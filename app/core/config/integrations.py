@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.config.env import ENV_FILES
+
 
 class IntegrationsSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore", case_sensitive=False
+        env_file=ENV_FILES, env_file_encoding="utf-8", extra="ignore", case_sensitive=False
     )
 
     google_client_id: str | None = None

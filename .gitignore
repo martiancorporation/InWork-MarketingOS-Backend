@@ -11,10 +11,11 @@ dist/
 venv/
 env/
 
-# Environment & secrets
+# Environment & secrets — ignore real env files, keep the *.example templates.
 .env
 .env.*
 !.env.example
+!.env.*.example
 
 # Tooling caches
 .pytest_cache/

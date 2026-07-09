@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.config.env import ENV_FILES
+
 DEV_SECRET_PLACEHOLDER = "dev-insecure-secret-change-me-in-production-0123456789"
 
 
 class SecuritySettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore", case_sensitive=False
+        env_file=ENV_FILES, env_file_encoding="utf-8", extra="ignore", case_sensitive=False
     )
 
     secret_key: str = DEV_SECRET_PLACEHOLDER  # SECRET_KEY

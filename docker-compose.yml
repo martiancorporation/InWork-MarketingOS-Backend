@@ -1,2 +1,48 @@
-# Local dev stack (api + database) — service definitions added during
-# implementation. Placeholder for now.
+# Local development stack.
+#
+# The easiest way to get a database for local dev:
+#     docker compose up -d db
+# then run the API on the host with autoreload:
+#     make run              (or: uvicorn app.main:app --reload)
+#
+# An optional containerized API service is included too (profile "full"):
+#     docker compose --profile full up --build
+#
+# Values come from your .env.local (see .env.local.example). Compose reads the
+# host env / .env for interpolation; sensible defaults are provided below.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-inwork}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    profiles: ["full"]
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env.${APP_ENV:-local}
+    environment:
+      # Point the app at the db service instead of localhost when containerized.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-inwork}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
