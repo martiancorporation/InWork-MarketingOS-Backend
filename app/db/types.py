@@ -9,15 +9,19 @@ from __future__ import annotations
 import enum
 from typing import Type
 
-from sqlalchemy import TIMESTAMP
+from sqlalchemy import JSON, TIMESTAMP, Uuid
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB
 
-# Native Postgres UUID, exposed to Python as ``uuid.UUID``.
-GUID = UUID(as_uuid=True)
+# UUID exposed to Python as ``uuid.UUID``. Renders as native ``UUID`` on
+# Postgres and ``CHAR(32)`` elsewhere (e.g. SQLite in tests) — portable.
+GUID = Uuid(as_uuid=True)
 
-# Timezone-aware timestamp (stored as ``timestamptz``).
+# Timezone-aware timestamp (``timestamptz`` on Postgres).
 TZDateTime = TIMESTAMP(timezone=True)
+
+# JSON column: ``JSONB`` on Postgres, generic ``JSON`` on other backends.
+JSONColumn = JSON().with_variant(JSONB(), "postgresql")
 
 # One shared SAEnum instance per enum name. Native Postgres enums are created
 # by name, so every column that uses a given enum must reference the SAME type

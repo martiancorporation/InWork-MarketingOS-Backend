@@ -7,10 +7,16 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, ForeignKey, Index, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, GUID, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
+from app.models.base import (
+    Base,
+    GUID,
+    CreatedAtMixin,
+    JSONColumn,
+    UUIDPrimaryKeyMixin,
+    pg_enum,
+)
 from app.models.enums import ReportFormat, ReportKind
 
 if TYPE_CHECKING:
@@ -36,8 +42,8 @@ class Report(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     # "holistic" / "leads-only" / "meta-only" / "custom" — a plain string since
     # scope presets are a UI convenience, not a fixed domain concept.
     scope: Mapped[str | None] = mapped_column(String(40))
-    channels: Mapped[list | None] = mapped_column(JSONB)  # selected channel ids
-    sections: Mapped[dict | None] = mapped_column(JSONB)  # selected report sections
+    channels: Mapped[list | None] = mapped_column(JSONColumn)  # selected channel ids
+    sections: Mapped[dict | None] = mapped_column(JSONColumn)  # selected report sections
     save_to_outlook_draft: Mapped[bool] = mapped_column(default=False, nullable=False)
     file_url: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(

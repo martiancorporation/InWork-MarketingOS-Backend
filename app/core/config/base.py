@@ -1,40 +1,42 @@
-"""Application settings, loaded from the environment / a local ``.env`` file.
+"""Composed application settings.
 
-This is the ONLY place environment values enter the app. No secret values are
-hardcoded here — they come from environment variables (see ``.env.example``).
-
-Only the settings needed by the database layer are defined for now; the split
-files in this folder (``app_settings``, ``security``, ``ai``, ``integrations``)
-are wired in as those features are implemented.
+Each concern is its own small ``BaseSettings`` (app, database, security, ai,
+integrations); ``Settings`` groups them so callers use one object:
+``get_settings().security.secret_key``. This is the ONLY place environment
+values enter the app — nothing else reads ``os.environ``.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings
+
+from app.core.config.ai import AISettings
+from app.core.config.app_settings import AppSettings
+from app.core.config.database import DatabaseSettings
+from app.core.config.integrations import IntegrationsSettings
+from app.core.config.security import SecuritySettings
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-        case_sensitive=False,
-    )
+    app: AppSettings = Field(default_factory=AppSettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    security: SecuritySettings = Field(default_factory=SecuritySettings)
+    ai: AISettings = Field(default_factory=AISettings)
+    integrations: IntegrationsSettings = Field(default_factory=IntegrationsSettings)
 
-    # ---- Application ----
-    app_name: str = "InWork MarketingOS API"
-    app_env: str = "development"
-    debug: bool = True
-    api_v1_prefix: str = "/api/v1"
-
-    # ---- Database ----
-    # Overridden by the DATABASE_URL environment variable in every real deployment.
-    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/inwork"
+    @model_validator(mode="after")
+    def _forbid_placeholder_secret_in_prod(self) -> "Settings":
+        if self.app.is_production and self.security.uses_placeholder_secret:
+            raise ValueError(
+                "SECRET_KEY must be set to a strong value when APP_ENV=production."
+            )
+        return self
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return a cached Settings instance (read once per process)."""
+    """Return the process-wide cached settings instance."""
     return Settings()

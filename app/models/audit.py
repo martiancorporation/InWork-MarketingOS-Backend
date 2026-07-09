@@ -18,10 +18,9 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import ForeignKey, Index, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, GUID, CreatedAtMixin, UUIDPrimaryKeyMixin
+from app.models.base import Base, GUID, CreatedAtMixin, JSONColumn, UUIDPrimaryKeyMixin
 
 
 class AuditLog(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -42,4 +41,4 @@ class AuditLog(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     entity_id: Mapped[uuid.UUID | None] = mapped_column(GUID)
     action: Mapped[str] = mapped_column(String(80), nullable=False)
     target_label: Mapped[str | None] = mapped_column(Text)
-    meta: Mapped[dict | None] = mapped_column(JSONB)
+    meta: Mapped[dict | None] = mapped_column(JSONColumn)

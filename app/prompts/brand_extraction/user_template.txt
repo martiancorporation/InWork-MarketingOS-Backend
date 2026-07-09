@@ -1,0 +1,6 @@
+Extract the brand theme for this client.
+
+Website: {website}
+
+Reference material:
+{text}

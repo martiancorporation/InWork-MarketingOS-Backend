@@ -19,7 +19,7 @@ from app.models.base import (
     UUIDPrimaryKeyMixin,
     pg_enum,
 )
-from app.models.enums import ClientPipelineStage, ClientStatus, SocialPlatform
+from app.models.enums import ClientPipelineStage, ClientStatus
 
 if TYPE_CHECKING:
     from app.models.ai import AiChat, AiSource
@@ -43,7 +43,7 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    slug: Mapped[str] = mapped_column(String(140), unique=True, nullable=False)
+    slug: Mapped[str] = mapped_column(String(140), nullable=False)  # unique per org (see __table_args__)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     business_type: Mapped[str | None] = mapped_column(String(120))
     industry: Mapped[str | None] = mapped_column(String(120))
@@ -161,14 +161,21 @@ class ClientBrandFont(UUIDPrimaryKeyMixin, Base):
 
 
 class ClientPlatform(UUIDPrimaryKeyMixin, Base):
+    """A marketing channel in scope for the client (meta, google-ads, seo, …).
+
+    ``channel`` is a plain string, not an enum: the onboarding channel list is
+    open and app-defined (it grows with new channels), so a DB enum would force
+    a migration for every addition. Content-posting platforms
+    (``marketing_events.platform``) stay a ``SocialPlatform`` enum — that set is
+    closed.
+    """
+
     __tablename__ = "client_platforms"
-    __table_args__ = (UniqueConstraint("client_id", "platform"),)
+    __table_args__ = (UniqueConstraint("client_id", "channel"),)
 
     client_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    platform: Mapped[SocialPlatform] = mapped_column(
-        pg_enum(SocialPlatform, "social_platform"), nullable=False
-    )
+    channel: Mapped[str] = mapped_column(String(40), nullable=False)
 
     client: Mapped["Client"] = relationship(back_populates="platforms")
