@@ -18,3 +18,7 @@ email-validator>=2.0
 
 # AI (optional at runtime — the app degrades gracefully without it)
 anthropic>=0.39
+
+# Testing
+pytest>=8.0
+httpx>=0.27

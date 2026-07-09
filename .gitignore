@@ -28,3 +28,6 @@ htmlcov/
 .vscode/
 .idea/
 .DS_Store
+
+# Scripts directory
+scripts/
