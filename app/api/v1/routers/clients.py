@@ -7,7 +7,7 @@ import uuid
 from fastapi import APIRouter, Query, status
 
 from app.ai.brand_extraction import BrandExtractionService
-from app.api.deps import CurrentUser, DbSession, Pagination
+from app.api.deps import AdminUser, CurrentUser, DbSession, Pagination
 from app.models.enums import ClientStatus
 from app.schemas.client import ClientListResponse, ClientRead
 from app.schemas.onboarding import (
@@ -40,12 +40,12 @@ def list_clients(
     "/onboarding",
     response_model=OnboardingResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Onboard a new client",
+    summary="Onboard a new client (admin only)",
 )
 def onboard_client(
-    data: OnboardingRequest, user: CurrentUser, db: DbSession
+    data: OnboardingRequest, admin: AdminUser, db: DbSession
 ) -> OnboardingResponse:
-    client = OnboardingService(db).onboard(user, data)
+    client = OnboardingService(db).onboard(admin, data)
     readiness = ReadinessService().report(client)
     return OnboardingResponse(
         client=ClientRead.model_validate(client), readiness=readiness

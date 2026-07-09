@@ -7,6 +7,7 @@ resolution). Keep this list in sync when adding a new model file.
 
 from app.models.ai import AiChat, AiChatMessage, AiChatSource, AiSource
 from app.models.analytics import AnalyticsDaily, StrategyVisual
+from app.models.assignment import ClientAssignment
 from app.models.audit import AuditLog
 from app.models.client import (
     Client,
@@ -15,7 +16,7 @@ from app.models.client import (
     ClientPlatform,
 )
 from app.models.compliance import ComplianceDoc, ComplianceEntry
-from app.models.contact import ClientContact, ClientMember
+from app.models.contact import ClientContact
 from app.models.conversation import (
     Conversation,
     Message,
@@ -31,7 +32,6 @@ from app.models.event import (
     MarketingEvent,
 )
 from app.models.integration import Integration
-from app.models.organization import Organization, OrganizationMember
 from app.models.plan import PlanTask
 from app.models.recommendation import RecommendationAction
 from app.models.report import Report
@@ -45,10 +45,10 @@ __all__ = [
     "AnalyticsDaily",
     "AuditLog",
     "Client",
+    "ClientAssignment",
     "ClientBrandColor",
     "ClientBrandFont",
     "ClientContact",
-    "ClientMember",
     "ClientPlatform",
     "ComplianceDoc",
     "ComplianceEntry",
@@ -63,8 +63,6 @@ __all__ = [
     "Message",
     "MessageAttachment",
     "MessageRecipient",
-    "Organization",
-    "OrganizationMember",
     "PlanTask",
     "RecommendationAction",
     "Report",

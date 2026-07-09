@@ -10,11 +10,9 @@ import enum
 
 
 class UserRole(str, enum.Enum):
-    admin = "admin"
-    manager = "manager"
-    strategist = "strategist"
-    analyst = "analyst"
-    client_viewer = "client_viewer"
+    admin = "admin"      # full access: manage users, onboard clients, assign clients, see all
+    manager = "manager"  # non-admin; sees only assigned clients
+    user = "user"        # non-admin; sees only assigned clients
 
 
 class ClientStatus(str, enum.Enum):

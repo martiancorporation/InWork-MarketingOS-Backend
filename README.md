@@ -67,7 +67,21 @@ Switch environments with a single variable, e.g. `APP_ENV=production make run-pr
 As a safety net, the app **refuses to start in production** if `SECRET_KEY` is
 still the development placeholder.
 
-## Run it locally — step by step
+## Run it locally
+
+### Fastest — one command
+```bash
+cd Backend
+./scripts/run_local.sh          # or: make start
+```
+That's it. The script creates the virtualenv, installs dependencies, generates
+`.env.local` (with a fresh `SECRET_KEY`), starts a Docker Postgres, waits for it,
+runs migrations, and launches the server at http://localhost:8000/docs. It is
+idempotent — run it again any time. (Requires Python 3.11+ and Docker; if you
+don't use Docker, point `DATABASE_URL` in `.env.local` at your own Postgres and
+re-run.)
+
+### Manual — step by step
 
 **Prerequisites:** Python 3.11+ and a PostgreSQL 14+ database (or Docker).
 

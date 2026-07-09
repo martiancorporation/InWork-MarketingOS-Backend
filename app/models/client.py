@@ -24,13 +24,13 @@ from app.models.enums import ClientPipelineStage, ClientStatus
 if TYPE_CHECKING:
     from app.models.ai import AiChat, AiSource
     from app.models.analytics import AnalyticsDaily, StrategyVisual
+    from app.models.assignment import ClientAssignment
     from app.models.compliance import ComplianceDoc, ComplianceEntry
-    from app.models.contact import ClientContact, ClientMember
+    from app.models.contact import ClientContact
     from app.models.conversation import Conversation
     from app.models.document import Document
     from app.models.event import MarketingEvent
     from app.models.integration import Integration
-    from app.models.organization import Organization
     from app.models.plan import PlanTask
     from app.models.recommendation import RecommendationAction
     from app.models.report import Report
@@ -38,12 +38,8 @@ if TYPE_CHECKING:
 
 class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "clients"
-    __table_args__ = (UniqueConstraint("organization_id", "slug"),)
 
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    slug: Mapped[str] = mapped_column(String(140), nullable=False)  # unique per org (see __table_args__)
+    slug: Mapped[str] = mapped_column(String(140), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     business_type: Mapped[str | None] = mapped_column(String(120))
     industry: Mapped[str | None] = mapped_column(String(120))
@@ -78,7 +74,6 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    organization: Mapped["Organization"] = relationship(back_populates="clients")
     brand_colors: Mapped[list["ClientBrandColor"]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
@@ -91,7 +86,7 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     contacts: Mapped[list["ClientContact"]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    members: Mapped[list["ClientMember"]] = relationship(
+    assignments: Mapped[list["ClientAssignment"]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
     compliance_entries: Mapped[list["ComplianceEntry"]] = relationship(

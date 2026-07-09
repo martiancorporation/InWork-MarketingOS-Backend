@@ -24,10 +24,10 @@ Models describe *shape and relationships only*. No business logic, no queries
 | File | Tables |
 | --- | --- |
 | `enums.py` | all enum definitions |
-| `organization.py` | organizations, organization_members |
 | `user.py` | users, sessions |
 | `client.py` | clients, client_brand_colors, client_brand_fonts, client_platforms |
-| `contact.py` | client_contacts, client_members |
+| `assignment.py` | client_assignments (which users can access which clients) |
+| `contact.py` | client_contacts |
 | `compliance.py` | compliance_entries, compliance_docs |
 | `document.py` | documents |
 | `integration.py` | integrations |

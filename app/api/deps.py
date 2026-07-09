@@ -9,10 +9,11 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import AuthError
+from app.core.exceptions import AuthError, ForbiddenError
 from app.core.pagination import PaginationParams
 from app.core.security import TOKEN_TYPE_ACCESS, decode_token
 from app.db.session import get_db
+from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
 
@@ -41,7 +42,17 @@ def get_current_user(
     return user
 
 
+def get_current_admin(
+    user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """RBAC guard: allow only admins. Use on admin-only endpoints."""
+    if user.role != UserRole.admin:
+        raise ForbiddenError("Administrator privileges are required.")
+    return user
+
+
 # Reusable annotated aliases so routers read cleanly.
 DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+AdminUser = Annotated[User, Depends(get_current_admin)]
 Pagination = Annotated[PaginationParams, Depends()]

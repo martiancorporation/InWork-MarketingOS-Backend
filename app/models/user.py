@@ -20,8 +20,7 @@ from app.models.base import (
 from app.models.enums import UserRole
 
 if TYPE_CHECKING:
-    from app.models.contact import ClientMember
-    from app.models.organization import OrganizationMember
+    from app.models.assignment import ClientAssignment
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -33,7 +32,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     role: Mapped[UserRole] = mapped_column(
         pg_enum(UserRole, "user_role"),
         nullable=False,
-        default=UserRole.strategist,
+        default=UserRole.user,
         index=True,
     )
     avatar_url: Mapped[str | None] = mapped_column(Text)
@@ -43,11 +42,11 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sessions: Mapped[list["UserSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-    organization_memberships: Mapped[list["OrganizationMember"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
-    )
-    client_memberships: Mapped[list["ClientMember"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
+    # Clients assigned to this user (non-admins access only these).
+    client_assignments: Mapped[list["ClientAssignment"]] = relationship(
+        back_populates="user",
+        foreign_keys="ClientAssignment.user_id",
+        cascade="all, delete-orphan",
     )
 
 

@@ -1,8 +1,6 @@
-"""Client people: descriptive contacts + internal access members.
+"""Client contacts — descriptive directory of people on the client / InWork side.
 
-- ``ClientContact`` — free-text people on the client or InWork side (directory info).
-- ``ClientMember`` — links an internal ``User`` to a client for access control
-  ("who can work on this client, and in what role").
+Free-text info only (not access control — that's ``ClientAssignment``).
 """
 
 from __future__ import annotations
@@ -10,22 +8,14 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import (
-    Base,
-    GUID,
-    CreatedAtMixin,
-    TimestampMixin,
-    UUIDPrimaryKeyMixin,
-    pg_enum,
-)
-from app.models.enums import ContactSide, UserRole
+from app.models.base import Base, GUID, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
+from app.models.enums import ContactSide
 
 if TYPE_CHECKING:
     from app.models.client import Client
-    from app.models.user import User
 
 
 class ClientContact(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -47,21 +37,3 @@ class ClientContact(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     client: Mapped["Client"] = relationship(back_populates="contacts")
-
-
-class ClientMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    __tablename__ = "client_members"
-    __table_args__ = (UniqueConstraint("client_id", "user_id"),)
-
-    client_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    role: Mapped[UserRole] = mapped_column(
-        pg_enum(UserRole, "user_role"), nullable=False, default=UserRole.strategist
-    )
-
-    client: Mapped["Client"] = relationship(back_populates="members")
-    user: Mapped["User"] = relationship(back_populates="client_memberships")
