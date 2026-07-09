@@ -1,7 +1,7 @@
-"""Unit tests for the website-fetch SSRF guard.
+"""Unit tests for the website scraper (SSRF guard + CSS extraction).
 
-These assert the guard rejects unsafe URLs *before* any network call, so they
-run offline.
+The URL-guard cases assert unsafe URLs are rejected *before* any network call,
+so they run offline; the extraction cases operate on in-memory strings.
 """
 
 from __future__ import annotations

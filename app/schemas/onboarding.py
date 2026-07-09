@@ -104,14 +104,7 @@ class OnboardingRequest(BaseModel):
 # ---- AI-assisted brand extraction ----
 
 class BrandExtractionRequest(BaseModel):
-    website: str | None = Field(default=None, max_length=255)
-    text: str | None = None  # e.g. pasted brand brief / extracted document text
-
-    @model_validator(mode="after")
-    def _require_a_source(self) -> "BrandExtractionRequest":
-        if not (self.website or (self.text and self.text.strip())):
-            raise ValueError("Provide a website or some text to extract from.")
-        return self
+    website: str = Field(min_length=1, max_length=255)
 
 
 class BrandExtraction(BaseModel):

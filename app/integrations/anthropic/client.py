@@ -1,10 +1,11 @@
 """Thin async wrapper around the Anthropic (Claude) Messages API.
 
-Two entry points:
+Three entry points:
 - ``complete`` — a plain single-shot completion.
+- ``complete_with_image`` — single-shot completion with an image (vision);
+  brand extraction uses it to show Claude a screenshot of the client's site.
 - ``analyze_url`` — an agentic call that gives Claude the server-side
   ``web_fetch`` tool so it visits the URL itself, reads the page, and answers.
-  This is the "agent visits the website" path used by brand extraction.
 
 Reads the API key + model from settings (never hardcoded). The ``anthropic``
 SDK is imported lazily so the app runs without it installed / without a key.
@@ -48,6 +49,45 @@ class AnthropicClient:
             max_tokens=max_tokens or self._settings.max_tokens,
             system=system,
             messages=[{"role": "user", "content": prompt}],
+        )
+        return _text_of(message)
+
+    async def complete_with_image(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        image: bytes,
+        media_type: str = "image/jpeg",
+        max_tokens: int | None = None,
+    ) -> str:
+        """Single-shot completion where Claude also *sees* an image (vision).
+
+        Used by brand extraction to show the model a screenshot of the site.
+        """
+        import base64
+
+        client = self._new_client()
+        message = await client.messages.create(
+            model=self._settings.model,
+            max_tokens=max_tokens or self._settings.max_tokens,
+            system=system,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": base64.b64encode(image).decode("ascii"),
+                            },
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
         )
         return _text_of(message)
 

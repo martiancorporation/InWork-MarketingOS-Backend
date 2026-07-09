@@ -71,6 +71,15 @@ else
   ok "dependencies up to date"
 fi
 
+# Headless Chromium for brand extraction (no-op when already installed; the
+# app degrades to a plain scrape if this is skipped).
+if [ -x "$VENV_DIR/bin/playwright" ]; then
+  log "Ensuring headless Chromium is installed (Playwright)"
+  "$VENV_DIR/bin/playwright" install chromium >/dev/null 2>&1 \
+    && ok "Chromium ready" \
+    || warn "Chromium install failed — brand extraction will use the plain scrape"
+fi
+
 # ---------------------------------------------------------------------------
 # 3. .env.local (created once, with a generated SECRET_KEY)
 # ---------------------------------------------------------------------------

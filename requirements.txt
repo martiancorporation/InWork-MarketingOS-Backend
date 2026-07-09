@@ -19,8 +19,14 @@ email-validator>=2.0
 # AI (optional at runtime — the app degrades gracefully without it)
 anthropic>=0.39
 
-# HTTP client — website fetch for brand extraction (also used by the test client)
+# HTTP client — website scrape fallback for brand extraction (also used by the test client)
 httpx>=0.27
+
+# Headless browser — renders client sites for brand extraction (text after JS,
+# computed colors/fonts, screenshot for Claude vision). Needs a one-time
+# `playwright install chromium` (run_local.sh and the Dockerfile handle this);
+# without the browser the app degrades gracefully to the httpx scrape.
+playwright>=1.45
 
 # Testing
 pytest>=8.0
