@@ -28,9 +28,12 @@ from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 import app.models  # noqa: E402,F401  register all tables on Base.metadata
+from app.core.security import hash_password  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models.enums import UserRole  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 API = "/api/v1"
 
@@ -72,13 +75,21 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
 
 
 @pytest.fixture
-def admin_headers(client: TestClient) -> dict[str, str]:
-    """Bootstrap the first user (admin) and return its auth header."""
-    resp = client.post(
-        f"{API}/auth/signup",
-        json={"name": "Admin", "email": "admin@test.com", "password": "adminPass1"},
+def admin_headers(client: TestClient, db_session: Session) -> dict[str, str]:
+    """Provision an admin (as the seed script does), then log in for a token."""
+    db_session.add(
+        User(
+            email="admin@test.com",
+            name="Admin",
+            password_hash=hash_password("adminPass1"),
+            role=UserRole.admin,
+        )
     )
-    assert resp.status_code == 201, resp.text
+    db_session.commit()
+    resp = client.post(
+        f"{API}/auth/login", json={"email": "admin@test.com", "password": "adminPass1"}
+    )
+    assert resp.status_code == 200, resp.text
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
 

@@ -106,23 +106,24 @@ docker compose up -d db              # or: make db-up
 #    Option B — use your own local Postgres and set DATABASE_URL in .env.local
 
 # 5. Apply database migrations
-#    (first time only — generate the initial migration, then apply it)
-alembic revision --autogenerate -m "initial schema"   # or: make migration m="initial schema"
 alembic upgrade head                                    # or: make migrate
 
 # 6. Run the API (APP_ENV defaults to local)
 uvicorn app.main:app --reload        # or: make run
 ```
 
+> `./scripts/run_local.sh` (or `make start`) does all of this automatically —
+> including seeding the initial admin (`admin@inwork.com` / `12345678`).
+
 Open **http://localhost:8000/docs** for interactive API docs, or
 `GET http://localhost:8000/health` for a liveness check.
 
 ### Quick smoke test
 ```bash
-# Sign up (returns an access token)
-curl -X POST http://localhost:8000/api/v1/auth/signup \
+# Log in as the seeded admin (returns an access token)
+curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"name":"Alex","email":"alex@inwork.com","password":"s3curePass"}'
+  -d '{"email":"admin@inwork.com","password":"12345678"}'
 
 # List clients (paste the token from above)
 curl http://localhost:8000/api/v1/clients \

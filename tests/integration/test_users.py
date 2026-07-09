@@ -38,6 +38,26 @@ def test_create_duplicate_email_409(client: TestClient, admin_headers: dict, mak
     assert resp.status_code == 409
 
 
+def test_create_user_weak_password_422(client: TestClient, admin_headers: dict):
+    # too short
+    assert client.post(
+        f"{API}/users", headers=admin_headers,
+        json={"name": "A", "email": "a@test.com", "password": "short1"},
+    ).status_code == 422
+    # letters only, no digit
+    assert client.post(
+        f"{API}/users", headers=admin_headers,
+        json={"name": "A", "email": "b@test.com", "password": "onlyletters"},
+    ).status_code == 422
+
+
+def test_create_user_invalid_email_422(client: TestClient, admin_headers: dict):
+    assert client.post(
+        f"{API}/users", headers=admin_headers,
+        json={"name": "A", "email": "not-an-email", "password": "goodPass1"},
+    ).status_code == 422
+
+
 def test_create_user_invalid_role_422(client: TestClient, admin_headers: dict):
     resp = client.post(
         f"{API}/users",

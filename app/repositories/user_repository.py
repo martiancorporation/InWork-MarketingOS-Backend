@@ -20,9 +20,6 @@ class UserRepository(BaseRepository[User]):
             is not None
         )
 
-    def count(self) -> int:
-        return int(self.db.scalar(select(func.count()).select_from(User)) or 0)
-
     def list(self, *, offset: int, limit: int) -> tuple[list[User], int]:
         total = int(self.db.scalar(select(func.count()).select_from(User)) or 0)
         rows = list(

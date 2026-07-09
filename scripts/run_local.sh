@@ -150,7 +150,13 @@ log "Applying migrations"
 ok "database schema is up to date"
 
 # ---------------------------------------------------------------------------
-# 6. Run the server
+# 6. Seed the initial admin (idempotent — there is no public sign-up)
+# ---------------------------------------------------------------------------
+log "Seeding the initial admin"
+"$VENV_PY" scripts/seed_data.py
+
+# ---------------------------------------------------------------------------
+# 7. Run the server
 # ---------------------------------------------------------------------------
 log "Starting the API on http://$HOST:$PORT  (docs: http://localhost:$PORT/docs)"
 exec "$VENV_DIR/bin/uvicorn" app.main:app --reload --host "$HOST" --port "$PORT"

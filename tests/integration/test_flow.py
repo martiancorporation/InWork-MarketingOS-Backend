@@ -1,9 +1,12 @@
 """End-to-end process flow: the full RBAC journey in one test.
 
 Mirrors the product spec:
-  bootstrap admin -> admin creates a user -> admin onboards a client ->
+  admin logs in -> admin creates a user -> admin onboards a client ->
   the user is scoped out until assigned -> admin assigns -> user gains access ->
   admin unassigns -> user loses access -> admin always sees everything.
+
+The admin is provisioned the way production does it — seeded, then logged in
+(the ``admin_headers`` fixture) — since there is no public sign-up.
 """
 
 from __future__ import annotations
@@ -18,20 +21,9 @@ def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_full_rbac_process_flow(client: TestClient):
-    # 1. Bootstrap: first sign-up becomes the admin.
-    r = client.post(
-        f"{API}/auth/signup",
-        json={"name": "Admin", "email": "admin@inwork.com", "password": "adminPass1"},
-    )
-    assert r.status_code == 201 and r.json()["user"]["role"] == "admin"
-    admin = _auth(r.json()["access_token"])
-
-    # Sign-up is now closed.
-    assert client.post(
-        f"{API}/auth/signup",
-        json={"name": "Nope", "email": "nope@inwork.com", "password": "nopePass1"},
-    ).status_code == 403
+def test_full_rbac_process_flow(client: TestClient, admin_headers: dict):
+    # 1. Admin is already provisioned (seeded) and logged in.
+    admin = admin_headers
 
     # 2. Admin creates a (non-admin) user.
     created = client.post(
