@@ -33,7 +33,12 @@ class Report(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     date_from: Mapped[date] = mapped_column(Date, nullable=False)
     date_to: Mapped[date] = mapped_column(Date, nullable=False)
-    sections: Mapped[dict | None] = mapped_column(JSONB)  # selected sections/channels
+    # "holistic" / "leads-only" / "meta-only" / "custom" — a plain string since
+    # scope presets are a UI convenience, not a fixed domain concept.
+    scope: Mapped[str | None] = mapped_column(String(40))
+    channels: Mapped[list | None] = mapped_column(JSONB)  # selected channel ids
+    sections: Mapped[dict | None] = mapped_column(JSONB)  # selected report sections
+    save_to_outlook_draft: Mapped[bool] = mapped_column(default=False, nullable=False)
     file_url: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("users.id", ondelete="SET NULL")

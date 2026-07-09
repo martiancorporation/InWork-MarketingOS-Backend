@@ -14,6 +14,11 @@ Models describe *shape and relationships only*. No business logic, no queries
 - Client-owned rows use `ON DELETE CASCADE`; references to `users` use
   `ON DELETE SET NULL` (so removing a user never deletes their history).
 - Register every new model in `__init__.py` so Alembic and `Base.metadata` see it.
+- Not everything is an enum: columns whose value set is app-defined and grows
+  with every new feature (`audit_log.action`, `messages.category`,
+  `reports.scope`) are plain indexed strings instead — a DB enum would force a
+  migration every time a new value is needed. Reserve `pg_enum()` for genuinely
+  closed, stable sets.
 
 ## File map
 | File | Tables |

@@ -21,7 +21,13 @@ from app.models.base import (
     UUIDPrimaryKeyMixin,
     pg_enum,
 )
-from app.models.enums import AdObjective, ApprovalStatus, EventType, SocialPlatform
+from app.models.enums import (
+    AdObjective,
+    ApprovalStatus,
+    EventStage,
+    EventType,
+    SocialPlatform,
+)
 
 if TYPE_CHECKING:
     from app.models.client import Client
@@ -43,6 +49,13 @@ class MarketingEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     event_time: Mapped[time] = mapped_column(Time, nullable=False)  # local to client tz
     description: Mapped[str | None] = mapped_column(Text)
     strategy: Mapped[str | None] = mapped_column(Text)
+    # Production lifecycle (draft/scheduled/published), independent of client approval.
+    stage: Mapped[EventStage] = mapped_column(
+        pg_enum(EventStage, "event_stage"),
+        nullable=False,
+        default=EventStage.draft,
+        index=True,
+    )
     approval_status: Mapped[ApprovalStatus] = mapped_column(
         pg_enum(ApprovalStatus, "approval_status"),
         nullable=False,
@@ -96,6 +109,8 @@ class EventAd(UUIDPrimaryKeyMixin, Base):
         pg_enum(AdObjective, "ad_objective"), nullable=False, default=AdObjective.awareness
     )
     audience: Mapped[str | None] = mapped_column(Text)
+    bid_strategy: Mapped[str | None] = mapped_column(String(60))  # e.g. "Lowest cost"
+    duration_days: Mapped[int | None] = mapped_column(Integer)  # planned run window
 
     event: Mapped["MarketingEvent"] = relationship(back_populates="ad")
 

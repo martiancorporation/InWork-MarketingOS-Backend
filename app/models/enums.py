@@ -24,6 +24,20 @@ class ClientStatus(str, enum.Enum):
     archived = "archived"
 
 
+class ClientPipelineStage(str, enum.Enum):
+    """Lifecycle stage shown by the pipeline stepper in the client shell.
+
+    Distinct from ``ClientStatus``: status is account state (paused, archived);
+    pipeline stage is where the account is in its onboarding→retention journey.
+    """
+
+    onboarding = "onboarding"
+    discovery = "discovery"
+    active = "active"
+    optimize = "optimize"
+    retention = "retention"
+
+
 class ContactSide(str, enum.Enum):
     client = "client"
     inwork = "inwork"
@@ -60,6 +74,17 @@ class EventType(str, enum.Enum):
     review = "review"
     content = "content"
     meeting = "meeting"
+
+
+class EventStage(str, enum.Enum):
+    """Production lifecycle of a calendar item — independent of client
+    ``approval_status``. Backs the calendar's "Drafts & Ideas" panel vs. the
+    scheduled grid."""
+
+    draft = "draft"
+    scheduled = "scheduled"
+    published = "published"
+    archived = "archived"
 
 
 class SocialPlatform(str, enum.Enum):
@@ -112,6 +137,7 @@ class MessageFolder(str, enum.Enum):
     sent = "sent"
     drafts = "drafts"
     archive = "archive"
+    spam = "spam"
     trash = "trash"
 
 
@@ -156,10 +182,13 @@ class ReportKind(str, enum.Enum):
 
 
 class ReportFormat(str, enum.Enum):
+    """The three real output formats. "Save to Outlook draft" is a delivery
+    option layered on top of any format, not a format itself — see
+    ``Report.save_to_outlook_draft``."""
+
     pdf = "pdf"
     excel = "excel"
     visual = "visual"
-    outlook_draft = "outlook_draft"
 
 
 class DocumentKind(str, enum.Enum):
@@ -167,6 +196,7 @@ class DocumentKind(str, enum.Enum):
     compliance = "compliance"
     goals = "goals"
     contract = "contract"
+    brief = "brief"
     creative = "creative"
     other = "other"
 
@@ -176,14 +206,7 @@ class RecommendationDecision(str, enum.Enum):
     modified = "modified"
     rejected = "rejected"
 
-
-class AuditAction(str, enum.Enum):
-    create = "create"
-    update = "update"
-    delete = "delete"
-    login = "login"
-    connect = "connect"
-    disconnect = "disconnect"
-    publish = "publish"
-    approve = "approve"
-    reject = "reject"
+# Audit actions are deliberately NOT an enum: the app logs free-form, dotted
+# action identifiers per feature (e.g. "report.pdf.exported",
+# "recommendation.accepted", "integration.connect") and that set grows with
+# every new feature. See ``AuditLog.action`` for the string column instead.

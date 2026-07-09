@@ -65,6 +65,10 @@ class Message(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         default=MessageFolder.inbox,
         index=True,
     )
+    # Free-text label (Campaigns / Approvals / Reports / Billing today) — a plain
+    # string, not an enum, since agencies customize their own mail categories.
+    category: Mapped[str | None] = mapped_column(String(40), index=True)
+    is_starred: Mapped[bool] = mapped_column(default=False, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")

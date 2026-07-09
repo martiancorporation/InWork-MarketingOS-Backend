@@ -38,6 +38,12 @@ class AiChat(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     title: Mapped[str | None] = mapped_column(String(200))
+    # Which AI surface this chat belongs to: "project" (Project AI), "day"
+    # (per-date chat on the day view), "assistant" (floating global sheet), etc.
+    # Nullable/free-text on purpose — today only Project AI persists chats;
+    # this leaves room to persist the other surfaces later without a migration.
+    context_type: Mapped[str | None] = mapped_column(String(40), index=True)
+    context_key: Mapped[str | None] = mapped_column(String(80))  # e.g. an ISO date for "day"
 
     client: Mapped["Client"] = relationship(back_populates="ai_chats")
     messages: Mapped[list["AiChatMessage"]] = relationship(

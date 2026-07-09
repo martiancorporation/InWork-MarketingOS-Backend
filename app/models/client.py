@@ -19,7 +19,7 @@ from app.models.base import (
     UUIDPrimaryKeyMixin,
     pg_enum,
 )
-from app.models.enums import ClientStatus, SocialPlatform
+from app.models.enums import ClientPipelineStage, ClientStatus, SocialPlatform
 
 if TYPE_CHECKING:
     from app.models.ai import AiChat, AiSource
@@ -50,6 +50,7 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     website: Mapped[str | None] = mapped_column(String(255))
     location: Mapped[str | None] = mapped_column(String(160))
     timezone: Mapped[str | None] = mapped_column(String(60))  # IANA tz for scheduling
+    language: Mapped[str | None] = mapped_column(String(60))  # primary language, e.g. "English (US)"
     markets: Mapped[str | None] = mapped_column(Text)
     about_brand: Mapped[str | None] = mapped_column(Text)
     brand_voice: Mapped[str | None] = mapped_column(Text)
@@ -61,6 +62,12 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         pg_enum(ClientStatus, "client_status"),
         nullable=False,
         default=ClientStatus.onboarding,
+        index=True,
+    )
+    pipeline_stage: Mapped[ClientPipelineStage] = mapped_column(
+        pg_enum(ClientPipelineStage, "client_pipeline_stage"),
+        nullable=False,
+        default=ClientPipelineStage.onboarding,
         index=True,
     )
     # Denormalized caches — refreshed together by a job/trigger, never edited by hand.
