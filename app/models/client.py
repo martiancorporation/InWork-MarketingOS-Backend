@@ -66,6 +66,10 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=ClientPipelineStage.onboarding,
         index=True,
     )
+    # Highest onboarding wizard step completed (1..8). Advanced by each per-step
+    # autosave; 8 means the wizard has been finalized. Lets the UI resume a
+    # half-finished onboarding and drives the progress percentage.
+    onboarding_step: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # Denormalized caches — refreshed together by a job/trigger, never edited by hand.
     spend_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     leads_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

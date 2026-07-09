@@ -80,6 +80,7 @@ class ClientRead(ORMModel):
     goals: str | None = None
     status: ClientStatus
     pipeline_stage: ClientPipelineStage
+    onboarding_step: int = 1
     created_at: datetime
 
     brand_colors: list[BrandColorRead] = []

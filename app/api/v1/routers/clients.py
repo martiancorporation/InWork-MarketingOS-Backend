@@ -1,4 +1,14 @@
-"""Client endpoints: list, onboarding, AI brand extraction, detail."""
+"""Client endpoints: list, onboarding (atomic + step-by-step), AI brand
+extraction, detail.
+
+The onboarding surface mirrors the web wizard. ``POST /onboarding`` still
+accepts the whole payload atomically, but the wizard drives the *progressive*
+endpoints: ``POST /onboarding/draft`` opens a draft at the mandatory step 1,
+``PATCH /{id}/onboarding`` autosaves each later step, ``POST /{id}/documents``
+attaches uploads, and ``POST /{id}/onboarding/complete`` finalizes. Every
+progressive call returns the recomputed readiness score and wizard progress so
+the UI's meters stay honest.
+"""
 
 from __future__ import annotations
 
@@ -8,19 +18,33 @@ from fastapi import APIRouter, Query, status
 
 from app.ai.brand_extraction import BrandExtractionService
 from app.api.deps import AdminUser, CurrentUser, DbSession, Pagination
+from app.models.client import Client
 from app.models.enums import ClientStatus
 from app.schemas.client import ClientListResponse, ClientRead
 from app.schemas.onboarding import (
     BrandExtraction,
     BrandExtractionRequest,
+    DocumentsRequest,
+    OnboardingDraftRequest,
     OnboardingRequest,
     OnboardingResponse,
+    OnboardingStepResponse,
+    OnboardingStepUpdate,
 )
 from app.services.client_service import ClientService
 from app.services.onboarding_service import OnboardingService
 from app.services.readiness_service import ReadinessService
 
 router = APIRouter(prefix="/clients", tags=["clients"])
+
+
+def _step_response(client: Client) -> OnboardingStepResponse:
+    """Bundle a client with its recomputed readiness and wizard progress."""
+    return OnboardingStepResponse(
+        client=ClientRead.model_validate(client),
+        readiness=ReadinessService().report(client),
+        onboarding=OnboardingService.progress(client),
+    )
 
 
 @router.get("", response_model=ClientListResponse, summary="List clients")
@@ -50,6 +74,68 @@ def onboard_client(
     return OnboardingResponse(
         client=ClientRead.model_validate(client), readiness=readiness
     )
+
+
+@router.post(
+    "/onboarding/draft",
+    response_model=OnboardingStepResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Start onboarding — create the draft client (step 1, admin only)",
+)
+def start_onboarding(
+    data: OnboardingDraftRequest, admin: AdminUser, db: DbSession
+) -> OnboardingStepResponse:
+    client = OnboardingService(db).create_draft(admin, data)
+    return _step_response(client)
+
+
+@router.patch(
+    "/{client_id}/onboarding",
+    response_model=OnboardingStepResponse,
+    summary="Autosave an onboarding step (admin only)",
+)
+def update_onboarding_step(
+    client_id: uuid.UUID,
+    data: OnboardingStepUpdate,
+    admin: AdminUser,
+    db: DbSession,
+) -> OnboardingStepResponse:
+    service = OnboardingService(db)
+    client = service.get(client_id)
+    client = service.update_step(admin, client, data)
+    return _step_response(client)
+
+
+@router.post(
+    "/{client_id}/documents",
+    response_model=OnboardingStepResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Attach uploaded documents to a client (admin only)",
+)
+def attach_documents(
+    client_id: uuid.UUID,
+    data: DocumentsRequest,
+    admin: AdminUser,
+    db: DbSession,
+) -> OnboardingStepResponse:
+    service = OnboardingService(db)
+    client = service.get(client_id)
+    client = service.add_documents(admin, client, data.documents)
+    return _step_response(client)
+
+
+@router.post(
+    "/{client_id}/onboarding/complete",
+    response_model=OnboardingStepResponse,
+    summary="Finalize onboarding (step 8, admin only)",
+)
+def complete_onboarding(
+    client_id: uuid.UUID, admin: AdminUser, db: DbSession
+) -> OnboardingStepResponse:
+    service = OnboardingService(db)
+    client = service.get(client_id)
+    client = service.complete(client)
+    return _step_response(client)
 
 
 @router.post(

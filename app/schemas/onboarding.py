@@ -101,6 +101,90 @@ class OnboardingRequest(BaseModel):
         return self
 
 
+# ---- Progressive (step-by-step) onboarding ----
+#
+# The web wizard no longer submits one giant payload at the end. Step 1 is a
+# mandatory gate that creates a draft client; every step after it autosaves a
+# partial update. These schemas back that flow: a draft-create request, a
+# partial per-step update (only the sections present are applied), a document
+# attach request, and a response that always carries the recomputed readiness
+# score plus the wizard's progress.
+
+
+class BasicsUpdate(BaseModel):
+    """Step 1 fields, all optional — only the ones sent are written."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    business_type: str | None = Field(default=None, max_length=120)
+    industry: str | None = Field(default=None, max_length=120)
+    website: str | None = Field(default=None, max_length=255)
+    language: str | None = Field(default=None, max_length=60)
+    location: str | None = Field(default=None, max_length=160)
+    markets: str | None = None
+
+
+class BrandUpdate(BaseModel):
+    """Step 2 fields, all optional (no required ``brand_voice``) so the brand
+    step can autosave before it's complete — e.g. right after AI extraction."""
+
+    about_brand: str | None = None
+    brand_voice: str | None = None
+    brand_extracted: str | None = None
+    colors: list[BrandColorIn] | None = Field(default=None, max_length=24)
+    fonts: list[str] | None = Field(default=None, max_length=12)
+    color_guidelines: str | None = None
+    logo_url: str | None = Field(default=None, max_length=1024)
+
+
+class OnboardingDraftRequest(BaseModel):
+    """Step 1 — the mandatory gate. Creates the draft client record and returns
+    its id; every later step saves against that id."""
+
+    name: str = Field(min_length=1, max_length=160)
+    business_type: str = Field(min_length=1, max_length=120)
+    industry: str = Field(min_length=1, max_length=120)
+    website: str | None = Field(default=None, max_length=255)
+    language: str | None = Field(default=None, max_length=60)
+    location: str | None = Field(default=None, max_length=160)
+    markets: str | None = None
+
+
+class OnboardingStepUpdate(BaseModel):
+    """Partial autosave for a step after the gate.
+
+    Only the sections explicitly present in the body are applied — everything
+    else is left untouched, so saving step 4 never wipes step 2. ``step`` is the
+    wizard step being completed; it advances ``onboarding_step`` monotonically.
+    """
+
+    step: int | None = Field(default=None, ge=1, le=8)
+    basics: BasicsUpdate | None = None
+    brand: BrandUpdate | None = None
+    platforms: list[str] | None = Field(default=None, max_length=32)
+    goals: str | None = None
+    compliance: ComplianceIn | None = None
+    client_contacts: list[ContactIn] | None = None
+    inwork_contacts: list[ContactIn] | None = None
+
+    @field_validator("platforms")
+    @classmethod
+    def _dedupe_platforms(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        seen: list[str] = []
+        for raw in value:
+            channel = raw.strip().lower()
+            if channel and channel not in seen:
+                seen.append(channel)
+        return seen
+
+
+class DocumentsRequest(BaseModel):
+    """Step 7 — attach already-uploaded document references to the client."""
+
+    documents: list[DocumentRef] = Field(min_length=1, max_length=100)
+
+
 # ---- AI-assisted brand extraction ----
 
 class BrandExtractionRequest(BaseModel):
@@ -133,3 +217,19 @@ class ReadinessReport(BaseModel):
 class OnboardingResponse(BaseModel):
     client: ClientRead
     readiness: ReadinessReport
+
+
+class OnboardingProgress(BaseModel):
+    step: int  # highest step completed, 1..8
+    total_steps: int = 8
+    percent: int  # 0-100, matches the wizard's step meter
+    completed: bool  # True once the wizard is finalized (step 8)
+
+
+class OnboardingStepResponse(BaseModel):
+    """Returned by every progressive endpoint: the client, the recomputed
+    readiness score, and where the wizard now stands."""
+
+    client: ClientRead
+    readiness: ReadinessReport
+    onboarding: OnboardingProgress
