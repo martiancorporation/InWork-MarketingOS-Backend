@@ -109,8 +109,15 @@ def test_brand_extraction_uses_ai_when_configured(client: TestClient, admin_head
     async def fake_complete(self, *, system, prompt, max_tokens=None):
         return '{"summary":"Warm DTC brand","colors":["#112233"],"fonts":["Inter"],"tone":"warm","imagery":"bright"}'
 
+    from app.utils.web import PageContent
+
     monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
     monkeypatch.setattr(AnthropicClient, "complete", fake_complete)
+    # Avoid a real network fetch of the website during the test.
+    monkeypatch.setattr(
+        "app.ai.brand_extraction.fetch_page",
+        lambda url, **kw: PageContent(text="site text", colors=[], fonts=[]),
+    )
 
     resp = client.post(
         f"{API}/clients/onboarding/extract-brand",
