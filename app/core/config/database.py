@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.config.env import ENV_FILES
@@ -19,3 +21,10 @@ class DatabaseSettings(BaseSettings):
     # DATABASE_URL — overridden in every real deployment.
     url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/inwork"
     echo: bool = False  # DATABASE_ECHO — log SQL when true
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def convert_postgresql_scheme(cls, v: Any) -> Any:
+        if isinstance(v, str) and v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+psycopg://", 1)
+        return v
