@@ -5,3 +5,8 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 python-dotenv
+
+# Database layer
+SQLAlchemy>=2.0
+alembic
+psycopg[binary]
