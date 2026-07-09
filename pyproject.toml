@@ -1,0 +1,9 @@
+# Project metadata & tooling config.
+# Dependency versions and tool settings (ruff, black, pytest) are filled in
+# during implementation. Structure-only placeholder for now.
+
+[project]
+name = "inwork-marketingos-backend"
+version = "0.0.0"
+description = "FastAPI backend for InWork MarketingOS"
+requires-python = ">=3.11"

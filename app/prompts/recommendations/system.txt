@@ -1,0 +1,1 @@
+[Prompt template placeholder — see README.md in this folder. Fill in during implementation.]

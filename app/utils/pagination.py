@@ -1,0 +1,1 @@
+"""Pagination — small generic helper."""

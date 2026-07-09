@@ -1,0 +1,7 @@
+# Core framework (pin exact versions during implementation).
+# Additional dependencies are added here as features are built.
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv

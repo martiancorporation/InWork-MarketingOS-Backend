@@ -1,0 +1,1 @@
+"""Slug — small generic helper."""
