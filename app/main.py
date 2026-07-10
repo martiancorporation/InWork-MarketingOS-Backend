@@ -37,6 +37,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    if settings.app.audit_enabled:
+        # Records every API request to the audit_log table. Registered last so
+        # it wraps outermost and sees the final response status.
+        from app.core.middleware import AuditMiddleware
+
+        app.add_middleware(AuditMiddleware, prefix=settings.app.api_v1_prefix)
+
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.app.api_v1_prefix)
 

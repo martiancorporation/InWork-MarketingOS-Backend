@@ -18,6 +18,9 @@ class AppSettings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     host: str = "0.0.0.0"
     port: int = 8000
+    # When on, every API request is recorded to the audit_log table by the
+    # AuditMiddleware. Disabled in the hermetic test suite (see conftest).
+    audit_enabled: bool = True
 
     @property
     def is_production(self) -> bool:
