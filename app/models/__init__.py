@@ -6,6 +6,7 @@ resolution). Keep this list in sync when adding a new model file.
 """
 
 from app.models.ai import AiChat, AiChatMessage, AiChatSource, AiSource
+from app.models.ai_usage import AiUsageEvent
 from app.models.analytics import AnalyticsDaily, StrategyVisual
 from app.models.assignment import ClientAssignment
 from app.models.audit import AuditLog
@@ -42,6 +43,7 @@ __all__ = [
     "AiChatMessage",
     "AiChatSource",
     "AiSource",
+    "AiUsageEvent",
     "AnalyticsDaily",
     "AuditLog",
     "Client",

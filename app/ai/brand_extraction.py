@@ -25,6 +25,7 @@ from typing import Any
 from anyio import to_thread
 
 from app.ai.parsers import parse_json_object
+from app.ai.usage import AiUsageContext
 from app.integrations.anthropic.client import AnthropicClient
 from app.prompts.loader import load_prompt, render
 from app.schemas.onboarding import BrandExtraction, BrandExtractionRequest
@@ -38,7 +39,9 @@ class BrandExtractionService:
     def __init__(self, client: AnthropicClient | None = None) -> None:
         self._client = client or AnthropicClient()
 
-    async def extract(self, data: BrandExtractionRequest) -> BrandExtraction:
+    async def extract(
+        self, data: BrandExtractionRequest, context: AiUsageContext | None = None
+    ) -> BrandExtraction:
         # One render captures text + colors + fonts + screenshot together.
         page = await render_page(data.website)
         screenshot: bytes | None = page.screenshot if page else None
@@ -54,7 +57,7 @@ class BrandExtractionService:
         if not self._client.is_configured:
             return self._fallback(data, colors, fonts)
 
-        payload = await self._analyze(data.website, text, colors, fonts, screenshot)
+        payload = await self._analyze(data.website, text, colors, fonts, screenshot, context)
         if payload is None:
             return self._fallback(data, colors, fonts)
 
@@ -77,6 +80,7 @@ class BrandExtractionService:
         colors: list[str],
         fonts: list[str],
         screenshot: bytes | None,
+        context: AiUsageContext | None = None,
     ) -> dict[str, Any] | None:
         """One model call: vision (screenshot + text) when we have a render,
         text-only otherwise. Returns ``None`` on any failure."""
@@ -98,10 +102,12 @@ class BrandExtractionService:
         try:
             if screenshot is not None:
                 raw = await self._client.complete_with_image(
-                    system=system, prompt=prompt, image=screenshot
+                    system=system, prompt=prompt, image=screenshot, context=context
                 )
             else:
-                raw = await self._client.complete(system=system, prompt=prompt)
+                raw = await self._client.complete(
+                    system=system, prompt=prompt, context=context
+                )
         except Exception:  # degrade to the deterministic fallback, never 500
             logger.warning("Brand analysis failed for %s", website, exc_info=True)
             return None

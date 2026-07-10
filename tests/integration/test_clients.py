@@ -129,7 +129,7 @@ def test_brand_extraction_render_plus_vision(client: TestClient, admin_headers: 
     from app.integrations.anthropic.client import AnthropicClient
     from app.utils.render import RenderedPage
 
-    async def fake_complete_with_image(self, *, system, prompt, image, media_type="image/jpeg", max_tokens=None):
+    async def fake_complete_with_image(self, *, system, prompt, image, media_type="image/jpeg", max_tokens=None, context=None):
         assert image == b"jpg"          # the screenshot reached the model
         assert "site text" in prompt    # so did the rendered text
         return '{"summary":"Warm DTC brand","colors":["#AABBCC"],"fonts":["Lora"],"tone":"warm","imagery":"bright"}'
@@ -163,7 +163,7 @@ def test_brand_extraction_scrape_fallback_when_render_unavailable(
     from app.integrations.anthropic.client import AnthropicClient
     from app.utils.web import PageContent
 
-    async def fake_complete(self, *, system, prompt, max_tokens=None):
+    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
         assert "site text" in prompt  # scraped text was passed as reference
         return '{"summary":"From scraped text","colors":[],"fonts":[],"tone":"plain","imagery":"minimal"}'
 

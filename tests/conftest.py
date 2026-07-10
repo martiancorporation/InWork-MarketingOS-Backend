@@ -22,6 +22,8 @@ os.environ.setdefault("DATABASE_URL", "sqlite://")
 # suite hermetic by disabling it here. The audit read API + service are tested
 # directly against the per-test SQLite session instead.
 os.environ["AUDIT_ENABLED"] = "false"
+# Same reasoning for AI usage recording (recorder uses its own session factory).
+os.environ["AI_USAGE_ENABLED"] = "false"
 
 from collections.abc import Callable, Generator  # noqa: E402
 

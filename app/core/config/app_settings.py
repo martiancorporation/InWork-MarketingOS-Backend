@@ -21,6 +21,9 @@ class AppSettings(BaseSettings):
     # When on, every API request is recorded to the audit_log table by the
     # AuditMiddleware. Disabled in the hermetic test suite (see conftest).
     audit_enabled: bool = True
+    # When on, every AI provider call is recorded to ai_usage_events (tokens +
+    # cost). Disabled in the hermetic test suite (recorder uses a real session).
+    ai_usage_enabled: bool = True
 
     @property
     def is_production(self) -> bool:

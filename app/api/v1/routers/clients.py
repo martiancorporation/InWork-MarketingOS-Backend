@@ -17,6 +17,8 @@ import uuid
 from fastapi import APIRouter, Query, status
 
 from app.ai.brand_extraction import BrandExtractionService
+from app.ai.features import AiFeature
+from app.ai.usage import AiUsageContext
 from app.api.deps import AdminUser, CurrentUser, DbSession, Pagination
 from app.models.client import Client
 from app.models.enums import ClientStatus
@@ -144,9 +146,14 @@ def complete_onboarding(
     summary="AI-extract a brand theme from a website or document",
 )
 async def extract_brand(
-    data: BrandExtractionRequest, _user: CurrentUser
+    data: BrandExtractionRequest, user: CurrentUser
 ) -> BrandExtraction:
-    return await BrandExtractionService().extract(data)
+    context = AiUsageContext(
+        feature=AiFeature.BRAND_EXTRACTION,
+        user_id=user.id,
+        meta={"website": data.website},
+    )
+    return await BrandExtractionService().extract(data, context)
 
 
 @router.get("/{client_id}", response_model=ClientRead, summary="Get a client")
