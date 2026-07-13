@@ -64,6 +64,7 @@ class S3Storage:
                 config=Config(
                     signature_version="s3v4",
                     retries={"max_attempts": 3, "mode": "standard"},
+                    s3={"addressing_style": "virtual"},
                 ),
             )
         return self._client_obj
