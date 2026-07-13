@@ -27,6 +27,16 @@ boto3>=1.34
 # Multipart form parsing — required by FastAPI for the proxied file-upload route.
 python-multipart>=0.0.9
 
+# Client intelligence — pgvector RAG store (Postgres extension binding).
+pgvector>=0.2.5
+# Embeddings provider (optional at runtime — falls back to a local embedder).
+voyageai>=0.2
+# Document text extraction (optional per type — each degrades gracefully).
+pypdf>=4.0
+python-docx>=1.1
+python-pptx>=0.6
+openpyxl>=3.1
+
 # Headless browser — renders client sites for brand extraction (text after JS,
 # computed colors/fonts, screenshot for Claude vision). Needs a one-time
 # `playwright install chromium` (run_local.sh and the Dockerfile handle this);

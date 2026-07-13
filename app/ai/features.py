@@ -12,6 +12,8 @@ from __future__ import annotations
 
 class AiFeature:
     BRAND_EXTRACTION = "onboarding.brand_extraction"
+    CLIENT_SUMMARY = "intelligence.client_summary"
+    CLIENT_DIRECTIVES = "intelligence.client_directives"
     PROJECT_AI = "project_ai.chat"
     DAY_CHAT = "day.chat"
     ASSISTANT = "assistant.global"

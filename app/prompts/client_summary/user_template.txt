@@ -1,0 +1,7 @@
+Client: {client_name}
+
+Below is the complete onboarding corpus for this client (structured fields and the full text of every uploaded document). Analyze all of it and produce the structured summary as specified.
+
+<corpus>
+{corpus}
+</corpus>

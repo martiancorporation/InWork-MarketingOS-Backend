@@ -34,18 +34,20 @@ from app.schemas.onboarding import (
     OnboardingStepUpdate,
 )
 from app.services.client_service import ClientService
+from app.services.intelligence.intelligence_service import IntelligenceService
 from app.services.onboarding_service import OnboardingService
 from app.services.readiness_service import ReadinessService
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 
-def _step_response(client: Client) -> OnboardingStepResponse:
-    """Bundle a client with its recomputed readiness and wizard progress."""
+def _step_response(client: Client, db) -> OnboardingStepResponse:
+    """Bundle a client with its readiness, wizard progress, and build status."""
     return OnboardingStepResponse(
         client=ClientRead.model_validate(client),
         readiness=ReadinessService().report(client),
         onboarding=OnboardingService.progress(client),
+        intelligence=IntelligenceService(db).status(client),
     )
 
 
@@ -74,7 +76,9 @@ def onboard_client(
     client = OnboardingService(db).onboard(admin, data)
     readiness = ReadinessService().report(client)
     return OnboardingResponse(
-        client=ClientRead.model_validate(client), readiness=readiness
+        client=ClientRead.model_validate(client),
+        readiness=readiness,
+        intelligence=IntelligenceService(db).status(client),
     )
 
 
@@ -88,7 +92,7 @@ def start_onboarding(
     data: OnboardingDraftRequest, admin: AdminUser, db: DbSession
 ) -> OnboardingStepResponse:
     client = OnboardingService(db).create_draft(admin, data)
-    return _step_response(client)
+    return _step_response(client, db)
 
 
 @router.patch(
@@ -105,7 +109,7 @@ def update_onboarding_step(
     service = OnboardingService(db)
     client = service.get(client_id)
     client = service.update_step(admin, client, data)
-    return _step_response(client)
+    return _step_response(client, db)
 
 
 @router.post(
@@ -123,7 +127,7 @@ def attach_documents(
     service = OnboardingService(db)
     client = service.get(client_id)
     client = service.add_documents(admin, client, data.documents)
-    return _step_response(client)
+    return _step_response(client, db)
 
 
 @router.post(
@@ -137,7 +141,7 @@ def complete_onboarding(
     service = OnboardingService(db)
     client = service.get(client_id)
     client = service.complete(client)
-    return _step_response(client)
+    return _step_response(client, db)
 
 
 @router.post(

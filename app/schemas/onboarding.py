@@ -10,6 +10,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, model_validato
 
 from app.models.enums import DocumentKind
 from app.schemas.client import ClientRead
+from app.schemas.intelligence import IntelligenceStatus
 
 HEX_PATTERN = r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
 
@@ -217,6 +218,7 @@ class ReadinessReport(BaseModel):
 class OnboardingResponse(BaseModel):
     client: ClientRead
     readiness: ReadinessReport
+    intelligence: IntelligenceStatus | None = None
 
 
 class OnboardingProgress(BaseModel):
@@ -228,8 +230,10 @@ class OnboardingProgress(BaseModel):
 
 class OnboardingStepResponse(BaseModel):
     """Returned by every progressive endpoint: the client, the recomputed
-    readiness score, and where the wizard now stands."""
+    readiness score, where the wizard now stands, and the async intelligence
+    build status (so the UI can show "analyzing…" without blocking)."""
 
     client: ClientRead
     readiness: ReadinessReport
     onboarding: OnboardingProgress
+    intelligence: IntelligenceStatus | None = None

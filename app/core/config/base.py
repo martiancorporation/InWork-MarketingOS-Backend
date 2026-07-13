@@ -16,6 +16,7 @@ from pydantic_settings import BaseSettings
 from app.core.config.ai import AISettings
 from app.core.config.app_settings import AppSettings
 from app.core.config.database import DatabaseSettings
+from app.core.config.intelligence import IntelligenceSettings
 from app.core.config.integrations import IntegrationsSettings
 from app.core.config.security import SecuritySettings
 from app.core.config.storage import StorageSettings
@@ -28,6 +29,7 @@ class Settings(BaseSettings):
     ai: AISettings = Field(default_factory=AISettings)
     integrations: IntegrationsSettings = Field(default_factory=IntegrationsSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    intelligence: IntelligenceSettings = Field(default_factory=IntelligenceSettings)
 
     @model_validator(mode="after")
     def _forbid_placeholder_secret_in_prod(self) -> "Settings":

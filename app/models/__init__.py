@@ -16,6 +16,8 @@ from app.models.client import (
     ClientBrandFont,
     ClientPlatform,
 )
+from app.models.client_directive import ClientDirective
+from app.models.client_profile import ClientProfile
 from app.models.compliance import ComplianceDoc, ComplianceEntry
 from app.models.contact import ClientContact
 from app.models.conversation import (
@@ -33,6 +35,8 @@ from app.models.event import (
     MarketingEvent,
 )
 from app.models.integration import Integration
+from app.models.intel_job import IntelJob
+from app.models.knowledge import KnowledgeChunk, KnowledgeSource
 from app.models.plan import PlanTask
 from app.models.recommendation import RecommendationAction
 from app.models.report import Report
@@ -52,7 +56,9 @@ __all__ = [
     "ClientBrandColor",
     "ClientBrandFont",
     "ClientContact",
+    "ClientDirective",
     "ClientPlatform",
+    "ClientProfile",
     "ComplianceDoc",
     "ComplianceEntry",
     "Conversation",
@@ -62,6 +68,9 @@ __all__ = [
     "EventAsset",
     "EventPost",
     "Integration",
+    "IntelJob",
+    "KnowledgeChunk",
+    "KnowledgeSource",
     "MarketingEvent",
     "Message",
     "MessageAttachment",

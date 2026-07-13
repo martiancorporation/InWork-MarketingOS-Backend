@@ -86,6 +86,14 @@ class S3Storage:
         except Exception as exc:  # noqa: BLE001 - translate any boto error
             raise self._translate(exc, key) from exc
 
+    def download(self, key: str) -> bytes:
+        client = self._client()
+        try:
+            resp = client.get_object(Bucket=self._bucket, Key=key)
+            return resp["Body"].read()
+        except Exception as exc:  # noqa: BLE001
+            raise self._translate(exc, key) from exc
+
     def generate_download_url(self, key: str, expiry_seconds: int) -> str:
         client = self._client()
         try:

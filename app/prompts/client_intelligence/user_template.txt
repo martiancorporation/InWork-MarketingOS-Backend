@@ -1,0 +1,7 @@
+Client: {client_name}
+
+Extract the client's directives from the complete onboarding corpus below. Capture every rule, requirement, preference, and restriction as atomic directives.
+
+<corpus>
+{corpus}
+</corpus>

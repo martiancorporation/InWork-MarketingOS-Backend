@@ -70,6 +70,9 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # autosave; 8 means the wizard has been finalized. Lets the UI resume a
     # half-finished onboarding and drives the progress percentage.
     onboarding_step: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Points at the live ClientProfile version (async intelligence pipeline).
+    # Null until the first profile build succeeds; flipped atomically per build.
+    current_profile_version: Mapped[int | None] = mapped_column(Integer)
     # Denormalized caches — refreshed together by a job/trigger, never edited by hand.
     spend_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     leads_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -23,9 +23,16 @@ from app.models.client import Client, ClientBrandColor, ClientBrandFont, ClientP
 from app.models.compliance import ComplianceEntry
 from app.models.contact import ClientContact
 from app.models.document import Document
-from app.models.enums import ClientPipelineStage, ClientStatus, ComplianceKind, ContactSide
+from app.models.enums import (
+    ClientPipelineStage,
+    ClientStatus,
+    ComplianceKind,
+    ContactSide,
+    IntelJobType,
+)
 from app.models.user import User
 from app.repositories.client_repository import ClientRepository
+from app.services.intelligence.job_queue import JobQueue
 from app.schemas.onboarding import (
     BasicsUpdate,
     BrandUpdate,
@@ -112,6 +119,8 @@ class OnboardingService:
         ]
 
         self.clients.add(client)
+        self.db.flush()  # assign client.id before enqueuing the build job
+        self._enqueue_build(client.id, IntelJobType.full_build.value)
         self._commit("Could not create client — please retry.")
         self.db.refresh(client)
         return client
@@ -173,6 +182,14 @@ class OnboardingService:
         if data.step is not None:
             client.onboarding_step = max(client.onboarding_step, data.step)
 
+        # Reprocess the changed sections asynchronously; debounce so a burst of
+        # autosaves coalesces into a single build.
+        self._enqueue_build(
+            client.id,
+            IntelJobType.incremental.value,
+            changed_keys=sorted(sent - {"step"}),
+            debounce_seconds=5,
+        )
         self._commit("Could not save onboarding step — please retry.")
         self.db.refresh(client)
         return client
@@ -192,17 +209,39 @@ class OnboardingService:
                     uploaded_by=admin.id,
                 )
             )
+        self._enqueue_build(
+            client.id, IntelJobType.incremental.value,
+            changed_keys=["documents"], debounce_seconds=5,
+        )
         self._commit("Could not attach documents — please retry.")
         self.db.refresh(client)
         return client
 
     def complete(self, client: Client) -> Client:
         """Finalize the wizard (step 8). Status stays ``onboarding`` until the
-        first integration connects; the step tracker marks the form done."""
+        first integration connects; the step tracker marks the form done.
+
+        Kicks off a full intelligence build so the summary + RAG profile are
+        generated asynchronously — the user's onboarding returns immediately.
+        """
         client.onboarding_step = FINAL_STEP
+        self._enqueue_build(client.id, IntelJobType.full_build.value)
         self._commit("Could not finalize onboarding — please retry.")
         self.db.refresh(client)
         return client
+
+    def _enqueue_build(
+        self,
+        client_id: uuid.UUID,
+        job_type: str,
+        *,
+        changed_keys: list[str] | None = None,
+        debounce_seconds: int = 0,
+    ) -> None:
+        """Enqueue an intelligence build in the SAME transaction (outbox)."""
+        JobQueue(self.db).enqueue(
+            client_id, job_type, changed_keys=changed_keys, debounce_seconds=debounce_seconds
+        )
 
     @staticmethod
     def progress(client: Client) -> OnboardingProgress:

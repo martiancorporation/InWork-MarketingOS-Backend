@@ -22,6 +22,13 @@ class Storage(Protocol):
         """Upload a file object to ``key`` (encrypted at rest, private)."""
         ...
 
+    def download(self, key: str) -> bytes:
+        """Fetch the object's bytes (server-side; used by the ingestion worker).
+
+        Raises ``NotFoundError`` if the key does not exist.
+        """
+        ...
+
     def generate_download_url(self, key: str, expiry_seconds: int) -> str:
         """Short-lived presigned GET URL for a private object."""
         ...

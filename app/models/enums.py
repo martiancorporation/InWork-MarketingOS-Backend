@@ -15,6 +15,71 @@ class UserRole(str, enum.Enum):
     user = "user"        # non-admin; sees only assigned clients
 
 
+# ---- Client intelligence (async build pipeline + RAG) ----
+# Stored as plain indexed String columns (not native PG enums) so these open-ish
+# sets can grow without a migration, matching the ai_usage_events.status pattern.
+
+
+class KnowledgeSourceType(str, enum.Enum):
+    """Provenance of a knowledge source feeding the client profile."""
+
+    document = "document"          # an uploaded file
+    onboarding_field = "onboarding_field"  # a structured field group from the wizard
+    note = "note"                  # free-text note / instruction
+    website = "website"            # scraped site content
+
+
+class SourceStatus(str, enum.Enum):
+    pending = "pending"
+    extracted = "extracted"
+    embedded = "embedded"
+    failed = "failed"
+    unsupported = "unsupported"
+
+
+class DirectiveType(str, enum.Enum):
+    must = "must"            # required action/inclusion
+    must_not = "must_not"    # hard prohibition
+    prefer = "prefer"        # soft preference
+    avoid = "avoid"          # soft avoidance
+    constraint = "constraint"  # factual/technical constraint
+
+
+class DirectiveTier(str, enum.Enum):
+    """Priority tier. Higher tiers win conflicts and are never dropped."""
+
+    mandatory = "mandatory"    # P0 — must_not / legal / explicit "do not"
+    required = "required"      # P1 — explicit must
+    preference = "preference"  # P2 — style choices
+    inferred = "inferred"      # P3 — model-derived, lower confidence
+
+
+class DirectiveStatus(str, enum.Enum):
+    active = "active"
+    superseded = "superseded"
+    conflicted = "conflicted"  # opposing rules; needs human resolution
+
+
+class ProfileStatus(str, enum.Enum):
+    building = "building"
+    ready = "ready"
+    failed = "failed"
+    superseded = "superseded"
+
+
+class IntelJobType(str, enum.Enum):
+    full_build = "full_build"    # re-extract & re-embed everything
+    incremental = "incremental"  # only changed sources; reuse unchanged chunks
+
+
+class IntelJobStatus(str, enum.Enum):
+    queued = "queued"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+    dead = "dead"  # exhausted retries
+
+
 class ClientStatus(str, enum.Enum):
     active = "active"
     paused = "paused"

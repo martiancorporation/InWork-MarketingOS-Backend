@@ -24,6 +24,10 @@ os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ["AUDIT_ENABLED"] = "false"
 # Same reasoning for AI usage recording (recorder uses its own session factory).
 os.environ["AI_USAGE_ENABLED"] = "false"
+# Client intelligence: use the deterministic local embedder so the RAG pipeline
+# runs hermetically (no Voyage key, no network). Agents fall back to their
+# deterministic path because ANTHROPIC_API_KEY is empty (above).
+os.environ["INTEL_EMBEDDING_PROVIDER"] = "fake"
 
 from collections.abc import Callable, Generator  # noqa: E402
 
