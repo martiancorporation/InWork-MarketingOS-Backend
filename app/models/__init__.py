@@ -36,6 +36,7 @@ from app.models.integration import Integration
 from app.models.plan import PlanTask
 from app.models.recommendation import RecommendationAction
 from app.models.report import Report
+from app.models.upload import Upload
 from app.models.user import User, UserSession
 
 __all__ = [
@@ -69,6 +70,7 @@ __all__ = [
     "RecommendationAction",
     "Report",
     "StrategyVisual",
+    "Upload",
     "User",
     "UserSession",
 ]
