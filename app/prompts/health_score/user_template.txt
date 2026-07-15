@@ -1,1 +1,9 @@
-[Prompt template placeholder — see README.md in this folder. Fill in during implementation.]
+CONTEXT (client rules — follow, never contradict):
+{preamble}
+
+Client: {client_name}
+
+Known facts:
+{facts}
+
+Return the health score JSON now.

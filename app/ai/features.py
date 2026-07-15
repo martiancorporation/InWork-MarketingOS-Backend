@@ -20,4 +20,7 @@ class AiFeature:
     INSIGHTS = "insights.generate"
     REPORT_NARRATIVE = "report.narrative"
     RECOMMENDATION = "recommendation.generate"
+    HEALTH_SCORE = "dashboard.health_score"
+    EXECUTIVE_BRIEF = "dashboard.executive_brief"
+    WATCHDOG = "dashboard.watchdog"
     UNKNOWN = "unknown"
