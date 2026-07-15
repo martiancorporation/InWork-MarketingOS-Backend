@@ -8,7 +8,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.utils.web import _extract_colors, _extract_fonts, fetch_page
+from app.utils.web import (
+    _extract_colors,
+    _extract_fonts,
+    _extract_meta,
+    candidate_urls,
+    fetch_page,
+    normalize_url,
+)
 
 
 @pytest.mark.parametrize(
@@ -19,11 +26,48 @@ from app.utils.web import _extract_colors, _extract_fonts, fetch_page
         "http://localhost:8000",      # loopback
         "http://127.0.0.1/admin",     # loopback IP
         "http://169.254.169.254/",    # link-local (cloud metadata)
-        "not-a-url",                  # no host
+        "not-a-url",                  # inferred https, but no dot -> rejected offline
     ],
 )
 def test_unsafe_urls_are_rejected(url: str):
     assert fetch_page(url) is None
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("acme.com", "https://acme.com"),                 # bare domain -> https
+        ("  acme.com/path  ", "https://acme.com/path"),   # trimmed
+        ("http://acme.com", "http://acme.com"),           # explicit scheme kept
+        ("HTTPS://Acme.com", "HTTPS://Acme.com"),         # scheme preserved as-is
+        ("", None),                                       # empty
+        ("not-a-url", None),                              # inferred, no dot
+        ("ftp://acme.com", None),                         # unsupported scheme
+    ],
+)
+def test_normalize_url(raw: str, expected: str | None):
+    assert normalize_url(raw) == expected
+
+
+def test_candidate_urls_toggles_www_and_falls_back_to_http():
+    cands = candidate_urls("acme.com")
+    assert cands[0] == "https://acme.com"
+    assert "https://www.acme.com/" in cands   # www toggle
+    assert any(c.startswith("http://acme.com") for c in cands)  # http fallback
+
+
+def test_candidate_urls_empty_for_junk():
+    assert candidate_urls("not-a-url") == []
+
+
+def test_extract_meta_reads_theme_color_and_description():
+    html = (
+        '<meta name="theme-color" content="#0D6EFD">'
+        '<meta property="og:description" content="A friendly brand.">'
+    )
+    meta = _extract_meta(html)
+    assert meta["theme-color"] == "#0D6EFD"
+    assert meta["og:description"] == "A friendly brand."
 
 
 def test_extract_colors_dedupes_and_ignores_black_white():

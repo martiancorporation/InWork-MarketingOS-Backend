@@ -2,10 +2,19 @@
 
 Returns the visible text (for the model to summarize) plus **deterministically
 extracted** colors and fonts scraped from inline styles, ``<style>`` blocks, up
-to a few linked stylesheets, and Google-Fonts links. Colors/fonts are far more
+to a few linked stylesheets, and Google-Fonts links, plus a declared
+``theme-color`` and the page's meta description. Colors/fonts are far more
 reliable to pull from CSS directly than to ask the model to guess.
 
-Dependency-light (``httpx`` + regex), best-effort: any failure yields ``None``.
+This is the *fallback* path used when the headless browser (``utils/render.py``)
+is unavailable. It is deliberately dependency-light (``httpx`` + regex) and
+best-effort: any failure yields ``None``. To survive as many sites as possible
+it (1) normalizes bare-domain input into a real URL, (2) tries a short list of
+candidate URLs (``www``/apex toggle, ``https``→``http`` fallback), and (3) sends
+a realistic browser ``User-Agent``/headers so plain WAFs don't reject it.
+
+The URL helpers (``normalize_url``, ``candidate_urls``, ``_is_public_http_url``)
+are shared with the headless renderer.
 """
 
 from __future__ import annotations
@@ -15,7 +24,7 @@ import re
 import socket
 from collections import Counter
 from typing import NamedTuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 
@@ -33,6 +42,26 @@ _TAG_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL
 _ANY_TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
+_META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+_ATTR_RE = re.compile(r'([a-zA-Z:_-]+)\s*=\s*(["\'])(.*?)\2', re.DOTALL)
+_HEX_FULL_RE = re.compile(r"#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
+
+# A realistic desktop-Chrome fingerprint. A bespoke bot UA gets 403'd by many
+# WAFs; presenting as a normal browser clears the low bar most sites set.
+_CHROME_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+)
+_BROWSER_HEADERS = {
+    "User-Agent": _CHROME_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
+    "image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+# Cap how many URL variants we probe so a dead host fails fast.
+_MAX_CANDIDATES = 3
+
 # Fonts that aren't real brand faces.
 _GENERIC_FONTS = {
     "sans-serif", "serif", "monospace", "cursive", "fantasy", "system-ui",
@@ -48,6 +77,61 @@ class PageContent(NamedTuple):
     text: str
     colors: list[str]
     fonts: list[str]
+    theme_color: str | None = None
+    description: str | None = None
+
+
+def normalize_url(raw: str) -> str | None:
+    """Turn user input into a usable http(s) URL, or ``None`` if unusable.
+
+    Accepts a bare domain (``acme.com`` → ``https://acme.com``) — the single
+    most common onboarding input that the old scheme-only guard rejected. When
+    the scheme is inferred, the host must look like a domain (contain a dot) so
+    obvious junk (``not-a-url``) is rejected offline without a DNS lookup.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    inferred = False
+    if not _SCHEME_RE.match(raw):
+        raw = "https://" + raw
+        inferred = True
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return None
+    if inferred and "." not in parsed.hostname:
+        return None
+    return raw
+
+
+def candidate_urls(raw: str) -> list[str]:
+    """Ordered URLs to try for one input: as given, ``www``/apex toggle, then an
+    ``http`` fallback. Redirects are followed automatically, so this only covers
+    connection/DNS-level failures a redirect can't."""
+    base = normalize_url(raw)
+    if not base:
+        return []
+    parsed = urlparse(base)
+    host = parsed.hostname or ""
+    port = f":{parsed.port}" if parsed.port else ""
+    alt_host = host[4:] if host.startswith("www.") else "www." + host
+
+    def build(scheme: str, hostname: str) -> str:
+        return urlunparse(
+            (scheme, hostname + port, parsed.path or "/", parsed.params, parsed.query, "")
+        )
+
+    out = [base, build(parsed.scheme, alt_host)]
+    if parsed.scheme == "https":
+        out.append(build("http", host))
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for url in out:
+        if url not in seen:
+            seen.add(url)
+            result.append(url)
+    return result
 
 
 def _is_public_http_url(url: str) -> bool:
@@ -80,6 +164,25 @@ def _clean_text(html: str, max_chars: int) -> str:
     text = _TAG_RE.sub(" ", html)
     text = _ANY_TAG_RE.sub(" ", text)
     return _WS_RE.sub(" ", text).strip()[:max_chars]
+
+
+def _as_hex(value: object) -> str | None:
+    """Normalize a color string to ``#RRGGBB`` (expanding ``#RGB``), else ``None``."""
+    if not isinstance(value, str):
+        return None
+    match = _HEX_FULL_RE.match(value.strip())
+    if not match:
+        return None
+    digits = match.group(1)
+    if len(digits) == 3:
+        digits = "".join(ch * 2 for ch in digits)
+    return "#" + digits.upper()
+
+
+def _clean_str(value: object, *, limit: int = 600) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()[:limit]
+    return None
 
 
 def _normalize_hex(value: str) -> str:
@@ -123,12 +226,29 @@ def _extract_fonts(css: str, html: str) -> list[str]:
     return fonts[:6]
 
 
-def fetch_page(url: str, *, timeout: float = 8.0, max_chars: int = 8000, max_css: int = 3) -> PageContent | None:
-    """Fetch ``url`` and return its text + extracted brand colors/fonts."""
-    with httpx.Client(
-        headers={"User-Agent": "InWork-MarketingOS/1.0 (brand-extraction)"}
-    ) as client:
-        html = _get(url, timeout=timeout, client=client)
+def _extract_meta(html: str) -> dict[str, str]:
+    """Map ``name``/``property`` → ``content`` for every ``<meta>`` tag (first wins)."""
+    out: dict[str, str] = {}
+    for tag in _META_TAG_RE.findall(html):
+        attrs = {m.group(1).lower(): m.group(3) for m in _ATTR_RE.finditer(tag)}
+        key = attrs.get("name") or attrs.get("property")
+        content = attrs.get("content")
+        if key and content and key.lower() not in out:
+            out[key.lower()] = content.strip()
+    return out
+
+
+def fetch_page(
+    url: str, *, timeout: float = 10.0, max_chars: int = 8000, max_css: int = 3
+) -> PageContent | None:
+    """Fetch ``url`` and return its text + extracted brand colors/fonts/meta."""
+    with httpx.Client(headers=_BROWSER_HEADERS, follow_redirects=True) as client:
+        html: str | None = None
+        for candidate in candidate_urls(url)[:_MAX_CANDIDATES]:
+            html = _get(candidate, timeout=timeout, client=client)
+            if html:
+                url = candidate  # resolve relative stylesheet links against the hit
+                break
         if html is None:
             return None
 
@@ -144,10 +264,13 @@ def fetch_page(url: str, *, timeout: float = 8.0, max_chars: int = 8000, max_css
                 continue
             sheet = _get(urljoin(url, href_match.group(1)), timeout=timeout, client=client)
             if sheet:
-                css += " " + sheet[:max_chars * 2]
+                css += " " + sheet[: max_chars * 2]
 
+    meta = _extract_meta(html)
     return PageContent(
         text=_clean_text(html, max_chars),
         colors=_extract_colors(css),
         fonts=_extract_fonts(css, html),
+        theme_color=_as_hex(meta.get("theme-color")),
+        description=_clean_str(meta.get("og:description") or meta.get("description")),
     )

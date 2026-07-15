@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from app.utils.render import _filter_fonts, _rank_colors, render_page
+from app.utils.render import _filter_fonts, _looks_blocked, _rank_colors, render_page
 
 
 @pytest.mark.parametrize(
@@ -19,11 +19,18 @@ from app.utils.render import _filter_fonts, _rank_colors, render_page
         "ftp://example.com",          # non-http scheme
         "http://localhost:8000",      # loopback
         "http://169.254.169.254/",    # link-local (cloud metadata)
-        "not-a-url",                  # no host
+        "not-a-url",                  # inferred https, no dot -> no safe candidate
     ],
 )
 def test_unsafe_urls_are_rejected_before_browser_launch(url: str):
     assert asyncio.run(render_page(url)) is None
+
+
+def test_looks_blocked_flags_challenge_pages():
+    assert _looks_blocked({"title": "Just a moment...", "text": "Checking your browser"})
+    assert _looks_blocked({"text": "   "})  # empty
+    # A real page that merely mentions a marker in passing is not flagged.
+    assert not _looks_blocked({"title": "Acme", "text": "Welcome to Acme. " * 60})
 
 
 def test_rank_colors_puts_brand_accents_ahead_of_utility_grays():

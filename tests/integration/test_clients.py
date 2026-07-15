@@ -216,6 +216,52 @@ def test_brand_extraction_model_failure_degrades_to_measured_values(
     assert body["fonts"] == ["Inter"]
 
 
+def test_brand_extraction_prepends_declared_theme_color(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
+    # The site's declared theme-color leads the palette, ahead of measured colors.
+    from app.utils.render import RenderedPage
+
+    _mock_render(
+        monkeypatch,
+        RenderedPage(
+            text="site text",
+            colors=["#112233"],
+            fonts=["Inter"],
+            screenshot=b"jpg",
+            theme_color="#0D6EFD",
+        ),
+    )
+    resp = client.post(
+        f"{API}/clients/onboarding/extract-brand",
+        headers=admin_headers,
+        json={"website": "acme.com"},  # bare domain accepted
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["colors"] == ["#0D6EFD", "#112233"]  # theme-color first
+
+
+def test_brand_extraction_when_nothing_can_be_fetched(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
+    # Neither the browser nor the scrape returns anything: still a clean 200 with
+    # a deterministic, clearly-provisional result (never a 500).
+    _mock_render(monkeypatch, None)
+    monkeypatch.setattr("app.ai.brand_extraction.fetch_page", lambda url, **kw: None)
+
+    resp = client.post(
+        f"{API}/clients/onboarding/extract-brand",
+        headers=admin_headers,
+        json={"website": "https://unreachable.example"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ai_generated"] is False
+    assert body["colors"] == [] and body["fonts"] == []
+    assert "unreachable.example" in body["summary"]
+
+
 def test_brand_extraction_requires_website(client: TestClient, admin_headers: dict):
     resp = client.post(f"{API}/clients/onboarding/extract-brand", headers=admin_headers, json={})
     assert resp.status_code == 422
