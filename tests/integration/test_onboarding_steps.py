@@ -29,7 +29,7 @@ def test_draft_opens_onboarding_client_at_step_1(client: TestClient, admin_heade
     assert resp.status_code == 201
     body = resp.json()
     assert body["client"]["slug"] == "acme-co"
-    assert body["client"]["status"] == "onboarding"
+    assert body["client"]["status"] == "draft"
     assert body["client"]["onboarding_step"] == 1
     assert body["onboarding"] == {
         "step": 1,
@@ -159,6 +159,8 @@ def test_complete_finalizes_at_100_percent(client: TestClient, admin_headers: di
         "completed": True,
     }
     assert body["client"]["onboarding_step"] == 8
+    # finishing the wizard flips a draft to active
+    assert body["client"]["status"] == "active"
 
 
 def test_patch_unknown_client_404(client: TestClient, admin_headers: dict):

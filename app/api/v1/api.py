@@ -9,6 +9,7 @@ from app.api.v1.routers import (
     assignments,
     audit,
     auth,
+    calendar,
     clients,
     intelligence,
     uploads,
@@ -24,3 +25,4 @@ api_router.include_router(audit.router)
 api_router.include_router(ai_usage.router)
 api_router.include_router(uploads.router)
 api_router.include_router(intelligence.router)
+api_router.include_router(calendar.router)

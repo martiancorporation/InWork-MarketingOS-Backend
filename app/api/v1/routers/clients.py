@@ -22,7 +22,7 @@ from app.ai.usage import AiUsageContext
 from app.api.deps import AdminUser, CurrentUser, DbSession, Pagination
 from app.models.client import Client
 from app.models.enums import ClientStatus
-from app.schemas.client import ClientListResponse, ClientRead
+from app.schemas.client import ClientListResponse, ClientRead, ClientUpdate
 from app.schemas.onboarding import (
     BrandExtraction,
     BrandExtractionRequest,
@@ -163,4 +163,16 @@ async def extract_brand(
 @router.get("/{client_id}", response_model=ClientRead, summary="Get a client")
 def get_client(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> ClientRead:
     client = ClientService(db).get_client(user, client_id)
+    return ClientRead.model_validate(client)
+
+
+@router.patch(
+    "/{client_id}",
+    response_model=ClientRead,
+    summary="Update a client's status or basic profile (admin only)",
+)
+def update_client(
+    client_id: uuid.UUID, data: ClientUpdate, _admin: AdminUser, db: DbSession
+) -> ClientRead:
+    client = ClientService(db).update_client(client_id, data)
     return ClientRead.model_validate(client)

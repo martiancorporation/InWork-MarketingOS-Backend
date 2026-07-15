@@ -18,7 +18,7 @@ from app.models.enums import ClientStatus, UserRole
 from app.models.user import User
 from app.repositories.assignment_repository import AssignmentRepository
 from app.repositories.client_repository import ClientRepository
-from app.schemas.client import ClientListItem, ClientListResponse
+from app.schemas.client import ClientListItem, ClientListResponse, ClientUpdate
 
 
 class ClientService:
@@ -61,6 +61,20 @@ class ClientService:
             raise NotFoundError("Client not found.")
         return client
 
+    def update_client(self, client_id: uuid.UUID, data: ClientUpdate) -> Client:
+        """Admin edit of status / basic profile fields (partial). Scoping is
+        enforced at the router via the ``AdminUser`` dependency."""
+        client = self.clients.get(client_id)
+        if client is None:
+            raise NotFoundError("Client not found.")
+        fields = data.model_fields_set
+        for attr in ("name", "business_type", "industry", "website", "location", "status"):
+            if attr in fields:
+                setattr(client, attr, getattr(data, attr))
+        self.db.commit()
+        self.db.refresh(client)
+        return client
+
     def _can_access(self, user: User, client_id: uuid.UUID) -> bool:
         return user.role == UserRole.admin or self.assignments.exists(client_id, user.id)
 
@@ -75,6 +89,7 @@ class ClientService:
             website=c.website,
             location=c.location,
             status=c.status,
+            onboarding_step=c.onboarding_step,
             spend=float(c.spend_total),
             leads=c.leads_total,
             cpl=float(c.cpl),

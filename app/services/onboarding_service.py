@@ -79,7 +79,7 @@ class OnboardingService:
             color_guidelines=data.brand.color_guidelines,
             logo_url=data.brand.logo_url,
             goals=data.goals,
-            status=ClientStatus.onboarding,
+            status=ClientStatus.active,  # created complete in one shot → live
             pipeline_stage=ClientPipelineStage.onboarding,
             onboarding_step=FINAL_STEP,  # created complete in one shot
         )
@@ -149,7 +149,7 @@ class OnboardingService:
             language=data.language,
             location=data.location,
             markets=data.markets,
-            status=ClientStatus.onboarding,
+            status=ClientStatus.draft,  # still being set up in the wizard
             pipeline_stage=ClientPipelineStage.onboarding,
             onboarding_step=1,
         )
@@ -218,13 +218,15 @@ class OnboardingService:
         return client
 
     def complete(self, client: Client) -> Client:
-        """Finalize the wizard (step 8). Status stays ``onboarding`` until the
-        first integration connects; the step tracker marks the form done.
+        """Finalize the wizard (step 8): mark the form done and flip the client
+        from ``draft`` to ``active``.
 
         Kicks off a full intelligence build so the summary + RAG profile are
         generated asynchronously — the user's onboarding returns immediately.
         """
         client.onboarding_step = FINAL_STEP
+        if client.status == ClientStatus.draft:
+            client.status = ClientStatus.active
         self._enqueue_build(client.id, IntelJobType.full_build.value)
         self._commit("Could not finalize onboarding — please retry.")
         self.db.refresh(client)

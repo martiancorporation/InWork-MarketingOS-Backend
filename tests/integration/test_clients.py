@@ -18,7 +18,7 @@ def test_admin_onboards_client(client: TestClient, admin_headers: dict):
     data = resp.json()
     c = data["client"]
     assert c["slug"] == "acme-co"
-    assert c["status"] == "onboarding"
+    assert c["status"] == "active"  # onboarded in one shot → live
     assert c["pipeline_stage"] == "onboarding"
     assert len(c["brand_colors"]) == 2
     assert len(c["platforms"]) == 4
@@ -87,8 +87,10 @@ def test_list_search_and_status_filter(client: TestClient, admin_headers: dict):
     _onboard(client, admin_headers, name="Northwind", industry="DevTools")
     assert client.get(f"{API}/clients?search=north", headers=admin_headers).json()["total"] == 1
     assert client.get(f"{API}/clients?search=zzz", headers=admin_headers).json()["total"] == 0
-    # freshly onboarded clients are status=onboarding, so filtering active -> 0
-    assert client.get(f"{API}/clients?status=active", headers=admin_headers).json()["total"] == 0
+    # atomic onboarding creates live clients, so both are status=active
+    assert client.get(f"{API}/clients?status=active", headers=admin_headers).json()["total"] == 2
+    # ...and none are left at the legacy onboarding status
+    assert client.get(f"{API}/clients?status=onboarding", headers=admin_headers).json()["total"] == 0
 
 
 def _mock_render(monkeypatch, page):

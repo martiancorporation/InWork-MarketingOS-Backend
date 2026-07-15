@@ -81,9 +81,11 @@ class IntelJobStatus(str, enum.Enum):
 
 
 class ClientStatus(str, enum.Enum):
-    active = "active"
-    paused = "paused"
-    onboarding = "onboarding"
+    draft = "draft"  # being set up (onboarding wizard not finished)
+    active = "active"  # onboarding complete / live
+    inactive = "inactive"  # paused or switched off
+    paused = "paused"  # legacy alias of inactive (kept for existing rows)
+    onboarding = "onboarding"  # legacy; superseded by ``draft``
     archived = "archived"
 
 

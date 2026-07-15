@@ -5,10 +5,19 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, computed_field
 
 from app.models.enums import ClientPipelineStage, ClientStatus, ContactSide
 from app.schemas.common import ORMModel
+
+# Total wizard steps — mirrors ``OnboardingService.FINAL_STEP``. Kept here so the
+# schema layer doesn't import a service (respecting the dependency direction).
+_ONBOARDING_TOTAL_STEPS = 8
+
+
+def _percent(step: int) -> int:
+    """Wizard completion as a whole-number percent (1→13 … 8→100)."""
+    return int(step / _ONBOARDING_TOTAL_STEPS * 100 + 0.5)
 
 
 class ClientListItem(BaseModel):
@@ -20,10 +29,22 @@ class ClientListItem(BaseModel):
     website: str | None = None
     location: str | None = None
     status: ClientStatus
+    onboarding_step: int = 1
     spend: float
     leads: int
     cpl: float
     created_at: datetime
+
+    @computed_field
+    @property
+    def onboarding_percent(self) -> int:
+        """Progress-bar value for the list (e.g. 50, 63, 100)."""
+        return _percent(self.onboarding_step)
+
+    @computed_field
+    @property
+    def onboarding_completed(self) -> bool:
+        return self.onboarding_step >= _ONBOARDING_TOTAL_STEPS
 
 
 class ClientListResponse(BaseModel):
@@ -31,6 +52,20 @@ class ClientListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ClientUpdate(BaseModel):
+    """Partial client update (admin) — change status or basic profile fields.
+
+    Only the fields present in the request body are applied.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    business_type: str | None = None
+    industry: str | None = None
+    website: str | None = None
+    location: str | None = None
+    status: ClientStatus | None = None
 
 
 # ---- Detailed read (nested) ----
@@ -87,3 +122,13 @@ class ClientRead(ORMModel):
     brand_fonts: list[BrandFontRead] = []
     platforms: list[PlatformRead] = []
     contacts: list[ContactRead] = []
+
+    @computed_field
+    @property
+    def onboarding_percent(self) -> int:
+        return _percent(self.onboarding_step)
+
+    @computed_field
+    @property
+    def onboarding_completed(self) -> bool:
+        return self.onboarding_step >= _ONBOARDING_TOTAL_STEPS
