@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import BigInteger, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, GUID, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
+from app.models.base import GUID, Base, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
 from app.models.enums import DocumentKind
 
 if TYPE_CHECKING:
@@ -37,4 +37,4 @@ class Document(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    client: Mapped["Client"] = relationship(back_populates="documents")
+    client: Mapped[Client] = relationship(back_populates="documents")

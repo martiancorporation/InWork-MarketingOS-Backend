@@ -134,30 +134,69 @@ def candidate_urls(raw: str) -> list[str]:
     return result
 
 
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """True for any address a server-side fetch must never reach."""
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local  # 169.254.0.0/16 — cloud metadata lives here
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified  # 0.0.0.0 / ::
+    )
+
+
 def _is_public_http_url(url: str) -> bool:
-    """Only http(s) with a non-loopback/private/link-local host (basic SSRF guard)."""
+    """Only http(s) whose host resolves exclusively to public addresses.
+
+    Every resolved A/AAAA record is checked, so a name that returns *any*
+    private/loopback/link-local address is rejected (basic SSRF guard).
+    """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return False
     try:
-        for info in socket.getaddrinfo(parsed.hostname, None):
-            ip = ipaddress.ip_address(info[4][0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+        if not infos:
+            return False
+        for info in infos:
+            if _is_blocked_ip(ipaddress.ip_address(info[4][0])):
                 return False
     except (socket.gaierror, ValueError):
         return False
     return True
 
 
+# Follow at most this many redirects, re-validating the target of each hop.
+_MAX_REDIRECTS = 5
+
+
 def _get(url: str, *, timeout: float, client: httpx.Client) -> str | None:
-    if not _is_public_http_url(url):
-        return None
-    try:
-        resp = client.get(url, timeout=timeout, follow_redirects=True)
-        resp.raise_for_status()
+    """Fetch ``url`` with SSRF-safe manual redirect handling.
+
+    Auto-redirects are disabled so every hop (including cross-host 3xx to an
+    internal address) is re-validated against the private-range guard before we
+    connect — a plain ``follow_redirects=True`` would bypass the initial check.
+    """
+    for _ in range(_MAX_REDIRECTS + 1):
+        if not _is_public_http_url(url):
+            return None
+        try:
+            resp = client.get(url, timeout=timeout, follow_redirects=False)
+        except httpx.HTTPError:
+            return None
+        if resp.is_redirect:
+            location = resp.headers.get("location")
+            if not location:
+                return None
+            url = urljoin(url, location)
+            continue
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPError:
+            return None
         return resp.text
-    except httpx.HTTPError:
-        return None
+    return None  # too many redirects
 
 
 def _clean_text(html: str, max_chars: int) -> str:
@@ -242,7 +281,8 @@ def fetch_page(
     url: str, *, timeout: float = 10.0, max_chars: int = 8000, max_css: int = 3
 ) -> PageContent | None:
     """Fetch ``url`` and return its text + extracted brand colors/fonts/meta."""
-    with httpx.Client(headers=_BROWSER_HEADERS, follow_redirects=True) as client:
+    # Redirects are followed manually in ``_get`` so each hop is SSRF-checked.
+    with httpx.Client(headers=_BROWSER_HEADERS, follow_redirects=False) as client:
         html: str | None = None
         for candidate in candidate_urls(url)[:_MAX_CANDIDATES]:
             html = _get(candidate, timeout=timeout, client=client)

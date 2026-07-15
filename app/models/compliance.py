@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, ForeignKey, Index, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, GUID, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
+from app.models.base import GUID, Base, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
 from app.models.enums import ComplianceKind
 
 if TYPE_CHECKING:
@@ -33,7 +33,7 @@ class ComplianceEntry(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
-    client: Mapped["Client"] = relationship(back_populates="compliance_entries")
+    client: Mapped[Client] = relationship(back_populates="compliance_entries")
 
 
 class ComplianceDoc(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -46,4 +46,4 @@ class ComplianceDoc(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         GUID, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
 
-    client: Mapped["Client"] = relationship(back_populates="compliance_docs")
+    client: Mapped[Client] = relationship(back_populates="compliance_docs")

@@ -19,7 +19,7 @@ from app.models.enums import (
     EventType,
     SocialPlatform,
 )
-from app.schemas.common import ORMModel
+from app.schemas.common import MAX_LONG_LINE, MAX_TEXT, ORMModel
 
 # --------------------------------------------------------------------------- #
 # Sub-objects (input)
@@ -27,15 +27,15 @@ from app.schemas.common import ORMModel
 
 
 class EventPostIn(BaseModel):
-    image_url: str | None = None
-    caption: str | None = None
-    hashtags: str | None = None  # space-separated tags, e.g. "#new #drop"
+    image_url: str | None = Field(None, max_length=1024)
+    caption: str | None = Field(None, max_length=MAX_TEXT)
+    hashtags: str | None = Field(None, max_length=MAX_LONG_LINE)  # e.g. "#new #drop"
 
 
 class EventAdIn(BaseModel):
     budget_usd: float = Field(0, ge=0)
     objective: AdObjective = AdObjective.awareness
-    audience: str | None = None
+    audience: str | None = Field(None, max_length=MAX_TEXT)
     bid_strategy: str | None = Field(None, max_length=60)
     duration_days: int | None = Field(None, ge=1)
 
@@ -84,8 +84,8 @@ class EventCreate(BaseModel):
     platform: SocialPlatform
     event_date: date
     event_time: time
-    description: str | None = None
-    strategy: str | None = None
+    description: str | None = Field(None, max_length=MAX_TEXT)
+    strategy: str | None = Field(None, max_length=MAX_TEXT)
     stage: EventStage = EventStage.draft
     post: EventPostIn | None = None
     ad: EventAdIn | None = None
@@ -103,8 +103,8 @@ class EventUpdate(BaseModel):
     platform: SocialPlatform | None = None
     event_date: date | None = None
     event_time: time | None = None
-    description: str | None = None
-    strategy: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_TEXT)
+    strategy: str | None = Field(default=None, max_length=MAX_TEXT)
     stage: EventStage | None = None
     post: EventPostIn | None = None
     ad: EventAdIn | None = None
@@ -118,7 +118,7 @@ class ApprovalDecision(BaseModel):
     """
 
     status: ApprovalStatus
-    note: str | None = None
+    note: str | None = Field(default=None, max_length=MAX_TEXT)
 
 
 # --------------------------------------------------------------------------- #
@@ -168,3 +168,5 @@ class EventRead(ORMModel):
 class EventListResponse(BaseModel):
     items: list[EventListItem]
     total: int
+    page: int = 1
+    page_size: int = 20

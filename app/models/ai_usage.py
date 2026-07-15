@@ -18,7 +18,7 @@ import uuid
 from sqlalchemy import ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, GUID, CreatedAtMixin, JSONColumn, UUIDPrimaryKeyMixin
+from app.models.base import GUID, Base, CreatedAtMixin, JSONColumn, UUIDPrimaryKeyMixin
 
 _COST = Numeric(14, 6)  # USD with 6 decimals — fractions of a cent per request
 

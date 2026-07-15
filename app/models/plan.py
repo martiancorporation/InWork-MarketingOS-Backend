@@ -10,8 +10,8 @@ from sqlalchemy import Date, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
     pg_enum,
@@ -45,4 +45,4 @@ class PlanTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    client: Mapped["Client"] = relationship(back_populates="tasks")
+    client: Mapped[Client] = relationship(back_populates="tasks")

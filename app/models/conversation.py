@@ -14,8 +14,8 @@ from sqlalchemy import ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     CreatedAtMixin,
     TZDateTime,
     UUIDPrimaryKeyMixin,
@@ -43,8 +43,8 @@ class Conversation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     is_read: Mapped[bool] = mapped_column(default=False, nullable=False)
     last_message_at: Mapped[datetime | None] = mapped_column(TZDateTime)
 
-    client: Mapped["Client"] = relationship(back_populates="conversations")
-    messages: Mapped[list["Message"]] = relationship(
+    client: Mapped[Client] = relationship(back_populates="conversations")
+    messages: Mapped[list[Message]] = relationship(
         back_populates="conversation", cascade="all, delete-orphan"
     )
 
@@ -71,11 +71,11 @@ class Message(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     is_starred: Mapped[bool] = mapped_column(default=False, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
 
-    conversation: Mapped["Conversation"] = relationship(back_populates="messages")
-    recipients: Mapped[list["MessageRecipient"]] = relationship(
+    conversation: Mapped[Conversation] = relationship(back_populates="messages")
+    recipients: Mapped[list[MessageRecipient]] = relationship(
         back_populates="message", cascade="all, delete-orphan"
     )
-    attachments: Mapped[list["MessageAttachment"]] = relationship(
+    attachments: Mapped[list[MessageAttachment]] = relationship(
         back_populates="message", cascade="all, delete-orphan"
     )
 
@@ -91,7 +91,7 @@ class MessageRecipient(UUIDPrimaryKeyMixin, Base):
         pg_enum(RecipientKind, "recipient_kind"), nullable=False, default=RecipientKind.to
     )
 
-    message: Mapped["Message"] = relationship(back_populates="recipients")
+    message: Mapped[Message] = relationship(back_populates="recipients")
 
 
 class MessageAttachment(UUIDPrimaryKeyMixin, Base):
@@ -104,4 +104,4 @@ class MessageAttachment(UUIDPrimaryKeyMixin, Base):
         GUID, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
 
-    message: Mapped["Message"] = relationship(back_populates="attachments")
+    message: Mapped[Message] = relationship(back_populates="attachments")

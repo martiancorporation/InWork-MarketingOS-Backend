@@ -22,12 +22,22 @@ def get_engine() -> Engine:
     global _engine
     if _engine is None:
         settings = get_settings()
-        _engine = create_engine(
-            settings.database.url,
-            echo=settings.database.echo,
-            pool_pre_ping=True,
-            future=True,
-        )
+        db = settings.database
+        kwargs: dict = {
+            "echo": db.echo,
+            "pool_pre_ping": True,  # drop dead connections before handing them out
+            "future": True,
+        }
+        # SQLite (tests/tooling) doesn't use a sized connection pool; only pass
+        # pool tuning to real server databases.
+        if not db.url.startswith("sqlite"):
+            kwargs.update(
+                pool_size=db.pool_size,
+                max_overflow=db.max_overflow,
+                pool_timeout=db.pool_timeout,
+                pool_recycle=db.pool_recycle,
+            )
+        _engine = create_engine(db.url, **kwargs)
     return _engine
 
 

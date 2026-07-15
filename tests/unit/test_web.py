@@ -6,12 +6,14 @@ so they run offline; the extraction cases operate on in-memory strings.
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from app.utils.web import (
     _extract_colors,
     _extract_fonts,
     _extract_meta,
+    _get,
     candidate_urls,
     fetch_page,
     normalize_url,
@@ -58,6 +60,32 @@ def test_candidate_urls_toggles_www_and_falls_back_to_http():
 
 def test_candidate_urls_empty_for_junk():
     assert candidate_urls("not-a-url") == []
+
+
+def test_get_refuses_redirect_to_internal_host():
+    """A public URL that 302-redirects to a link-local metadata address must
+    not be followed — the redirect target is re-validated per hop."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "evil.example":
+            return httpx.Response(302, headers={"location": "http://169.254.169.254/latest/meta-data/"})
+        raise AssertionError(f"followed redirect to internal host: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    with client:
+        assert _get("https://evil.example/", timeout=1.0, client=client) is None
+
+
+def test_get_follows_safe_redirect():
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"location": "https://example.com/final"})
+        return httpx.Response(200, text="<html>ok</html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    with client:
+        # example.com resolves publicly; both hops pass the guard.
+        assert _get("https://example.com/start", timeout=1.0, client=client) == "<html>ok</html>"
 
 
 def test_extract_meta_reads_theme_color_and_description():

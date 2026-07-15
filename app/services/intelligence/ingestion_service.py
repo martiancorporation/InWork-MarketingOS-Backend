@@ -138,7 +138,7 @@ class IngestionService:
             return "", SourceStatus.failed.value
         try:
             data = self.storage.download(doc.storage_url)
-        except AppError as exc:
+        except AppError:
             return "", SourceStatus.failed.value
         result = extract_text(data, doc.mime_type, doc.name)
         return result.text, result.status

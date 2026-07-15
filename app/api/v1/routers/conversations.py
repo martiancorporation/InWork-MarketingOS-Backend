@@ -19,7 +19,7 @@ import uuid
 
 from fastapi import APIRouter, Query, status
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, Pagination
 from app.models.enums import MessageFolder
 from app.schemas.common import MessageResponse
 from app.schemas.conversation import (
@@ -42,6 +42,7 @@ def list_conversations(
     client_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    pagination: Pagination,
     folder: MessageFolder | None = Query(None, description="Filter by the latest message's folder"),
     starred: bool | None = Query(None, description="Only threads with a starred message"),
     category: str | None = Query(None, description="Filter by message category label"),
@@ -49,7 +50,12 @@ def list_conversations(
 ) -> ConversationListResponse:
     ClientService(db).get_client(user, client_id)
     return ConversationService(db).list_conversations(
-        client_id, folder=folder, starred=starred, category=category, search=search
+        client_id,
+        pagination=pagination,
+        folder=folder,
+        starred=starred,
+        category=category,
+        search=search,
     )
 
 

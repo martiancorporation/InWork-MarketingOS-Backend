@@ -13,8 +13,8 @@ from sqlalchemy import ForeignKey, Integer, Numeric, String, Text, UniqueConstra
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
     pg_enum,
@@ -81,58 +81,58 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    brand_colors: Mapped[list["ClientBrandColor"]] = relationship(
+    brand_colors: Mapped[list[ClientBrandColor]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    brand_fonts: Mapped[list["ClientBrandFont"]] = relationship(
+    brand_fonts: Mapped[list[ClientBrandFont]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    platforms: Mapped[list["ClientPlatform"]] = relationship(
+    platforms: Mapped[list[ClientPlatform]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    contacts: Mapped[list["ClientContact"]] = relationship(
+    contacts: Mapped[list[ClientContact]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    assignments: Mapped[list["ClientAssignment"]] = relationship(
+    assignments: Mapped[list[ClientAssignment]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    compliance_entries: Mapped[list["ComplianceEntry"]] = relationship(
+    compliance_entries: Mapped[list[ComplianceEntry]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    compliance_docs: Mapped[list["ComplianceDoc"]] = relationship(
+    compliance_docs: Mapped[list[ComplianceDoc]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    documents: Mapped[list["Document"]] = relationship(
+    documents: Mapped[list[Document]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    integrations: Mapped[list["Integration"]] = relationship(
+    integrations: Mapped[list[Integration]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    events: Mapped[list["MarketingEvent"]] = relationship(
+    events: Mapped[list[MarketingEvent]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    tasks: Mapped[list["PlanTask"]] = relationship(
+    tasks: Mapped[list[PlanTask]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    analytics: Mapped[list["AnalyticsDaily"]] = relationship(
+    analytics: Mapped[list[AnalyticsDaily]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    strategy_visuals: Mapped[list["StrategyVisual"]] = relationship(
+    strategy_visuals: Mapped[list[StrategyVisual]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    conversations: Mapped[list["Conversation"]] = relationship(
+    conversations: Mapped[list[Conversation]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    ai_chats: Mapped[list["AiChat"]] = relationship(
+    ai_chats: Mapped[list[AiChat]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    ai_sources: Mapped[list["AiSource"]] = relationship(
+    ai_sources: Mapped[list[AiSource]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    reports: Mapped[list["Report"]] = relationship(
+    reports: Mapped[list[Report]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
-    recommendation_actions: Mapped[list["RecommendationAction"]] = relationship(
+    recommendation_actions: Mapped[list[RecommendationAction]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
 
@@ -147,7 +147,7 @@ class ClientBrandColor(UUIDPrimaryKeyMixin, Base):
     label: Mapped[str | None] = mapped_column(String(60))
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    client: Mapped["Client"] = relationship(back_populates="brand_colors")
+    client: Mapped[Client] = relationship(back_populates="brand_colors")
 
 
 class ClientBrandFont(UUIDPrimaryKeyMixin, Base):
@@ -159,7 +159,7 @@ class ClientBrandFont(UUIDPrimaryKeyMixin, Base):
     family: Mapped[str] = mapped_column(String(120), nullable=False)
     usage: Mapped[str | None] = mapped_column(String(60))  # heading / body / accent
 
-    client: Mapped["Client"] = relationship(back_populates="brand_fonts")
+    client: Mapped[Client] = relationship(back_populates="brand_fonts")
 
 
 class ClientPlatform(UUIDPrimaryKeyMixin, Base):
@@ -180,4 +180,4 @@ class ClientPlatform(UUIDPrimaryKeyMixin, Base):
     )
     channel: Mapped[str] = mapped_column(String(40), nullable=False)
 
-    client: Mapped["Client"] = relationship(back_populates="platforms")
+    client: Mapped[Client] = relationship(back_populates="platforms")

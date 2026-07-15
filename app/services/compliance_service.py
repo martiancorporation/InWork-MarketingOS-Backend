@@ -15,15 +15,16 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
+from app.core.pagination import PaginationParams
 from app.models.client import Client
 from app.models.compliance import ComplianceEntry
 from app.models.enums import ComplianceKind, IntelJobType
 from app.repositories.compliance_repository import ComplianceRepository
 from app.schemas.compliance import (
     ComplianceEntryCreate,
+    ComplianceEntryRead,
     ComplianceEntryUpdate,
     ComplianceListResponse,
-    ComplianceEntryRead,
 )
 from app.schemas.intelligence import IntelligenceStatus
 from app.services.intelligence.intelligence_service import IntelligenceService
@@ -39,12 +40,24 @@ class ComplianceService:
         self,
         client_id: uuid.UUID,
         *,
+        pagination: PaginationParams,
         kind: ComplianceKind | None = None,
         active_only: bool = False,
     ) -> ComplianceListResponse:
-        rows = self.entries.list_for_client(client_id, kind=kind, active_only=active_only)
+        rows, total = self.entries.list_for_client(
+            client_id,
+            kind=kind,
+            active_only=active_only,
+            offset=pagination.offset,
+            limit=pagination.limit,
+        )
         items = [ComplianceEntryRead.model_validate(e) for e in rows]
-        return ComplianceListResponse(items=items, total=len(items))
+        return ComplianceListResponse(
+            items=items,
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
 
     def get_entry(self, client_id: uuid.UUID, entry_id: uuid.UUID) -> ComplianceEntry:
         entry = self.entries.get_for_client(client_id, entry_id)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -45,7 +45,7 @@ def create_access_token(
 ) -> str:
     """Create a signed, short-lived JWT access token for ``subject`` (user id)."""
     sec = get_settings().security
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expire = now + timedelta(minutes=expires_minutes or sec.access_token_expire_minutes)
     payload = {
         "sub": str(subject),

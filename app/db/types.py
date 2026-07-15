@@ -7,7 +7,6 @@ columns the same way.
 from __future__ import annotations
 
 import enum
-from typing import Type
 
 from sqlalchemy import JSON, TIMESTAMP, Uuid
 from sqlalchemy import Enum as SAEnum
@@ -30,7 +29,7 @@ JSONColumn = JSON().with_variant(JSONB(), "postgresql")
 _ENUM_CACHE: dict[str, SAEnum] = {}
 
 
-def pg_enum(enum_cls: Type[enum.Enum], name: str) -> SAEnum:
+def pg_enum(enum_cls: type[enum.Enum], name: str) -> SAEnum:
     """Return a cached native Postgres enum that stores the enum *value*."""
     if name not in _ENUM_CACHE:
         _ENUM_CACHE[name] = SAEnum(

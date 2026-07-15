@@ -13,9 +13,9 @@ running, avoiding profile-version races.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -42,7 +42,7 @@ class JobQueue:
             return None
 
         run_after = (
-            datetime.now(timezone.utc) + timedelta(seconds=debounce_seconds)
+            datetime.now(UTC) + timedelta(seconds=debounce_seconds)
             if debounce_seconds
             else None
         )
@@ -71,7 +71,10 @@ class JobQueue:
 
     def claim_next(self, worker_id: str) -> IntelJob | None:
         """Claim the next runnable job. Commits the claim before returning."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
+        is_postgres = (
+            self.db.bind is not None and self.db.bind.dialect.name == "postgresql"
+        )
         stmt = (
             select(IntelJob)
             .where(
@@ -81,13 +84,21 @@ class JobQueue:
             .order_by(IntelJob.priority.desc(), IntelJob.created_at)
             .limit(1)
         )
-        if self.db.bind is not None and self.db.bind.dialect.name == "postgresql":
+        if is_postgres:
             stmt = stmt.with_for_update(skip_locked=True)
 
         job = self.db.scalar(stmt)
         if job is None:
             return None
-        # Serialize per client: skip if another job for this client is running.
+        # Serialize per client. Two workers can each claim a *different* queued
+        # job for the same client and both pass an unlocked "is anything
+        # running?" check (TOCTOU) — so take a transaction-scoped advisory lock
+        # keyed by client id first. The lock auto-releases at commit/rollback.
+        if is_postgres:
+            self.db.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                {"k": str(job.client_id)},
+            )
         running = self.db.scalar(
             select(IntelJob).where(
                 IntelJob.client_id == job.client_id,
@@ -114,7 +125,7 @@ class JobQueue:
             job.status = IntelJobStatus.dead.value
         else:
             job.status = IntelJobStatus.queued.value
-            job.run_after = datetime.now(timezone.utc) + timedelta(
+            job.run_after = datetime.now(UTC) + timedelta(
                 seconds=min(300, 10 * (2 ** job.attempts))
             )
         job.locked_by = None

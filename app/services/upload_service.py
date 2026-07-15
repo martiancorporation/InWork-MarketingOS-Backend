@@ -158,6 +158,6 @@ class UploadService:
     def _commit(self, error_message: str) -> None:
         try:
             self.db.commit()
-        except Exception:  # pragma: no cover - unique-key race etc.
+        except Exception as exc:  # pragma: no cover - unique-key race etc.
             self.db.rollback()
-            raise ConflictError(error_message)
+            raise ConflictError(error_message) from exc

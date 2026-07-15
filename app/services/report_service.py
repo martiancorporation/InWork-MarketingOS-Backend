@@ -14,6 +14,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
+from app.core.pagination import PaginationParams
 from app.models.enums import ReportKind
 from app.models.report import Report
 from app.repositories.report_repository import ReportRepository
@@ -26,11 +27,22 @@ class ReportService:
         self.reports = ReportRepository(db)
 
     def list_reports(
-        self, client_id: uuid.UUID, *, kind: ReportKind | None = None
+        self,
+        client_id: uuid.UUID,
+        *,
+        pagination: PaginationParams,
+        kind: ReportKind | None = None,
     ) -> ReportListResponse:
-        rows = self.reports.list_for_client(client_id, kind=kind)
+        rows, total = self.reports.list_for_client(
+            client_id, kind=kind, offset=pagination.offset, limit=pagination.limit
+        )
         items = [ReportRead.model_validate(r) for r in rows]
-        return ReportListResponse(items=items, total=len(items))
+        return ReportListResponse(
+            items=items,
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
 
     def get_report(self, client_id: uuid.UUID, report_id: uuid.UUID) -> Report:
         report = self.reports.get_for_client(client_id, report_id)

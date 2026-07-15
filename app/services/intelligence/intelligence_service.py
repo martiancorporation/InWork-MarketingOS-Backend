@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.models.client import Client
-from app.models.client_directive import ClientDirective
 from app.models.enums import (
     DirectiveStatus,
     IntelJobStatus,

@@ -59,11 +59,25 @@ class AnalyticsRepository(BaseRepository[AnalyticsDaily]):
         start: date | None = None,
         end: date | None = None,
         platform: SocialPlatform | None = None,
-    ) -> list[AnalyticsDaily]:
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> tuple[list[AnalyticsDaily], int]:
+        """Return a page of daily rows plus the total matching count (DB-side)."""
+        total = self.db.scalar(
+            self._scope(
+                select(func.count()).select_from(AnalyticsDaily),
+                client_id,
+                start=start,
+                end=end,
+                platform=platform,
+            )
+        )
         stmt = self._scope(
             select(AnalyticsDaily), client_id, start=start, end=end, platform=platform
-        ).order_by(AnalyticsDaily.date.asc(), AnalyticsDaily.platform.asc())
-        return list(self.db.scalars(stmt).all())
+        ).order_by(AnalyticsDaily.date.asc(), AnalyticsDaily.platform.asc()).offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list(self.db.scalars(stmt).all()), int(total or 0)
 
     def totals(
         self,

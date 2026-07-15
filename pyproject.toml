@@ -1,6 +1,4 @@
 # Project metadata & tooling config.
-# Dependency versions and tool settings (ruff, black, pytest) are filled in
-# during implementation. Structure-only placeholder for now.
 
 [project]
 name = "inwork-marketingos-backend"
@@ -12,3 +10,36 @@ requires-python = ">=3.11"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [".venv", "migrations/versions"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, bugbear, comprehensions, pyupgrade.
+select = ["E", "F", "I", "B", "C4", "UP"]
+ignore = [
+    "E501",   # line length — handled by the formatter
+    "B008",   # function call in default — this IS the FastAPI Depends/Query idiom
+    "B905",   # zip(strict=) — not always desired
+    "UP042",  # StrEnum migration — intentional (str, Enum) mixins across models
+    "UP035",  # deprecated typing import — low value, avoided for now
+]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+# Start pragmatic; tighten over time.
+check_untyped_defs = true
+exclude = "(^\\.venv/|^migrations/)"
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/integrations/google/*", "app/integrations/meta/*", "app/integrations/linkedin/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

@@ -26,24 +26,24 @@ def _client_row(db: Session) -> Client:
 
 
 def _event(db: Session, **kw):
-    defaults = dict(
-        feature="onboarding.brand_extraction",
-        provider="anthropic",
-        model="claude-opus-4-8",
-        operation="complete",
-        input_tokens=1000,
-        output_tokens=500,
-        cache_write_tokens=0,
-        cache_read_tokens=0,
-        total_tokens=1500,
-        input_cost=0.015,
-        output_cost=0.0375,
-        cache_cost=0,
-        total_cost=0.0525,
-        currency="USD",
-        priced=True,
-        status="success",
-    )
+    defaults = {
+        "feature": "onboarding.brand_extraction",
+        "provider": "anthropic",
+        "model": "claude-opus-4-8",
+        "operation": "complete",
+        "input_tokens": 1000,
+        "output_tokens": 500,
+        "cache_write_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 1500,
+        "input_cost": 0.015,
+        "output_cost": 0.0375,
+        "cache_cost": 0,
+        "total_cost": 0.0525,
+        "currency": "USD",
+        "priced": True,
+        "status": "success",
+    }
     defaults.update(kw)
     row = AiUsageEvent(**defaults)
     db.add(row)

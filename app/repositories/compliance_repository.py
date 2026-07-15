@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.compliance import ComplianceEntry
 from app.models.enums import ComplianceKind
@@ -30,11 +30,25 @@ class ComplianceRepository(BaseRepository[ComplianceEntry]):
         *,
         kind: ComplianceKind | None = None,
         active_only: bool = False,
-    ) -> list[ComplianceEntry]:
-        stmt = select(ComplianceEntry).where(ComplianceEntry.client_id == client_id)
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> tuple[list[ComplianceEntry], int]:
+        """Return a page of entries plus the total matching count (DB-side)."""
+        conditions = [ComplianceEntry.client_id == client_id]
         if kind is not None:
-            stmt = stmt.where(ComplianceEntry.kind == kind)
+            conditions.append(ComplianceEntry.kind == kind)
         if active_only:
-            stmt = stmt.where(ComplianceEntry.is_active.is_(True))
-        stmt = stmt.order_by(ComplianceEntry.created_at.desc())
-        return list(self.db.scalars(stmt).all())
+            conditions.append(ComplianceEntry.is_active.is_(True))
+
+        total = self.db.scalar(
+            select(func.count()).select_from(ComplianceEntry).where(*conditions)
+        )
+        stmt = (
+            select(ComplianceEntry)
+            .where(*conditions)
+            .order_by(ComplianceEntry.created_at.desc())
+            .offset(offset)
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list(self.db.scalars(stmt).all()), int(total or 0)

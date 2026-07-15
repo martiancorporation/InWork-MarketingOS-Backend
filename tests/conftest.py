@@ -24,6 +24,9 @@ os.environ.setdefault("DATABASE_URL", "sqlite://")
 # suite hermetic by disabling it here. The audit read API + service are tested
 # directly against the per-test SQLite session instead.
 os.environ["AUDIT_ENABLED"] = "false"
+# Rate limiting is per-process and would trip on the suite's repeated logins;
+# the limiter logic is covered directly in tests/unit/test_rate_limit.py.
+os.environ["RATE_LIMIT_ENABLED"] = "false"
 # Same reasoning for AI usage recording (recorder uses its own session factory).
 os.environ["AI_USAGE_ENABLED"] = "false"
 # Client intelligence: use the deterministic local embedder so the RAG pipeline

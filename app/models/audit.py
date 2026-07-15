@@ -20,7 +20,7 @@ import uuid
 from sqlalchemy import ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, GUID, CreatedAtMixin, JSONColumn, UUIDPrimaryKeyMixin
+from app.models.base import GUID, Base, CreatedAtMixin, JSONColumn, UUIDPrimaryKeyMixin
 
 
 class AuditLog(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):

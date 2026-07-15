@@ -19,6 +19,9 @@ class AISettings(BaseSettings):
     api_key: str | None = None  # ANTHROPIC_API_KEY — absent in local dev
     model: str = "claude-opus-4-8"  # ANTHROPIC_MODEL
     max_tokens: int = 1024  # ANTHROPIC_MAX_TOKENS
+    # Per-request timeout (seconds) and SDK-level retries (429/5xx, exp backoff).
+    timeout_seconds: float = 30.0  # ANTHROPIC_TIMEOUT_SECONDS
+    max_retries: int = 2  # ANTHROPIC_MAX_RETRIES
 
     @property
     def is_configured(self) -> bool:

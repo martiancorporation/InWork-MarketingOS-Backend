@@ -11,7 +11,6 @@ import pytest
 from app.ai.pricing import UsageBreakdown, price
 from app.ai.usage import AiUsageContext, usage_from_message
 
-
 # ---- pricing ----
 
 def test_price_known_model():

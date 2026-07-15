@@ -10,8 +10,8 @@ from sqlalchemy import Boolean, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     TimestampMixin,
     TZDateTime,
     UUIDPrimaryKeyMixin,
@@ -39,11 +39,11 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(TZDateTime)
 
-    sessions: Mapped[list["UserSession"]] = relationship(
+    sessions: Mapped[list[UserSession]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     # Clients assigned to this user (non-admins access only these).
-    client_assignments: Mapped[list["ClientAssignment"]] = relationship(
+    client_assignments: Mapped[list[ClientAssignment]] = relationship(
         back_populates="user",
         foreign_keys="ClientAssignment.user_id",
         cascade="all, delete-orphan",
@@ -66,4 +66,4 @@ class UserSession(UUIDPrimaryKeyMixin, Base):
         TZDateTime, server_default=func.now(), nullable=False
     )
 
-    user: Mapped["User"] = relationship(back_populates="sessions")
+    user: Mapped[User] = relationship(back_populates="sessions")

@@ -10,10 +10,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.models.enums import ConversationSource, MessageFolder, RecipientKind
-from app.schemas.common import ORMModel
+from app.schemas.common import MAX_TEXT, ORMModel
 
 # --------------------------------------------------------------------------- #
 # Recipients / attachments
@@ -21,7 +21,7 @@ from app.schemas.common import ORMModel
 
 
 class RecipientIn(BaseModel):
-    email: str = Field(min_length=1, max_length=255)
+    email: EmailStr = Field(max_length=255)
     kind: RecipientKind = RecipientKind.to
 
 
@@ -57,10 +57,10 @@ class MessageRead(ORMModel):
 class MessageCreate(BaseModel):
     """Reply within a thread. Defaults to an outbound (sent) message."""
 
-    body: str = Field(min_length=1)
+    body: str = Field(min_length=1, max_length=MAX_TEXT)
     folder: MessageFolder = MessageFolder.sent
     category: str | None = Field(None, max_length=40)
-    recipients: list[RecipientIn] = []
+    recipients: list[RecipientIn] = Field(default=[], max_length=100)
 
 
 class MessageUpdate(BaseModel):
@@ -80,11 +80,11 @@ class ConversationCreate(BaseModel):
     """Compose a new thread with its first message."""
 
     subject: str | None = Field(None, max_length=255)
-    body: str = Field(min_length=1)
+    body: str = Field(min_length=1, max_length=MAX_TEXT)
     category: str | None = Field(None, max_length=40)
     source: ConversationSource = ConversationSource.email
     folder: MessageFolder = MessageFolder.sent
-    recipients: list[RecipientIn] = []
+    recipients: list[RecipientIn] = Field(default=[], max_length=100)
 
 
 class ConversationUpdate(BaseModel):
@@ -110,6 +110,8 @@ class ConversationListItem(BaseModel):
 class ConversationListResponse(BaseModel):
     items: list[ConversationListItem]
     total: int
+    page: int = 1
+    page_size: int = 20
 
 
 class ConversationRead(ORMModel):

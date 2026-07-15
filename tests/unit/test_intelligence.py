@@ -11,7 +11,6 @@ from app.models.enums import DirectiveStatus, DirectiveTier, DirectiveType
 from app.services.intelligence.chunking_service import ChunkingService
 from app.services.intelligence.reconcile import merge_capability_flags, reconcile
 
-
 # ---- chunking ----
 
 def test_chunking_splits_long_text_with_overlap() -> None:

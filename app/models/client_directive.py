@@ -15,8 +15,8 @@ from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     CreatedAtMixin,
     JSONColumn,
     UUIDPrimaryKeyMixin,
@@ -60,4 +60,4 @@ class ClientDirective(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     # Self-reference to a conflicting directive (no FK to keep it decoupled).
     conflicts_with_id: Mapped[uuid.UUID | None] = mapped_column(GUID)
 
-    profile: Mapped["ClientProfile"] = relationship(back_populates="directives")
+    profile: Mapped[ClientProfile] = relationship(back_populates="directives")

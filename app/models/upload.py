@@ -16,8 +16,8 @@ from sqlalchemy import BigInteger, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     JSONColumn,
     TimestampMixin,
     UUIDPrimaryKeyMixin,

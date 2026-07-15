@@ -13,6 +13,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
+from app.core.pagination import PaginationParams
 from app.models.analytics import AnalyticsDaily
 from app.models.enums import SocialPlatform
 from app.repositories.analytics_repository import AnalyticsRepository
@@ -61,13 +62,26 @@ class AnalyticsService:
         self,
         client_id: uuid.UUID,
         *,
+        pagination: PaginationParams,
         start: date | None = None,
         end: date | None = None,
         platform: SocialPlatform | None = None,
     ) -> AnalyticsDailyListResponse:
-        rows = self.analytics.list_daily(client_id, start=start, end=end, platform=platform)
+        rows, total = self.analytics.list_daily(
+            client_id,
+            start=start,
+            end=end,
+            platform=platform,
+            offset=pagination.offset,
+            limit=pagination.limit,
+        )
         items = [AnalyticsDailyRead.model_validate(r) for r in rows]
-        return AnalyticsDailyListResponse(items=items, total=len(items))
+        return AnalyticsDailyListResponse(
+            items=items,
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
 
     def summary(
         self,

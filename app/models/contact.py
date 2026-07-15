@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, GUID, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
+from app.models.base import GUID, Base, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
 from app.models.enums import ContactSide
 
 if TYPE_CHECKING:
@@ -36,4 +36,4 @@ class ClientContact(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     description: Mapped[str | None] = mapped_column(Text)
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    client: Mapped["Client"] = relationship(back_populates="contacts")
+    client: Mapped[Client] = relationship(back_populates="contacts")

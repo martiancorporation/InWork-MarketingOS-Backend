@@ -17,16 +17,17 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
+from app.core.pagination import PaginationParams
 from app.models.enums import ApprovalStatus, EventStage, EventType, SocialPlatform
 from app.models.event import EventActivity, EventAd, EventPost, MarketingEvent
 from app.repositories.event_repository import EventRepository
 from app.schemas.event import (
     ApprovalDecision,
+    EventAdIn,
     EventCreate,
     EventListItem,
     EventListResponse,
     EventPostIn,
-    EventAdIn,
     EventUpdate,
 )
 
@@ -42,6 +43,7 @@ class CalendarService:
         self,
         client_id: uuid.UUID,
         *,
+        pagination: PaginationParams,
         year: int | None = None,
         month: int | None = None,
         stage: EventStage | None = None,
@@ -50,7 +52,7 @@ class CalendarService:
         approval_status: ApprovalStatus | None = None,
     ) -> EventListResponse:
         start, end = self._month_range(year, month)
-        rows = self.events.list_for_client(
+        rows, total = self.events.list_for_client(
             client_id,
             start=start,
             end=end,
@@ -58,9 +60,16 @@ class CalendarService:
             platform=platform,
             type=type,
             approval_status=approval_status,
+            offset=pagination.offset,
+            limit=pagination.limit,
         )
         items = [EventListItem.model_validate(e) for e in rows]
-        return EventListResponse(items=items, total=len(items))
+        return EventListResponse(
+            items=items,
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
 
     def get_event(self, client_id: uuid.UUID, event_id: uuid.UUID) -> MarketingEvent:
         event = self.events.get_for_client(client_id, event_id)

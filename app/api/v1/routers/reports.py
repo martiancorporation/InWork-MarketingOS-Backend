@@ -16,7 +16,7 @@ import uuid
 
 from fastapi import APIRouter, Query, status
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, Pagination
 from app.models.enums import ReportKind
 from app.schemas.common import MessageResponse
 from app.schemas.report import (
@@ -36,10 +36,11 @@ def list_reports(
     client_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    pagination: Pagination,
     kind: ReportKind | None = Query(None, description="Filter by report kind"),
 ) -> ReportListResponse:
     ClientService(db).get_client(user, client_id)
-    return ReportService(db).list_reports(client_id, kind=kind)
+    return ReportService(db).list_reports(client_id, pagination=pagination, kind=kind)
 
 
 @router.post(

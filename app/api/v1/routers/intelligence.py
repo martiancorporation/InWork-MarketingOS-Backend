@@ -114,15 +114,17 @@ def resolve_directive(
 @router.get(
     "/{client_id}/context",
     response_model=ClientContextResponse,
-    summary="Debug: the context every agent receives for this client",
+    summary="Debug: the context every agent receives for this client (admin only)",
 )
 def get_context(
     client_id: uuid.UUID,
-    user: CurrentUser,
+    admin: AdminUser,
     db: DbSession,
     query: str | None = Query(None, description="Optional query for RAG retrieval"),
 ) -> ClientContextResponse:
-    ClientService(db).get_client(user, client_id)  # access scoping
+    # Debug endpoint exposing the raw agent preamble + retrieved RAG chunks —
+    # restricted to admins rather than any assigned user.
+    ClientService(db).get_client(admin, client_id)  # access scoping
     ctx = ContextService(db, get_embedder()).build(client_id, query=query)
     return ClientContextResponse(
         version=ctx.version,

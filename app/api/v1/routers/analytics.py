@@ -15,7 +15,7 @@ from datetime import date
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, Pagination
 from app.models.enums import SocialPlatform
 from app.schemas.analytics import (
     AnalyticsDailyListResponse,
@@ -43,12 +43,15 @@ def list_daily(
     client_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    pagination: Pagination,
     start: date | None = Query(None, description="Inclusive start date"),
     end: date | None = Query(None, description="Inclusive end date"),
     platform: SocialPlatform | None = Query(None),
 ) -> AnalyticsDailyListResponse:
     ClientService(db).get_client(user, client_id)
-    return AnalyticsService(db).list_daily(client_id, start=start, end=end, platform=platform)
+    return AnalyticsService(db).list_daily(
+        client_id, pagination=pagination, start=start, end=end, platform=platform
+    )
 
 
 @router.get("/summary", response_model=AnalyticsSummary, summary="Aggregated analytics summary")

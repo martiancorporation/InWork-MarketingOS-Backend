@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.enums import ReportKind
 from app.models.report import Report
@@ -24,10 +24,27 @@ class ReportRepository(BaseRepository[Report]):
         )
 
     def list_for_client(
-        self, client_id: uuid.UUID, *, kind: ReportKind | None = None
-    ) -> list[Report]:
-        stmt = select(Report).where(Report.client_id == client_id)
+        self,
+        client_id: uuid.UUID,
+        *,
+        kind: ReportKind | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> tuple[list[Report], int]:
+        """Return a page of reports plus the total matching count (DB-side)."""
+        conditions = [Report.client_id == client_id]
         if kind is not None:
-            stmt = stmt.where(Report.kind == kind)
-        stmt = stmt.order_by(Report.created_at.desc())
-        return list(self.db.scalars(stmt).all())
+            conditions.append(Report.kind == kind)
+
+        total = self.db.scalar(
+            select(func.count()).select_from(Report).where(*conditions)
+        )
+        stmt = (
+            select(Report)
+            .where(*conditions)
+            .order_by(Report.created_at.desc())
+            .offset(offset)
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list(self.db.scalars(stmt).all()), int(total or 0)

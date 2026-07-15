@@ -26,13 +26,16 @@ attempt failing returns ``None`` so callers fall back to ``app/utils/web.py``.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from typing import Any, NamedTuple
+from urllib.parse import urlparse
 
 from app.utils.web import (
     _GENERIC_FONTS,
     _as_hex,
     _clean_str,
+    _is_blocked_ip,
     _is_public_http_url,
     candidate_urls,
 )
@@ -160,6 +163,42 @@ def _filter_fonts(fonts: list[str], limit: int = 6) -> list[str]:
     return out[:limit]
 
 
+def _is_blocked_target(url: str) -> bool:
+    """Cheap, DNS-free SSRF check for in-browser requests/redirects.
+
+    Blocks non-http(s) schemes and any request to a literal private/reserved IP
+    (e.g. a redirect to ``169.254.169.254`` for cloud metadata) or a local
+    hostname. Hostnames that need DNS are allowed here — the top-level navigation
+    target is already validated by ``_is_public_http_url`` before launch.
+    """
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme in ("data", "blob", "about"):
+        return False  # inert, browser-internal — allow
+    if scheme not in ("http", "https"):
+        return True  # file:, ftp:, gopher:, etc.
+    host = parsed.hostname or ""
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return _is_blocked_ip(ipaddress.ip_address(host))
+    except ValueError:
+        return False  # not a literal IP — a hostname; allow
+
+
+async def _install_ssrf_guard(context: Any) -> None:
+    """Abort any browser request bound for a private/reserved address."""
+
+    async def _guard(route: Any) -> None:
+        if _is_blocked_target(route.request.url):
+            logger.warning("Blocked SSRF-unsafe browser request: %s", route.request.url)
+            await route.abort()
+        else:
+            await route.continue_()
+
+    await context.route("**/*", _guard)
+
+
 def _looks_blocked(data: dict[str, Any]) -> bool:
     """True if the page is empty or a known bot/challenge interstitial."""
     text = str(data.get("text") or "")
@@ -211,6 +250,7 @@ async def render_page(
                     extra_http_headers=_EXTRA_HEADERS,
                 )
                 await context.add_init_script(_STEALTH_JS)
+                await _install_ssrf_guard(context)
                 page = await context.new_page()
                 for target in targets:
                     result = await _render_one(page, target, timeout_ms, max_chars)

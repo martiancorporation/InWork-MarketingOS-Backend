@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import BigInteger, Date, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, GUID, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
+from app.models.base import GUID, Base, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
 from app.models.enums import SocialPlatform
 
 if TYPE_CHECKING:
@@ -41,7 +41,7 @@ class AnalyticsDaily(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     spend: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     revenue: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
 
-    client: Mapped["Client"] = relationship(back_populates="analytics")
+    client: Mapped[Client] = relationship(back_populates="analytics")
 
 
 class StrategyVisual(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -57,4 +57,4 @@ class StrategyVisual(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    client: Mapped["Client"] = relationship(back_populates="strategy_visuals")
+    client: Mapped[Client] = relationship(back_populates="strategy_visuals")

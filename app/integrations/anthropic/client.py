@@ -48,7 +48,13 @@ class AnthropicClient:
             from anthropic import AsyncAnthropic
         except ImportError as exc:  # pragma: no cover - optional dep
             raise ServiceUnavailableError("Anthropic SDK is not installed.") from exc
-        return AsyncAnthropic(api_key=self._settings.api_key)
+        # timeout bounds each request; max_retries lets the SDK retry transient
+        # 429/5xx with exponential backoff (no unbounded hangs, no manual loop).
+        return AsyncAnthropic(
+            api_key=self._settings.api_key,
+            timeout=self._settings.timeout_seconds,
+            max_retries=self._settings.max_retries,
+        )
 
     async def _invoke(
         self, create_kwargs: dict, *, operation: str, context: AiUsageContext | None

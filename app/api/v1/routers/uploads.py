@@ -13,7 +13,9 @@ All require auth; a user sees only their own files, an admin sees all.
 from __future__ import annotations
 
 import uuid
+from functools import partial
 
+import anyio
 from fastapi import APIRouter, File, Form, UploadFile, status
 
 from app.api.deps import CurrentUser, DbSession, StorageDep
@@ -59,12 +61,17 @@ async def upload_file(
 ) -> UploadRead:
     max_bytes = get_settings().storage.max_upload_bytes
     data = await _read_capped(file, max_bytes)
-    return UploadService(db, storage).store_bytes(
-        user,
-        filename=file.filename or "file",
-        content_type=file.content_type or "application/octet-stream",
-        data=data,
-        feature=feature,
+    # store_bytes does a blocking S3 PUT + DB commit; run it off the event loop
+    # so it doesn't stall every other concurrent request on this worker.
+    return await anyio.to_thread.run_sync(
+        partial(
+            UploadService(db, storage).store_bytes,
+            user,
+            filename=file.filename or "file",
+            content_type=file.content_type or "application/octet-stream",
+            data=data,
+            feature=feature,
+        )
     )
 
 

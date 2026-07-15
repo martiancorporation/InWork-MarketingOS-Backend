@@ -10,8 +10,8 @@ from sqlalchemy import Date, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     CreatedAtMixin,
     JSONColumn,
     UUIDPrimaryKeyMixin,
@@ -50,4 +50,4 @@ class Report(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    client: Mapped["Client"] = relationship(back_populates="reports")
+    client: Mapped[Client] = relationship(back_populates="reports")

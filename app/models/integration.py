@@ -13,8 +13,8 @@ from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     TimestampMixin,
     TZDateTime,
     UUIDPrimaryKeyMixin,
@@ -51,4 +51,4 @@ class Integration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_sync_at: Mapped[datetime | None] = mapped_column(TZDateTime)
     last_error: Mapped[str | None] = mapped_column(Text)
 
-    client: Mapped["Client"] = relationship(back_populates="integrations")
+    client: Mapped[Client] = relationship(back_populates="integrations")

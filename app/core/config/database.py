@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,6 +22,15 @@ class DatabaseSettings(BaseSettings):
     # DATABASE_URL — overridden in every real deployment.
     url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/inwork"
     echo: bool = False  # DATABASE_ECHO — log SQL when true
+
+    # Connection-pool tuning. Sizing rule: per-process, so total server-side
+    # connections ≈ (pool_size + max_overflow) × uvicorn workers — keep that
+    # under the database/pooler ceiling (e.g. Neon). recycle avoids handing out
+    # connections the server has already dropped.
+    pool_size: int = 5  # DATABASE_POOL_SIZE
+    max_overflow: int = 10  # DATABASE_MAX_OVERFLOW
+    pool_timeout: int = 30  # DATABASE_POOL_TIMEOUT — seconds to wait for a conn
+    pool_recycle: int = 1800  # DATABASE_POOL_RECYCLE — seconds; recycle idle conns
 
     @field_validator("url", mode="before")
     @classmethod

@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Path, status
+from fastapi import APIRouter, Depends, Path, status
 
 from app.api.deps import CurrentUser, DbSession
+from app.core.rate_limit import RateLimit
 from app.schemas.ai import (
     DashboardResponse,
     RecommendationActionListResponse,
@@ -33,6 +34,7 @@ router = APIRouter(prefix="/clients/{client_id}", tags=["dashboard"])
     "/dashboard",
     response_model=DashboardResponse,
     summary="Full AI dashboard (health, brief, watchdog, recommendations)",
+    dependencies=[Depends(RateLimit("ai_dashboard", times=30, seconds=60))],
 )
 async def get_dashboard(
     client_id: uuid.UUID, user: CurrentUser, db: DbSession

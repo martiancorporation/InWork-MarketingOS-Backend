@@ -14,8 +14,8 @@ from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     CreatedAtMixin,
     JSONColumn,
     UUIDPrimaryKeyMixin,
@@ -53,6 +53,6 @@ class ClientProfile(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    directives: Mapped[list["ClientDirective"]] = relationship(
+    directives: Mapped[list[ClientDirective]] = relationship(
         back_populates="profile", cascade="all, delete-orphan"
     )

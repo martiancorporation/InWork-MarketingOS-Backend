@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.models.enums import ApprovalStatus, EventStage, EventType, SocialPlatform
@@ -48,21 +48,33 @@ class EventRepository(BaseRepository[MarketingEvent]):
         platform: SocialPlatform | None = None,
         type: EventType | None = None,
         approval_status: ApprovalStatus | None = None,
-    ) -> list[MarketingEvent]:
-        stmt = select(MarketingEvent).where(MarketingEvent.client_id == client_id)
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> tuple[list[MarketingEvent], int]:
+        """Return a page of events plus the total matching count (DB-side)."""
+        conditions = [MarketingEvent.client_id == client_id]
         if start is not None:
-            stmt = stmt.where(MarketingEvent.event_date >= start)
+            conditions.append(MarketingEvent.event_date >= start)
         if end is not None:
-            stmt = stmt.where(MarketingEvent.event_date <= end)
+            conditions.append(MarketingEvent.event_date <= end)
         if stage is not None:
-            stmt = stmt.where(MarketingEvent.stage == stage)
+            conditions.append(MarketingEvent.stage == stage)
         if platform is not None:
-            stmt = stmt.where(MarketingEvent.platform == platform)
+            conditions.append(MarketingEvent.platform == platform)
         if type is not None:
-            stmt = stmt.where(MarketingEvent.type == type)
+            conditions.append(MarketingEvent.type == type)
         if approval_status is not None:
-            stmt = stmt.where(MarketingEvent.approval_status == approval_status)
-        stmt = stmt.order_by(
-            MarketingEvent.event_date.asc(), MarketingEvent.event_time.asc()
+            conditions.append(MarketingEvent.approval_status == approval_status)
+
+        total = self.db.scalar(
+            select(func.count()).select_from(MarketingEvent).where(*conditions)
         )
-        return list(self.db.scalars(stmt).all())
+        stmt = (
+            select(MarketingEvent)
+            .where(*conditions)
+            .order_by(MarketingEvent.event_date.asc(), MarketingEvent.event_time.asc())
+            .offset(offset)
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list(self.db.scalars(stmt).all()), int(total or 0)

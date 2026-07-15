@@ -14,8 +14,8 @@ from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     CreatedAtMixin,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
@@ -45,11 +45,11 @@ class AiChat(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     context_type: Mapped[str | None] = mapped_column(String(40), index=True)
     context_key: Mapped[str | None] = mapped_column(String(80))  # e.g. an ISO date for "day"
 
-    client: Mapped["Client"] = relationship(back_populates="ai_chats")
-    messages: Mapped[list["AiChatMessage"]] = relationship(
+    client: Mapped[Client] = relationship(back_populates="ai_chats")
+    messages: Mapped[list[AiChatMessage]] = relationship(
         back_populates="chat", cascade="all, delete-orphan"
     )
-    source_links: Mapped[list["AiChatSource"]] = relationship(
+    source_links: Mapped[list[AiChatSource]] = relationship(
         back_populates="chat", cascade="all, delete-orphan"
     )
 
@@ -64,7 +64,7 @@ class AiChatMessage(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tokens: Mapped[int | None] = mapped_column(Integer)
 
-    chat: Mapped["AiChat"] = relationship(back_populates="messages")
+    chat: Mapped[AiChat] = relationship(back_populates="messages")
 
 
 class AiSource(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -79,8 +79,8 @@ class AiSource(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     label: Mapped[str] = mapped_column(String(200), nullable=False)
     ref_id: Mapped[uuid.UUID | None] = mapped_column(GUID)  # polymorphic; no FK by design
 
-    client: Mapped["Client"] = relationship(back_populates="ai_sources")
-    chat_links: Mapped[list["AiChatSource"]] = relationship(
+    client: Mapped[Client] = relationship(back_populates="ai_sources")
+    chat_links: Mapped[list[AiChatSource]] = relationship(
         back_populates="source", cascade="all, delete-orphan"
     )
 
@@ -95,5 +95,5 @@ class AiChatSource(Base):
         GUID, ForeignKey("ai_sources.id", ondelete="CASCADE"), primary_key=True
     )
 
-    chat: Mapped["AiChat"] = relationship(back_populates="source_links")
-    source: Mapped["AiSource"] = relationship(back_populates="chat_links")
+    chat: Mapped[AiChat] = relationship(back_populates="source_links")
+    source: Mapped[AiSource] = relationship(back_populates="chat_links")

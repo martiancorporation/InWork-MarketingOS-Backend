@@ -14,18 +14,18 @@ from sqlalchemy import Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     CreatedAtMixin,
     Embedding,
     JSONColumn,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
-from app.models.enums import KnowledgeSourceType, SourceStatus
+from app.models.enums import SourceStatus
 
 if TYPE_CHECKING:
-    from app.models.client import Client
+    pass
 
 # Embedding dimensionality. Must match INTEL_EMBEDDING_DIM / the embedding model
 # (voyage-3 = 1024). Changing this requires a migration that rewrites the column.
@@ -52,7 +52,7 @@ class KnowledgeSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     error: Mapped[str | None] = mapped_column(Text)
 
-    chunks: Mapped[list["KnowledgeChunk"]] = relationship(
+    chunks: Mapped[list[KnowledgeChunk]] = relationship(
         back_populates="source", cascade="all, delete-orphan"
     )
 
@@ -76,4 +76,4 @@ class KnowledgeChunk(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     meta: Mapped[dict | None] = mapped_column(JSONColumn)
 
-    source: Mapped["KnowledgeSource"] = relationship(back_populates="chunks")
+    source: Mapped[KnowledgeSource] = relationship(back_populates="chunks")

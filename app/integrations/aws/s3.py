@@ -39,7 +39,7 @@ class S3Storage:
 
     # ---- client (lazy) ----
 
-    def _client(self) -> "S3Client":
+    def _client(self) -> S3Client:
         if not self._settings.is_configured:
             raise ServiceUnavailableError(
                 "File storage is not configured. Set STORAGE_S3_BUCKET and "

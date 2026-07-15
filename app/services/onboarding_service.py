@@ -32,7 +32,6 @@ from app.models.enums import (
 )
 from app.models.user import User
 from app.repositories.client_repository import ClientRepository
-from app.services.intelligence.job_queue import JobQueue
 from app.schemas.onboarding import (
     BasicsUpdate,
     BrandUpdate,
@@ -44,6 +43,7 @@ from app.schemas.onboarding import (
     OnboardingRequest,
     OnboardingStepUpdate,
 )
+from app.services.intelligence.job_queue import JobQueue
 from app.utils.slug import slugify, unique_slug
 
 FINAL_STEP = 8
@@ -324,6 +324,6 @@ class OnboardingService:
     def _commit(self, error_message: str) -> None:
         try:
             self.db.commit()
-        except Exception:  # pragma: no cover - unique-slug race etc.
+        except Exception as exc:  # pragma: no cover - unique-slug race etc.
             self.db.rollback()
-            raise ConflictError(error_message)
+            raise ConflictError(error_message) from exc

@@ -27,7 +27,7 @@ class AnalyticsDailyIn(BaseModel):
 
 
 class AnalyticsIngestRequest(BaseModel):
-    rows: list[AnalyticsDailyIn] = Field(min_length=1)
+    rows: list[AnalyticsDailyIn] = Field(min_length=1, max_length=1000)
 
 
 class AnalyticsIngestResponse(BaseModel):
@@ -48,6 +48,8 @@ class AnalyticsDailyRead(ORMModel):
 class AnalyticsDailyListResponse(BaseModel):
     items: list[AnalyticsDailyRead]
     total: int
+    page: int = 1
+    page_size: int = 20
 
 
 class AnalyticsTotals(BaseModel):

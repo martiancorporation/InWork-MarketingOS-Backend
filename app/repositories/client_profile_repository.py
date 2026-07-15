@@ -8,7 +8,6 @@ from sqlalchemy import func, select
 
 from app.models.client_directive import ClientDirective
 from app.models.client_profile import ClientProfile
-from app.models.enums import DirectiveStatus
 from app.repositories.base import BaseRepository
 
 

@@ -29,7 +29,7 @@ class ReportCreate(BaseModel):
     file_url: str | None = None
 
     @model_validator(mode="after")
-    def _check_range(self) -> "ReportCreate":
+    def _check_range(self) -> ReportCreate:
         if self.date_to < self.date_from:
             raise ValueError("date_to must be on or after date_from")
         return self
@@ -63,3 +63,5 @@ class ReportRead(ORMModel):
 class ReportListResponse(BaseModel):
     items: list[ReportRead]
     total: int
+    page: int = 1
+    page_size: int = 20

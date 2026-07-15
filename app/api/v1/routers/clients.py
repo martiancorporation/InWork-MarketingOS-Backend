@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.ai.brand_extraction import BrandExtractionService
 from app.ai.features import AiFeature
 from app.ai.usage import AiUsageContext
 from app.api.deps import AdminUser, CurrentUser, DbSession, Pagination
+from app.core.rate_limit import RateLimit
 from app.models.client import Client
 from app.models.enums import ClientStatus
 from app.schemas.client import ClientListResponse, ClientRead, ClientUpdate
@@ -148,6 +149,7 @@ def complete_onboarding(
     "/onboarding/extract-brand",
     response_model=BrandExtraction,
     summary="AI-extract a brand theme from a website or document",
+    dependencies=[Depends(RateLimit("extract_brand", times=10, seconds=60))],
 )
 async def extract_brand(
     data: BrandExtractionRequest, user: CurrentUser

@@ -24,12 +24,10 @@ from app.ai.health_score import HealthScoreAgent
 from app.ai.recommendations import RecommendationsAgent
 from app.ai.usage import AiUsageContext
 from app.ai.watchdog import WatchdogAgent
-from app.core.exceptions import NotFoundError
 from app.integrations.anthropic.client import AnthropicClient
 from app.models.client import Client
-from app.models.enums import ComplianceKind, IntegrationStatus
+from app.models.enums import ApprovalStatus, ComplianceKind, IntegrationStatus
 from app.models.event import MarketingEvent
-from app.models.enums import ApprovalStatus
 from app.models.recommendation import RecommendationAction
 from app.repositories.recommendation_repository import RecommendationRepository
 from app.schemas.ai import (

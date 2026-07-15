@@ -12,17 +12,17 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.models.enums import ComplianceKind
-from app.schemas.common import ORMModel
+from app.schemas.common import MAX_TEXT, ORMModel
 
 
 class ComplianceEntryCreate(BaseModel):
     kind: ComplianceKind
-    text: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=MAX_TEXT)
 
 
 class ComplianceEntryUpdate(BaseModel):
     kind: ComplianceKind | None = None
-    text: str | None = Field(None, min_length=1)
+    text: str | None = Field(None, min_length=1, max_length=MAX_TEXT)
     is_active: bool | None = None
 
 
@@ -39,3 +39,5 @@ class ComplianceEntryRead(ORMModel):
 class ComplianceListResponse(BaseModel):
     items: list[ComplianceEntryRead]
     total: int
+    page: int = 1
+    page_size: int = 20

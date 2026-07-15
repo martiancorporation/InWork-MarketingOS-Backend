@@ -14,8 +14,8 @@ from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, String, Text, 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
-    Base,
     GUID,
+    Base,
     CreatedAtMixin,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
@@ -70,17 +70,17 @@ class MarketingEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    client: Mapped["Client"] = relationship(back_populates="events")
-    post: Mapped["EventPost | None"] = relationship(
+    client: Mapped[Client] = relationship(back_populates="events")
+    post: Mapped[EventPost | None] = relationship(
         back_populates="event", cascade="all, delete-orphan", uselist=False
     )
-    ad: Mapped["EventAd | None"] = relationship(
+    ad: Mapped[EventAd | None] = relationship(
         back_populates="event", cascade="all, delete-orphan", uselist=False
     )
-    assets: Mapped[list["EventAsset"]] = relationship(
+    assets: Mapped[list[EventAsset]] = relationship(
         back_populates="event", cascade="all, delete-orphan"
     )
-    activity: Mapped[list["EventActivity"]] = relationship(
+    activity: Mapped[list[EventActivity]] = relationship(
         back_populates="event", cascade="all, delete-orphan"
     )
 
@@ -95,7 +95,7 @@ class EventPost(UUIDPrimaryKeyMixin, Base):
     caption: Mapped[str | None] = mapped_column(Text)
     hashtags: Mapped[str | None] = mapped_column(Text)  # space-separated tags
 
-    event: Mapped["MarketingEvent"] = relationship(back_populates="post")
+    event: Mapped[MarketingEvent] = relationship(back_populates="post")
 
 
 class EventAd(UUIDPrimaryKeyMixin, Base):
@@ -112,7 +112,7 @@ class EventAd(UUIDPrimaryKeyMixin, Base):
     bid_strategy: Mapped[str | None] = mapped_column(String(60))  # e.g. "Lowest cost"
     duration_days: Mapped[int | None] = mapped_column(Integer)  # planned run window
 
-    event: Mapped["MarketingEvent"] = relationship(back_populates="ad")
+    event: Mapped[MarketingEvent] = relationship(back_populates="ad")
 
 
 class EventAsset(UUIDPrimaryKeyMixin, Base):
@@ -126,7 +126,7 @@ class EventAsset(UUIDPrimaryKeyMixin, Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    event: Mapped["MarketingEvent"] = relationship(back_populates="assets")
+    event: Mapped[MarketingEvent] = relationship(back_populates="assets")
 
 
 class EventActivity(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -141,4 +141,4 @@ class EventActivity(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     action: Mapped[str] = mapped_column(String(60), nullable=False)  # status_change / comment / edit
     note: Mapped[str | None] = mapped_column(Text)
 
-    event: Mapped["MarketingEvent"] = relationship(back_populates="activity")
+    event: Mapped[MarketingEvent] = relationship(back_populates="activity")

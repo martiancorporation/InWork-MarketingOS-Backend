@@ -16,7 +16,7 @@ import uuid
 
 from fastapi import APIRouter, Query, status
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, Pagination
 from app.models.enums import ComplianceKind
 from app.schemas.common import MessageResponse
 from app.schemas.compliance import (
@@ -37,11 +37,14 @@ def list_entries(
     client_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    pagination: Pagination,
     kind: ComplianceKind | None = Query(None, description="Filter by entry kind"),
     active_only: bool = Query(False, description="Only active (effective) entries"),
 ) -> ComplianceListResponse:
     ClientService(db).get_client(user, client_id)
-    return ComplianceService(db).list_entries(client_id, kind=kind, active_only=active_only)
+    return ComplianceService(db).list_entries(
+        client_id, pagination=pagination, kind=kind, active_only=active_only
+    )
 
 
 @router.post(

@@ -19,7 +19,7 @@ import uuid
 
 from fastapi import APIRouter, Query, status
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, Pagination
 from app.models.enums import ApprovalStatus, EventStage, EventType, SocialPlatform
 from app.schemas.common import MessageResponse
 from app.schemas.event import (
@@ -40,6 +40,7 @@ def list_events(
     client_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    pagination: Pagination,
     year: int | None = Query(None, ge=1970, le=9999, description="Filter to a month (with `month`)"),
     month: int | None = Query(None, ge=1, le=12, description="1-12; pair with `year`"),
     stage: EventStage | None = Query(None, description="draft / scheduled / published / archived"),
@@ -50,6 +51,7 @@ def list_events(
     ClientService(db).get_client(user, client_id)  # 404 if not accessible
     return CalendarService(db).list_events(
         client_id,
+        pagination=pagination,
         year=year,
         month=month,
         stage=stage,

@@ -12,11 +12,12 @@ logic (derived from each thread's latest message) in one place.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
+from app.core.pagination import PaginationParams
 from app.models.conversation import Conversation, Message, MessageRecipient
 from app.models.enums import ConversationSource, MessageFolder
 from app.repositories.conversation_repository import ConversationRepository
@@ -42,6 +43,7 @@ class ConversationService:
         self,
         client_id: uuid.UUID,
         *,
+        pagination: PaginationParams,
         folder: MessageFolder | None = None,
         starred: bool | None = None,
         category: str | None = None,
@@ -83,7 +85,16 @@ class ConversationService:
                     is_starred=is_starred,
                 )
             )
-        return ConversationListResponse(items=items, total=len(items))
+        # Rows are already newest-activity first; filtering preserves that order.
+        # Slice the matched set to the requested page (bounds the response).
+        total = len(items)
+        page_items = items[pagination.offset : pagination.offset + pagination.limit]
+        return ConversationListResponse(
+            items=page_items,
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
 
     def get_conversation(
         self, client_id: uuid.UUID, conversation_id: uuid.UUID
@@ -195,4 +206,4 @@ class ConversationService:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)

@@ -24,6 +24,11 @@ class AppSettings(BaseSettings):
     # When on, every AI provider call is recorded to ai_usage_events (tokens +
     # cost). Disabled in the hermetic test suite (recorder uses a real session).
     ai_usage_enabled: bool = True
+    # In-process rate limiting on sensitive routes (login, paid-AI). Disabled in
+    # the test suite so repeated logins don't trip it. NOTE: limits are
+    # per-process — with multiple workers, use a shared store (Redis) for exact
+    # global limits; this is a per-worker first line of defense.
+    rate_limit_enabled: bool = True
 
     @property
     def is_production(self) -> bool:

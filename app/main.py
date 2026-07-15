@@ -44,6 +44,11 @@ def create_app() -> FastAPI:
 
         app.add_middleware(AuditMiddleware, prefix=settings.app.api_v1_prefix)
 
+    # Outermost: assign/propagate a request id for log correlation.
+    from app.core.request_context import RequestIdMiddleware
+
+    app.add_middleware(RequestIdMiddleware)
+
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.app.api_v1_prefix)
 

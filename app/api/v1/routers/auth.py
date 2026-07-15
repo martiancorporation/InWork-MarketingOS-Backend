@@ -6,10 +6,11 @@ users are created by an admin via the user-management API.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api.deps import DbSession
 from app.core.config import get_settings
+from app.core.rate_limit import RateLimit
 from app.schemas.auth import LoginRequest, TokenResponse
 from app.schemas.user import UserRead
 from app.services.auth_service import AuthService
@@ -21,6 +22,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     "/login",
     response_model=TokenResponse,
     summary="Authenticate and receive an access token",
+    dependencies=[Depends(RateLimit("login", times=10, seconds=60))],
 )
 def login(data: LoginRequest, db: DbSession) -> TokenResponse:
     user, token = AuthService(db).login(data)

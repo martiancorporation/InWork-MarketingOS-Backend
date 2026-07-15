@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, GUID, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
+from app.models.base import GUID, Base, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
 from app.models.enums import RecommendationDecision
 
 if TYPE_CHECKING:
@@ -36,4 +36,4 @@ class RecommendationAction(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    client: Mapped["Client"] = relationship(back_populates="recommendation_actions")
+    client: Mapped[Client] = relationship(back_populates="recommendation_actions")

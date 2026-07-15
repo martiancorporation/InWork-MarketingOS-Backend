@@ -1,47 +1,51 @@
-# Core framework (pin exact versions during implementation).
-# Additional dependencies are added here as features are built.
-fastapi
-uvicorn[standard]
-pydantic
-pydantic-settings
-python-dotenv
+# Pinned for reproducible builds. Versions reflect the known-good set the app
+# is developed and tested against. Bump deliberately (ideally via a lockfile
+# tool such as pip-tools/uv) rather than letting `pip install` drift.
+
+# Core framework
+fastapi==0.139.0
+uvicorn[standard]==0.51.0
+gunicorn==23.0.0            # production process manager (uvicorn workers)
+pydantic==2.13.4
+pydantic-settings==2.14.2
+python-dotenv==1.2.2
 
 # Database layer
-SQLAlchemy>=2.0
-alembic
-psycopg[binary]
+SQLAlchemy==2.0.51
+alembic==1.18.5
+psycopg[binary]==3.3.4
 
 # Auth & security
-PyJWT>=2.8
-bcrypt>=4.1
-email-validator>=2.0
+PyJWT==2.13.0
+bcrypt==5.0.0
+email-validator==2.3.0
 
 # AI (optional at runtime — the app degrades gracefully without it)
-anthropic>=0.39
+anthropic==0.116.0
 
-# HTTP client — website scrape fallback for brand extraction (also used by the test client)
-httpx>=0.27
+# HTTP client — website scrape fallback for brand extraction (also the test client)
+httpx==0.28.1
 
 # Object storage — Amazon S3 backend for the global file-upload system.
-boto3>=1.34
+boto3==1.43.46
 # Multipart form parsing — required by FastAPI for the proxied file-upload route.
-python-multipart>=0.0.9
+python-multipart==0.0.32
 
 # Client intelligence — pgvector RAG store (Postgres extension binding).
-pgvector>=0.2.5
-# Embeddings provider (optional at runtime — falls back to a local embedder).
-voyageai>=0.2
+pgvector==0.5.0
+# Embeddings provider (OPTIONAL — falls back to a local embedder when absent).
+# Not pinned/installed by default; uncomment and pin to enable Voyage retrieval.
+# voyageai==0.3.6
 # Document text extraction (optional per type — each degrades gracefully).
-pypdf>=4.0
-python-docx>=1.1
-python-pptx>=0.6
-openpyxl>=3.1
+pypdf==6.14.2
+python-docx==1.2.0
+python-pptx==1.0.2
+openpyxl==3.1.5
 
-# Headless browser — renders client sites for brand extraction (text after JS,
-# computed colors/fonts, screenshot for Claude vision). Needs a one-time
+# Headless browser — renders client sites for brand extraction. Needs a one-time
 # `playwright install chromium` (run_local.sh and the Dockerfile handle this);
 # without the browser the app degrades gracefully to the httpx scrape.
-playwright>=1.45
+playwright==1.61.0
 
 # Testing
-pytest>=8.0
+pytest==9.1.1

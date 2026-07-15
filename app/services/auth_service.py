@@ -7,7 +7,7 @@ user-management API.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -32,7 +32,7 @@ class AuthService:
         if not user.is_active:
             raise AuthError("This account is disabled.")
 
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = datetime.now(UTC)
         self.db.commit()
         self.db.refresh(user)
         return user, create_access_token(user.id)
