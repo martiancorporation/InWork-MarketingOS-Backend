@@ -15,6 +15,8 @@ os.environ["APP_ENV"] = "test"
 # Force the AI provider "not configured" so the suite is hermetic (no network).
 # Tests that exercise the AI-configured branch monkeypatch the client instead.
 os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["STORAGE_S3_BUCKET"] = ""
+os.environ["STORAGE_S3_REGION"] = ""
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-must-be-at-least-32-bytes-long-00")
 os.environ.setdefault("DATABASE_URL", "sqlite://")

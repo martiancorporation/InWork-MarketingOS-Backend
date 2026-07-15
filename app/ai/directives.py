@@ -92,7 +92,7 @@ class DirectivesAgent:
                 {"client_name": client.name or "the client", "corpus": corpus},
             )
             raw = await self._client.complete(
-                system=system, prompt=prompt, max_tokens=2048, context=context
+                system=system, prompt=prompt, max_tokens=8000, context=context
             )
         except Exception:
             logger.warning("Directives agent failed for %s", client.id, exc_info=True)
