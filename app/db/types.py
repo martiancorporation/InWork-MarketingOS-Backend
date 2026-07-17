@@ -21,7 +21,10 @@ GUID = Uuid(as_uuid=True)
 TZDateTime = TIMESTAMP(timezone=True)
 
 # JSON column: ``JSONB`` on Postgres, generic ``JSON`` on other backends.
-JSONColumn = JSON().with_variant(JSONB(), "postgresql")
+# ``none_as_null=True`` so a Python ``None`` is stored as SQL ``NULL`` (not the
+# JSON literal ``null``) — otherwise "absent" rows are hard to filter, e.g.
+# ``changes IS NULL`` wouldn't match a JSON-``null`` row (audit-log gotcha).
+JSONColumn = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 
 # One shared SAEnum instance per enum name. Native Postgres enums are created
 # by name, so every column that uses a given enum must reference the SAME type

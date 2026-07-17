@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.core.pagination import PaginationParams
+from app.core.request_context import set_audit_changes
 from app.models.campaign import Campaign
 from app.repositories.campaign_repository import CampaignRepository
 from app.schemas.campaign import (
@@ -28,6 +29,7 @@ from app.schemas.campaign import (
     CampaignUpdate,
     HealthDriver,
 )
+from app.services.audit_service import created_changes, deleted_changes
 
 # Metric direction for A/B winner selection.
 _HIGHER_BETTER = ("ctr", "conversion_rate", "roas", "leads")
@@ -83,6 +85,12 @@ class CampaignService:
             created_by=created_by,
         )
         self.campaigns.add(campaign)
+        self.db.flush()
+        set_audit_changes(
+            created_changes(
+                {"name": campaign.name, "status": campaign.status, "budget_usd": campaign.budget_usd}
+            )
+        )
         self.db.commit()
         self.db.refresh(campaign)
         return campaign
@@ -121,6 +129,11 @@ class CampaignService:
 
     def delete_campaign(self, client_id: uuid.UUID, campaign_id: uuid.UUID) -> None:
         campaign = self.get_campaign(client_id, campaign_id)
+        set_audit_changes(
+            deleted_changes(
+                {"name": campaign.name, "status": campaign.status, "budget_usd": campaign.budget_usd}
+            )
+        )
         self.db.delete(campaign)
         self.db.commit()
 

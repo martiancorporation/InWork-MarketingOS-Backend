@@ -1021,7 +1021,7 @@ Base path: `/ai-usage`.
 ---
 
 ## Module 23 — Audit Log (Admin)
-**Screen:** Audit Logs (agency admin). **Role:** Admin only. **Frontend notes:** Every API request is recorded (actor, action, entity, status, ip, duration). Actions are free-form dotted strings (e.g. `report.pdf.exported`, `recommendation.accepted`, `integration.connect`). Mutating edits (e.g. client update) also record a **field-level `changes` diff** (`{ field: { before, after } }`) — render this as a "what changed" view. Filter by `action` (substring), `entity`, `actor_user_id`, `client_id`.
+**Screen:** Audit Logs (agency admin). **Role:** Admin only. **Frontend notes:** Every API request is recorded (actor, action, entity, status, ip, duration). Actions are free-form dotted strings (e.g. `report.pdf.exported`, `recommendation.accepted`, `integration.connect`). Mutating actions record a **field-level `changes` diff** (`{ field: { before, after } }`) — render this as a "what changed" view. **Updates** show `before → after`; **creates (add)** show `null → value`; **deletes (remove)** show `value → null`. Currently populated for client update and campaign / compliance / plan create+delete. Filter by `action` (substring), `entity`, `actor_user_id`, `client_id`.
 
 Base path: `/audit`.
 

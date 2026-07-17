@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.core.pagination import PaginationParams
+from app.core.request_context import set_audit_changes
 from app.models.enums import TaskCategory, TaskStatus
 from app.models.plan import PlanTask
 from app.repositories.plan_repository import PlanTaskRepository
@@ -25,6 +26,7 @@ from app.schemas.plan import (
     PlanTaskRead,
     PlanTaskUpdate,
 )
+from app.services.audit_service import created_changes, deleted_changes
 
 
 class PlanService:
@@ -82,6 +84,9 @@ class PlanService:
         )
         self.tasks.add(task)
         self.tasks.flush()  # assign the id before returning
+        set_audit_changes(
+            created_changes({"title": task.title, "category": task.category, "status": task.status})
+        )
         self.db.commit()
         return self.get_task(client_id, task.id)
 
@@ -105,5 +110,8 @@ class PlanService:
 
     def delete_task(self, client_id: uuid.UUID, task_id: uuid.UUID) -> None:
         task = self.get_task(client_id, task_id)
+        set_audit_changes(
+            deleted_changes({"title": task.title, "category": task.category, "status": task.status})
+        )
         self.db.delete(task)
         self.db.commit()

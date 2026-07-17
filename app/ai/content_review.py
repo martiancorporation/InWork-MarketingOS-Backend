@@ -54,7 +54,7 @@ class ContentReviewAgent(ClientAgent):
                 compliance=compliance,
                 brand_voice_aligned=None,
                 issues=base_issues,
-                suggestions=_deterministic_suggestions(seo),
+                suggestions=_deterministic_suggestions(seo, base_issues),
                 ai_generated=False,
             )
 
@@ -81,18 +81,21 @@ class ContentReviewAgent(ClientAgent):
             logger.warning("Content review AI failed for client %s", self.client_id, exc_info=True)
             return ContentReviewReport(
                 seo=seo, compliance=compliance, brand_voice_aligned=None,
-                issues=base_issues, suggestions=_deterministic_suggestions(seo),
+                issues=base_issues, suggestions=_deterministic_suggestions(seo, base_issues),
                 ai_generated=False,
             )
         payload = parse_json_object(raw) or {}
         ai_issues = [str(i) for i in payload.get("issues", []) if isinstance(i, str)]
         ai_suggestions = [str(x) for x in payload.get("suggestions", []) if isinstance(x, str)]
+        issues = _dedupe(base_issues + ai_issues)
         return ContentReviewReport(
             seo=seo,
             compliance=compliance,
             brand_voice_aligned=bool(payload.get("brand_voice_aligned")),
-            issues=_dedupe(base_issues + ai_issues),
-            suggestions=_dedupe(_deterministic_suggestions(seo) + ai_suggestions),
+            issues=issues,
+            # AI suggestions lead; add the deterministic nudge only if it's not
+            # contradicted by any issue the AI (or the pre-check) found.
+            suggestions=_dedupe(ai_suggestions + _deterministic_suggestions(seo, issues)),
             ai_generated=True,
         )
 
@@ -149,10 +152,15 @@ def _deterministic_issues(compliance: ComplianceCheck, seo: SeoScore) -> list[st
     return issues
 
 
-def _deterministic_suggestions(seo: SeoScore) -> list[str]:
-    if seo.score >= 85:
-        return ["Looks solid — a human reviewer can do a final on-brand pass."]
-    return ["Address the flagged SEO items before sending for approval."]
+def _deterministic_suggestions(seo: SeoScore, issues: list[str]) -> list[str]:
+    if issues:
+        # Something's flagged (compliance / SEO / brand-voice) — don't reassure.
+        return (
+            ["Address the flagged SEO items before sending for approval."]
+            if seo.score < 85
+            else []
+        )
+    return ["Looks solid — a human reviewer can do a final on-brand pass."]
 
 
 def _dedupe(items: list[str]) -> list[str]:

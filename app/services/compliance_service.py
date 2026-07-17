@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.core.pagination import PaginationParams
+from app.core.request_context import set_audit_changes
 from app.models.client import Client
 from app.models.compliance import ComplianceEntry
 from app.models.enums import ComplianceKind, IntelJobType
@@ -27,6 +28,7 @@ from app.schemas.compliance import (
     ComplianceListResponse,
 )
 from app.schemas.intelligence import IntelligenceStatus
+from app.services.audit_service import created_changes, deleted_changes
 from app.services.intelligence.intelligence_service import IntelligenceService
 from app.services.intelligence.job_queue import JobQueue
 
@@ -72,6 +74,8 @@ class ComplianceService:
             client_id=client_id, kind=data.kind, text=data.text.strip(), author_id=author_id
         )
         self.entries.add(entry)
+        self.db.flush()
+        set_audit_changes(created_changes({"kind": entry.kind, "text": entry.text}))
         self._enqueue_rebuild(client_id)
         self.db.commit()
         self.db.refresh(entry)
@@ -95,6 +99,7 @@ class ComplianceService:
 
     def delete_entry(self, client_id: uuid.UUID, entry_id: uuid.UUID) -> None:
         entry = self.get_entry(client_id, entry_id)
+        set_audit_changes(deleted_changes({"kind": entry.kind, "text": entry.text}))
         self.db.delete(entry)
         self._enqueue_rebuild(client_id)
         self.db.commit()

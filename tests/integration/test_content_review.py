@@ -94,6 +94,8 @@ def test_review_uses_ai_when_configured(client: TestClient, admin_headers: dict,
     assert body["ai_generated"] is True
     assert body["brand_voice_aligned"] is False
     assert "Tone is too casual" in body["issues"]
+    # When issues are flagged, the reassuring "Looks solid" line must NOT appear.
+    assert not any("Looks solid" in s for s in body["suggestions"])
 
 
 def test_review_requires_content(client: TestClient, admin_headers: dict):

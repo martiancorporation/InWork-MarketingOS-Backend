@@ -29,16 +29,24 @@ from app.services.intelligence.orchestrator import IntelligenceOrchestrator
 logger = logging.getLogger("app.worker")
 
 
-async def process_job(job_id: uuid.UUID) -> None:
-    """Run one claimed job's pipeline on its own session.
+async def process_job(job_id: uuid.UUID, *, session=None, embedder=None, storage=None) -> None:
+    """Run one claimed job's pipeline.
 
-    The job was claimed (and committed) in a *separate* session, so the instance
-    that was passed around is detached with expired attributes — using it here
-    would raise ``DetachedInstanceError``. Re-load it fresh in this session.
+    The job was claimed (and committed) in a *separate* session, so a passed-in
+    instance would be detached with expired attributes (``DetachedInstanceError``).
+    We take the job *id* and re-load it fresh in the processing session.
+
+    Uses its own session/embedder/storage in production; all three are injectable
+    for tests (so the build runs against the test DB with a fake embedder).
     """
     from app.core.config import get_settings
 
-    session = get_session_factory()()
+    own = session is None
+    session = session or get_session_factory()()
+    if embedder is None:
+        embedder = get_embedder()
+    if storage is None and own:
+        storage = S3Storage(get_settings().storage)
     queue = JobQueue(session)
     job = session.get(IntelJob, job_id)
     if job is None:
@@ -49,9 +57,7 @@ async def process_job(job_id: uuid.UUID) -> None:
             queue.succeed(job)  # client gone — nothing to build
             return
         orchestrator = IntelligenceOrchestrator(
-            session,
-            embedder=get_embedder(),
-            storage=S3Storage(get_settings().storage),
+            session, embedder=embedder, storage=storage
         )
         changed = set((job.payload or {}).get("changed_keys") or [])
         await orchestrator.build(
@@ -63,7 +69,8 @@ async def process_job(job_id: uuid.UUID) -> None:
         session.rollback()
         queue.fail(job, str(exc))
     finally:
-        session.close()
+        if own:
+            session.close()
 
 
 async def _claim_and_run(worker_id: str) -> bool:

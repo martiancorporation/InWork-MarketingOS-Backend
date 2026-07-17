@@ -59,6 +59,11 @@ def derive_audit(
     return entity, entity_id, action
 
 
+def _json_safe(value: object) -> object:
+    """JSON-safe scalar for an audit diff (enum → ``.value``)."""
+    return getattr(value, "value", value)
+
+
 def field_changes(before: dict, after: dict) -> dict | None:
     """Per-field ``{field: {before, after}}`` diff, or None if nothing changed.
 
@@ -68,6 +73,24 @@ def field_changes(before: dict, after: dict) -> dict | None:
         key: {"before": before.get(key), "after": after.get(key)}
         for key in before.keys() | after.keys()
         if before.get(key) != after.get(key)
+    }
+    return changed or None
+
+
+def created_changes(values: dict) -> dict | None:
+    """Diff for a **create**: each provided field goes ``None → value`` so the
+    audit row shows *what was added*. Skips fields whose value is None."""
+    changed = {
+        k: {"before": None, "after": _json_safe(v)} for k, v in values.items() if v is not None
+    }
+    return changed or None
+
+
+def deleted_changes(values: dict) -> dict | None:
+    """Diff for a **delete**: each provided field goes ``value → None`` so the
+    audit row shows *what was removed* (the data is gone afterwards)."""
+    changed = {
+        k: {"before": _json_safe(v), "after": None} for k, v in values.items() if v is not None
     }
     return changed or None
 
