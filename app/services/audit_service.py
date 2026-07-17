@@ -59,6 +59,19 @@ def derive_audit(
     return entity, entity_id, action
 
 
+def field_changes(before: dict, after: dict) -> dict | None:
+    """Per-field ``{field: {before, after}}`` diff, or None if nothing changed.
+
+    Values are compared as-is; callers pass JSON-safe scalars (enum → ``.value``).
+    """
+    changed = {
+        key: {"before": before.get(key), "after": after.get(key)}
+        for key in before.keys() | after.keys()
+        if before.get(key) != after.get(key)
+    }
+    return changed or None
+
+
 class AuditService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -74,6 +87,7 @@ class AuditService:
         client_id: uuid.UUID | None = None,
         target_label: str | None = None,
         meta: dict | None = None,
+        changes: dict | None = None,
     ) -> AuditLog:
         row = AuditLog(
             actor_user_id=actor_user_id,
@@ -83,6 +97,7 @@ class AuditService:
             action=action,
             target_label=target_label,
             meta=meta,
+            changes=changes,
         )
         self.db.add(row)
         self.db.commit()

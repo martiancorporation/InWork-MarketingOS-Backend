@@ -42,3 +42,7 @@ class AuditLog(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     action: Mapped[str] = mapped_column(String(80), nullable=False)
     target_label: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict | None] = mapped_column(JSONColumn)
+    # Per-field before/after diff of the mutated record, e.g.
+    # ``{"status": {"before": "active", "after": "inactive"}}`` — the
+    # accountability trail ("who changed this value, and from what").
+    changes: Mapped[dict | None] = mapped_column(JSONColumn)

@@ -194,8 +194,10 @@ Scales horizontally — each instance claims different jobs via
 ## API overview
 
 All routes are under `API_V1_PREFIX` (default `/api/v1`). Interactive docs at
-`/docs`; schema at `/openapi.json`. Every response uses a consistent error
-envelope:
+`/docs`; schema at `/openapi.json`. **For a full, frontend-facing reference of
+every endpoint — organized by module/screen/role, with payloads, responses,
+status codes, and integration notes — see [`docs/API-REFERENCE.md`](docs/API-REFERENCE.md).**
+Every response uses a consistent error envelope:
 
 ```json
 { "error": { "code": "not_found", "message": "…", "details": null } }

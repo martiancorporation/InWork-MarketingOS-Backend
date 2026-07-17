@@ -13,12 +13,19 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
 from app.core.pagination import PaginationParams
+from app.core.request_context import set_audit_changes
 from app.models.client import Client
 from app.models.enums import ClientStatus, UserRole
 from app.models.user import User
 from app.repositories.assignment_repository import AssignmentRepository
 from app.repositories.client_repository import ClientRepository
 from app.schemas.client import ClientListItem, ClientListResponse, ClientUpdate
+from app.services.audit_service import field_changes
+
+
+def _audit_value(value):
+    """JSON-safe representation of a field value for the audit diff."""
+    return getattr(value, "value", value)
 
 
 class ClientService:
@@ -68,9 +75,16 @@ class ClientService:
         if client is None:
             raise NotFoundError("Client not found.")
         fields = data.model_fields_set
-        for attr in ("name", "business_type", "industry", "website", "location", "status"):
+        tracked = ("name", "business_type", "industry", "website", "location", "status")
+        before = {f: _audit_value(getattr(client, f)) for f in tracked}
+        for attr in tracked:
             if attr in fields:
                 setattr(client, attr, getattr(data, attr))
+        after = {f: _audit_value(getattr(client, f)) for f in tracked}
+        # Record the before/after diff so the audit log shows what changed.
+        changes = field_changes(before, after)
+        if changes:
+            set_audit_changes(changes)
         self.db.commit()
         self.db.refresh(client)
         return client

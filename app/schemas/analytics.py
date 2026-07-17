@@ -34,6 +34,12 @@ class AnalyticsIngestResponse(BaseModel):
     upserted: int
 
 
+class AnalyticsCsvImportResponse(BaseModel):
+    upserted: int
+    skipped: int
+    errors: list[str] = []
+
+
 class AnalyticsDailyRead(ORMModel):
     date: date
     platform: SocialPlatform

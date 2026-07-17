@@ -18,6 +18,9 @@ import uuid
 
 from sqlalchemy.orm import Session
 
+from app.ai.consistency import ConsistencyAgent
+from app.ai.features import AiFeature
+from app.ai.usage import AiUsageContext
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.client import Client, ClientBrandColor, ClientBrandFont, ClientPlatform
 from app.models.compliance import ComplianceEntry
@@ -27,11 +30,13 @@ from app.models.enums import (
     ClientPipelineStage,
     ClientStatus,
     ComplianceKind,
+    ConsistencyLevel,
     ContactSide,
     IntelJobType,
 )
 from app.models.user import User
 from app.repositories.client_repository import ClientRepository
+from app.schemas.consistency import ConsistencyFinding, ConsistencyReport
 from app.schemas.onboarding import (
     BasicsUpdate,
     BrandUpdate,
@@ -133,6 +138,24 @@ class OnboardingService:
         if client is None:
             raise NotFoundError("Client not found.")
         return client
+
+    async def consistency(self, client_id: uuid.UUID) -> ConsistencyReport:
+        """Cross-field contradiction check over the onboarding inputs (review step)."""
+        client = self.get(client_id)
+        context = AiUsageContext(
+            feature=AiFeature.CONSISTENCY_CHECK, client_id=client_id
+        )
+        result = await ConsistencyAgent().check(client, context)
+        return ConsistencyReport(
+            findings=[
+                ConsistencyFinding(level=f.level, message=f.message, step=f.step)
+                for f in result.findings
+            ],
+            has_blocking=any(
+                f.level == ConsistencyLevel.error.value for f in result.findings
+            ),
+            ai_generated=result.ai_generated,
+        )
 
     def create_draft(self, admin: User, data: OnboardingDraftRequest) -> Client:
         """Step 1 gate — open a draft client from the mandatory basics."""

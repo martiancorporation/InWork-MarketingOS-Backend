@@ -19,6 +19,7 @@ class AuditLogRead(ORMModel):
     action: str
     target_label: str | None = None
     meta: dict | None = None
+    changes: dict | None = None  # {field: {before, after}} — what actually changed
     created_at: datetime
 
 

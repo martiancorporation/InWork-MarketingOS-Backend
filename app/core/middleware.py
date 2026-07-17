@@ -21,6 +21,11 @@ import jwt
 from starlette.requests import Request
 from starlette.types import ASGIApp
 
+from app.core.request_context import (
+    get_audit_changes,
+    reset_audit_changes,
+    set_audit_changes,
+)
 from app.core.security import TOKEN_TYPE_ACCESS, decode_token
 from app.db.session import get_session_factory
 from app.services.audit_service import AuditService, derive_audit
@@ -61,6 +66,8 @@ class AuditMiddleware:
         status_code = 500
         body_chunks: list[bytes] = []
         buffering = method in _WRITE_METHODS
+        # Fresh per-request slot; a service may fill it with a before/after diff.
+        changes_token = set_audit_changes(None)
 
         async def send_wrapper(message) -> None:
             nonlocal status_code
@@ -76,10 +83,14 @@ class AuditMiddleware:
             await self.app(scope, receive, send_wrapper)
         finally:
             duration_ms = int((time.perf_counter() - started) * 1000)
+            changes = get_audit_changes()
             try:
-                self._record(request, method, path, status_code, duration_ms, body_chunks)
+                self._record(
+                    request, method, path, status_code, duration_ms, body_chunks, changes
+                )
             except Exception as exc:  # never let auditing break the response
                 logger.warning("audit write failed for %s %s: %s", method, path, exc)
+            reset_audit_changes(changes_token)
 
     def _record(
         self,
@@ -89,6 +100,7 @@ class AuditMiddleware:
         status_code: int,
         duration_ms: int,
         body_chunks: list[bytes],
+        changes: dict | None = None,
     ) -> None:
         actor_id = self._actor(request)
         entity, entity_id, action = derive_audit(method, path, prefix=self.prefix)
@@ -122,6 +134,7 @@ class AuditMiddleware:
                 client_id=client_id,
                 target_label=f"{method} {path}",
                 meta=meta,
+                changes=changes,
             )
 
     @staticmethod

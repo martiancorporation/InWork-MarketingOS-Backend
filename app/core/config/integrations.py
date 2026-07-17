@@ -19,11 +19,44 @@ class IntegrationsSettings(BaseSettings):
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str | None = None
+    # Google Ads-specific: developer token (Google-approved) + manager (MCC) id.
+    google_developer_token: str | None = None
+    google_login_customer_id: str | None = None  # MCC customer id, digits only
+    google_ads_api_version: str = "v18"
+
+    @property
+    def google_configured(self) -> bool:
+        return bool(
+            self.google_client_id and self.google_client_secret and self.google_redirect_uri
+        )
+
+    @property
+    def google_ads_configured(self) -> bool:
+        return self.google_configured and bool(self.google_developer_token)
 
     meta_app_id: str | None = None
     meta_app_secret: str | None = None
     meta_redirect_uri: str | None = None
+    meta_api_version: str = "v21.0"
+    meta_scopes: str = "ads_read,business_management"
 
     linkedin_client_id: str | None = None
     linkedin_client_secret: str | None = None
     linkedin_redirect_uri: str | None = None
+
+    # Scraping / research providers (used by brand extraction). Optional — the
+    # extractor falls back to a headless render / httpx scrape when unset.
+    scrapingbee_api_key: str | None = None  # proxied, JS-rendering fetch (beats IP/anti-bot blocks)
+    brave_api_key: str | None = None  # Brave Search API for brand research
+
+    @property
+    def scrapingbee_configured(self) -> bool:
+        return bool(self.scrapingbee_api_key)
+
+    @property
+    def brave_configured(self) -> bool:
+        return bool(self.brave_api_key)
+
+    @property
+    def meta_configured(self) -> bool:
+        return bool(self.meta_app_id and self.meta_app_secret and self.meta_redirect_uri)

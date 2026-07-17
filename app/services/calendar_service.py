@@ -84,6 +84,7 @@ class CalendarService:
     ) -> MarketingEvent:
         event = MarketingEvent(
             client_id=client_id,
+            campaign_id=data.campaign_id,
             title=data.title,
             type=data.type,
             platform=data.platform,
@@ -123,6 +124,7 @@ class CalendarService:
             "description",
             "strategy",
             "stage",
+            "campaign_id",
         ):
             if attr in fields:
                 setattr(event, attr, getattr(data, attr))
@@ -162,7 +164,11 @@ class CalendarService:
     @staticmethod
     def _build_post(data: EventPostIn) -> EventPost:
         return EventPost(
-            image_url=data.image_url, caption=data.caption, hashtags=data.hashtags
+            image_url=data.image_url,
+            caption=data.caption,
+            hashtags=data.hashtags,
+            cta_label=data.cta_label,
+            cta_url=data.cta_url,
         )
 
     @staticmethod
@@ -182,6 +188,8 @@ class CalendarService:
             event.post.image_url = data.image_url
             event.post.caption = data.caption
             event.post.hashtags = data.hashtags
+            event.post.cta_label = data.cta_label
+            event.post.cta_url = data.cta_url
 
     def _apply_ad(self, event: MarketingEvent, data: EventAdIn) -> None:
         if event.ad is None:

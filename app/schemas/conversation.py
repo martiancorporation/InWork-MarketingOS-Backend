@@ -50,6 +50,8 @@ class MessageRead(ORMModel):
     is_starred: bool
     body: str
     created_at: datetime
+    added_to_source_at: datetime | None = None
+    knowledge_source_id: uuid.UUID | None = None
     recipients: list[RecipientRead] = []
     attachments: list[AttachmentRead] = []
 

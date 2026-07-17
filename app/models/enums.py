@@ -271,6 +271,57 @@ class RecommendationDecision(str, enum.Enum):
     modified = "modified"
     rejected = "rejected"
 
+
+# ---- Campaigns + KPI alerts ----
+# Stored as plain indexed String columns (the ai_usage/knowledge precedent) so
+# these sets stay portable across PG/SQLite and can grow without a migration.
+# The enums here drive request-schema validation, not native PG enum types.
+
+
+class CampaignStatus(str, enum.Enum):
+    draft = "draft"
+    active = "active"
+    paused = "paused"
+    ended = "ended"
+
+
+class AlertKind(str, enum.Enum):
+    """A watchdog signal: a problem to fix, or an opportunity to seize.
+
+    Mirrors the web ``WatchdogItem.kind`` contract."""
+
+    alert = "alert"
+    opportunity = "opportunity"
+
+
+class AlertSeverity(str, enum.Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+
+
+class AlertStatus(str, enum.Enum):
+    open = "open"
+    acknowledged = "acknowledged"
+    resolved = "resolved"
+
+
+class NotificationLevel(str, enum.Enum):
+    info = "info"
+    warning = "warning"
+    critical = "critical"
+
+
+class ConsistencyLevel(str, enum.Enum):
+    """Severity of an onboarding cross-field consistency finding.
+
+    Matches the web ``runConsistencyCheck`` contract (``ok`` / ``warn`` /
+    ``error``)."""
+
+    ok = "ok"
+    warn = "warn"
+    error = "error"
+
 # Audit actions are deliberately NOT an enum: the app logs free-form, dotted
 # action identifiers per feature (e.g. "report.pdf.exported",
 # "recommendation.accepted", "integration.connect") and that set grows with

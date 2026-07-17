@@ -70,6 +70,12 @@ class Message(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     category: Mapped[str | None] = mapped_column(String(40), index=True)
     is_starred: Mapped[bool] = mapped_column(default=False, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    # "Add to source": promoting an email into the client's knowledge/RAG layer
+    # is an explicit, manually-approved action (never automatic — a deliberate
+    # PII safeguard). Stamped when promoted; ``knowledge_source_id`` points at
+    # the created source (soft pointer, no hard FK — sources can be rebuilt).
+    added_to_source_at: Mapped[datetime | None] = mapped_column(TZDateTime)
+    knowledge_source_id: Mapped[uuid.UUID | None] = mapped_column(GUID)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
     recipients: Mapped[list[MessageRecipient]] = relationship(

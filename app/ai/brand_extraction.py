@@ -1,14 +1,24 @@
 """AI-assisted brand extraction for client onboarding.
 
-One-pass flow: signals are collected once (``_collect``) — preferring a headless
-browser render (``app/utils/render.py``: post-JS text, computed colors/fonts,
-declared theme-color/description, and a screenshot), falling back to a plain
-httpx scrape (``app/utils/web.py``) when no browser is available. A single Claude
-*vision* call then looks at the screenshot + text and writes summary/tone/imagery.
+One-pass flow: signals are collected once (``_collect``). Fetch order, most
+robust first:
+0. **ScrapingBee** (when configured) — a proxied, JS-rendering fetch that gets
+   past the anti-bot / geo-IP blocks a same-server render or scrape hits. Yields
+   text + colors/fonts/meta (no screenshot → the model call is text-only).
+1. Headless browser render (``app/utils/render.py``): post-JS text, computed
+   colors/fonts, declared theme-color/description, and a screenshot for vision.
+2. Plain httpx scrape (``app/utils/web.py``).
+
+Optionally, when the **Brave Search API** is configured, a short web-research
+snippet about the brand is folded into the text the model sees, so the summary
+and tone reflect more than just the landing page.
+
+A single Claude call then writes summary/tone/imagery — *vision* when a
+screenshot is available (render path), text-only otherwise.
 
 Graceful degradation, in order:
-1. Headless render unavailable/failed → plain httpx scrape supplies text +
-   colors/fonts/meta; the model call becomes text-only.
+1. ScrapingBee unconfigured/failed → headless render; render unavailable → httpx
+   scrape supplies text + colors/fonts/meta.
 2. Model call fails or returns unparseable JSON (after one retry) → deterministic
    response with the measured colors/fonts (``ai_generated`` False), its summary
    seeded from the site's meta description when present.
@@ -25,20 +35,24 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from anyio import to_thread
 
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
 from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.brave import BraveClient
+from app.integrations.scrapingbee import ScrapingBeeClient
 from app.prompts.loader import load_prompt, render
 from app.schemas.onboarding import BrandExtraction, BrandExtractionRequest
 from app.utils.render import render_page
-from app.utils.web import fetch_page
+from app.utils.web import fetch_page, normalize_url, parse_page
 
 logger = logging.getLogger("app.ai.brand_extraction")
 
 _MODEL_ATTEMPTS = 2
+_RESEARCH_RESULTS = 5
 
 
 @dataclass
@@ -51,12 +65,20 @@ class _Signals:
     screenshot: bytes | None
     theme_color: str | None
     description: str | None
-    source: str  # "render" | "scrape" | "none"
+    source: str  # "scrapingbee" | "render" | "scrape" | "none"
 
 
 class BrandExtractionService:
-    def __init__(self, client: AnthropicClient | None = None) -> None:
+    def __init__(
+        self,
+        client: AnthropicClient | None = None,
+        *,
+        scrapingbee: ScrapingBeeClient | None = None,
+        brave: BraveClient | None = None,
+    ) -> None:
         self._client = client or AnthropicClient()
+        self._scrapingbee = scrapingbee or ScrapingBeeClient()
+        self._brave = brave or BraveClient()
 
     async def extract(
         self, data: BrandExtractionRequest, context: AiUsageContext | None = None
@@ -70,8 +92,12 @@ class BrandExtractionService:
         if not self._client.is_configured:
             return self._fallback(data, colors, sig.fonts, sig.description)
 
+        # Optional web research (Brave) enriches the text the model reasons over.
+        research = await self._research(data.website)
+        text = f"{sig.text}\n\n{research}".strip() if research else sig.text
+
         payload = await self._analyze(
-            data.website, sig.text, colors, sig.fonts, sig.screenshot, context
+            data.website, text, colors, sig.fonts, sig.screenshot, context
         )
         if payload is None:
             return self._fallback(data, colors, sig.fonts, sig.description)
@@ -88,7 +114,24 @@ class BrandExtractionService:
         )
 
     async def _collect(self, website: str) -> _Signals:
-        """Gather page signals once: headless render first, httpx scrape second."""
+        """Gather page signals once. ScrapingBee (proxied, beats blocks) first
+        when configured, then a headless render, then a plain httpx scrape."""
+        if self._scrapingbee.is_configured:
+            html = await to_thread.run_sync(self._scrapingbee.fetch_html, website)
+            if html:
+                # No CSS-following here: one ScrapingBee call keeps credits low;
+                # inline/<style> CSS + meta still yield colors/fonts/description.
+                page = parse_page(html, normalize_url(website) or website)
+                return _Signals(
+                    text=page.text,
+                    colors=list(page.colors),
+                    fonts=list(page.fonts),
+                    screenshot=None,
+                    theme_color=page.theme_color,
+                    description=page.description,
+                    source="scrapingbee",
+                )
+            logger.info("ScrapingBee returned nothing for %s; falling back", website)
         page = await render_page(website)
         if page is not None:
             return _Signals(
@@ -112,6 +155,27 @@ class BrandExtractionService:
                 source="scrape",
             )
         return _Signals("", [], [], None, None, None, "none")
+
+    async def _research(self, website: str) -> str:
+        """Brave web-research snippets about the brand, or ``""`` when the Brave
+        API is unconfigured / returns nothing. Never raises — best-effort enrichment."""
+        if not self._brave.is_configured:
+            return ""
+        host = urlparse(normalize_url(website) or website).hostname or website
+        query = f"{host} brand company about"
+        results = await to_thread.run_sync(
+            lambda: self._brave.search(query, count=_RESEARCH_RESULTS)
+        )
+        if not results:
+            return ""
+        lines = [
+            f"- {r['title']}: {r['description']}"
+            for r in results
+            if r.get("title") or r.get("description")
+        ]
+        if not lines:
+            return ""
+        return "Web research about the brand:\n" + "\n".join(lines)
 
     async def _analyze(
         self,

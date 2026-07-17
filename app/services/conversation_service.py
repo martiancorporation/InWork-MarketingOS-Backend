@@ -19,7 +19,14 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import NotFoundError
 from app.core.pagination import PaginationParams
 from app.models.conversation import Conversation, Message, MessageRecipient
-from app.models.enums import ConversationSource, MessageFolder
+from app.models.enums import (
+    ConversationSource,
+    IntelJobType,
+    KnowledgeSourceType,
+    MessageFolder,
+    SourceStatus,
+)
+from app.models.knowledge import KnowledgeSource
 from app.repositories.conversation_repository import ConversationRepository
 from app.schemas.conversation import (
     ConversationCreate,
@@ -30,6 +37,7 @@ from app.schemas.conversation import (
     MessageUpdate,
     RecipientIn,
 )
+from app.services.intelligence.job_queue import JobQueue
 
 
 class ConversationService:
@@ -180,6 +188,53 @@ class ConversationService:
             message.is_starred = data.is_starred
         if "category" in fields:
             message.category = data.category
+        self.db.commit()
+        reloaded = self.conversations.get_message(client_id, conversation_id, message_id)
+        assert reloaded is not None
+        return reloaded
+
+    def add_message_to_source(
+        self,
+        client_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        message_id: uuid.UUID,
+    ) -> Message:
+        """Promote one email into the client's knowledge/RAG layer.
+
+        Deliberately manual and idempotent: nothing from the inbox reaches the
+        AI automatically (a deliberate PII safeguard). Creates a pending
+        ``KnowledgeSource`` the intelligence pipeline will embed on its next
+        rebuild — which we enqueue here — and stamps the message so the source
+        survives future reconciliations."""
+        message = self.conversations.get_message(client_id, conversation_id, message_id)
+        if message is None:
+            raise NotFoundError("Message not found.")
+        if message.added_to_source_at is not None:
+            return message  # already promoted — no-op
+
+        conv = self.get_conversation(client_id, conversation_id)
+        label = (conv.subject or message.sender_email or "message").strip()[:240]
+        source = KnowledgeSource(
+            client_id=client_id,
+            source_type=KnowledgeSourceType.note.value,
+            ref_kind="message",
+            ref_id=message.id,
+            ref_key=f"message:{message.id}",
+            label=f"Email: {label}",
+            extracted_text=message.body,
+            char_count=len(message.body or ""),
+            status=SourceStatus.pending.value,
+        )
+        self.db.add(source)
+        self.db.flush()  # assign source.id before pointing the message at it
+        message.added_to_source_at = _now()
+        message.knowledge_source_id = source.id
+        JobQueue(self.db).enqueue(
+            client_id,
+            IntelJobType.incremental.value,
+            changed_keys=["conversation"],
+            debounce_seconds=5,
+        )
         self.db.commit()
         reloaded = self.conversations.get_message(client_id, conversation_id, message_id)
         assert reloaded is not None

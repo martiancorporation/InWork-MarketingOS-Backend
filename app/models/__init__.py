@@ -7,9 +7,11 @@ resolution). Keep this list in sync when adding a new model file.
 
 from app.models.ai import AiChat, AiChatMessage, AiChatSource, AiSource
 from app.models.ai_usage import AiUsageEvent
+from app.models.alert import Alert
 from app.models.analytics import AnalyticsDaily, StrategyVisual
 from app.models.assignment import ClientAssignment
 from app.models.audit import AuditLog
+from app.models.campaign import Campaign
 from app.models.client import (
     Client,
     ClientBrandColor,
@@ -37,6 +39,7 @@ from app.models.event import (
 from app.models.integration import Integration
 from app.models.intel_job import IntelJob
 from app.models.knowledge import KnowledgeChunk, KnowledgeSource
+from app.models.notification import Notification
 from app.models.plan import PlanTask
 from app.models.recommendation import RecommendationAction
 from app.models.report import Report
@@ -49,8 +52,10 @@ __all__ = [
     "AiChatSource",
     "AiSource",
     "AiUsageEvent",
+    "Alert",
     "AnalyticsDaily",
     "AuditLog",
+    "Campaign",
     "Client",
     "ClientAssignment",
     "ClientBrandColor",
@@ -71,6 +76,7 @@ __all__ = [
     "IntelJob",
     "KnowledgeChunk",
     "KnowledgeSource",
+    "Notification",
     "MarketingEvent",
     "Message",
     "MessageAttachment",

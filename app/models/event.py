@@ -30,6 +30,7 @@ from app.models.enums import (
 )
 
 if TYPE_CHECKING:
+    from app.models.campaign import Campaign
     from app.models.client import Client
 
 
@@ -39,6 +40,10 @@ class MarketingEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     client_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Optional grouping under a campaign (multi-campaign support / A/B view).
+    campaign_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("campaigns.id", ondelete="SET NULL"), index=True
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     type: Mapped[EventType] = mapped_column(pg_enum(EventType, "event_type"), nullable=False)
@@ -71,6 +76,7 @@ class MarketingEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     client: Mapped[Client] = relationship(back_populates="events")
+    campaign: Mapped[Campaign | None] = relationship(back_populates="events")
     post: Mapped[EventPost | None] = relationship(
         back_populates="event", cascade="all, delete-orphan", uselist=False
     )
@@ -94,6 +100,9 @@ class EventPost(UUIDPrimaryKeyMixin, Base):
     image_url: Mapped[str | None] = mapped_column(Text)
     caption: Mapped[str | None] = mapped_column(Text)
     hashtags: Mapped[str | None] = mapped_column(Text)  # space-separated tags
+    # Call-to-action for the post (label + destination), e.g. "Book Now" → URL.
+    cta_label: Mapped[str | None] = mapped_column(String(80))
+    cta_url: Mapped[str | None] = mapped_column(Text)
 
     event: Mapped[MarketingEvent] = relationship(back_populates="post")
 

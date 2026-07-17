@@ -24,6 +24,7 @@ from app.core.rate_limit import RateLimit
 from app.models.client import Client
 from app.models.enums import ClientStatus
 from app.schemas.client import ClientListResponse, ClientRead, ClientUpdate
+from app.schemas.consistency import ConsistencyReport
 from app.schemas.onboarding import (
     BrandExtraction,
     BrandExtractionRequest,
@@ -143,6 +144,17 @@ def complete_onboarding(
     client = service.get(client_id)
     client = service.complete(client)
     return _step_response(client, db)
+
+
+@router.post(
+    "/{client_id}/onboarding/consistency",
+    response_model=ConsistencyReport,
+    summary="AI cross-field consistency check for the review step (admin only)",
+)
+async def check_onboarding_consistency(
+    client_id: uuid.UUID, admin: AdminUser, db: DbSession
+) -> ConsistencyReport:
+    return await OnboardingService(db).consistency(client_id)
 
 
 @router.post(

@@ -23,6 +23,7 @@ import ipaddress
 import re
 import socket
 from collections import Counter
+from collections.abc import Callable
 from typing import NamedTuple
 from urllib.parse import urljoin, urlparse, urlunparse
 
@@ -277,6 +278,46 @@ def _extract_meta(html: str) -> dict[str, str]:
     return out
 
 
+def parse_page(
+    html: str,
+    base_url: str,
+    *,
+    get_css: Callable[[str], str | None] | None = None,
+    max_chars: int = 8000,
+    max_css: int = 3,
+) -> PageContent:
+    """Turn already-fetched HTML into brand signals (text + colors/fonts/meta).
+
+    Split out of ``fetch_page`` so an alternate fetcher (e.g. the ScrapingBee
+    proxy) can reuse the exact same extraction. ``get_css`` optionally fetches a
+    linked stylesheet by absolute URL (external CSS holds most brand colors); when
+    ``None`` only inline/``<style>`` CSS is parsed — the callable is the sole way
+    this function touches the network.
+    """
+    css = " ".join(_STYLE_BLOCK_RE.findall(html))
+    css += " " + " ".join(_INLINE_STYLE_RE.findall(html))
+
+    if get_css is not None:
+        for i, link in enumerate(_LINK_CSS_RE.findall(html)):
+            if i >= max_css:
+                break
+            href_match = _HREF_RE.search(link)
+            if not href_match:
+                continue
+            sheet = get_css(urljoin(base_url, href_match.group(1)))
+            if sheet:
+                css += " " + sheet[: max_chars * 2]
+
+    meta = _extract_meta(html)
+    return PageContent(
+        text=_clean_text(html, max_chars),
+        colors=_extract_colors(css),
+        fonts=_extract_fonts(css, html),
+        theme_color=_as_hex(meta.get("theme-color")),
+        description=_clean_str(meta.get("og:description") or meta.get("description")),
+    )
+
+
 def fetch_page(
     url: str, *, timeout: float = 10.0, max_chars: int = 8000, max_css: int = 3
 ) -> PageContent | None:
@@ -292,25 +333,10 @@ def fetch_page(
         if html is None:
             return None
 
-        css = " ".join(_STYLE_BLOCK_RE.findall(html))
-        css += " " + " ".join(_INLINE_STYLE_RE.findall(html))
-
-        # Follow up to a few linked stylesheets (external CSS holds most colors).
-        for i, link in enumerate(_LINK_CSS_RE.findall(html)):
-            if i >= max_css:
-                break
-            href_match = _HREF_RE.search(link)
-            if not href_match:
-                continue
-            sheet = _get(urljoin(url, href_match.group(1)), timeout=timeout, client=client)
-            if sheet:
-                css += " " + sheet[: max_chars * 2]
-
-    meta = _extract_meta(html)
-    return PageContent(
-        text=_clean_text(html, max_chars),
-        colors=_extract_colors(css),
-        fonts=_extract_fonts(css, html),
-        theme_color=_as_hex(meta.get("theme-color")),
-        description=_clean_str(meta.get("og:description") or meta.get("description")),
-    )
+        return parse_page(
+            html,
+            url,
+            get_css=lambda u: _get(u, timeout=timeout, client=client),
+            max_chars=max_chars,
+            max_css=max_css,
+        )

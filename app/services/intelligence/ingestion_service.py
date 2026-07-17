@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -23,6 +24,7 @@ from app.core.exceptions import AppError
 from app.integrations.documents import extract_text
 from app.integrations.storage import Storage
 from app.models.client import Client
+from app.models.conversation import Conversation, Message
 from app.models.enums import KnowledgeSourceType, SourceStatus
 from app.models.knowledge import KnowledgeSource
 from app.repositories.knowledge_repository import (
@@ -131,7 +133,35 @@ class IngestionService:
                     load_text=lambda d=doc: self._load_document(d),
                 )
             )
+        # Emails explicitly promoted via conversations "add to source" — manual,
+        # approved additions to the RAG layer (never auto-ingested).
+        for msg in self._promoted_messages(client):
+            body = msg.body or ""
+            out.append(
+                _Desired(
+                    identity=f"message:{msg.id}",
+                    source_type=KnowledgeSourceType.note.value,
+                    ref_kind="message",
+                    ref_id=msg.id,
+                    ref_key=f"message:{msg.id}",
+                    label=f"Email: {msg.sender_email or 'message'}",
+                    hash_basis=body,
+                    load_text=lambda b=body: (b, SourceStatus.extracted.value),
+                )
+            )
         return out
+
+    def _promoted_messages(self, client: Client) -> list[Message]:
+        return list(
+            self.db.scalars(
+                select(Message)
+                .join(Conversation, Message.conversation_id == Conversation.id)
+                .where(
+                    Conversation.client_id == client.id,
+                    Message.added_to_source_at.isnot(None),
+                )
+            ).all()
+        )
 
     def _load_document(self, doc) -> tuple[str, str]:
         if self.storage is None:
@@ -147,6 +177,8 @@ class IngestionService:
     def _identity(src: KnowledgeSource) -> str:
         if src.ref_kind == "document" and src.ref_id:
             return f"document:{src.ref_id}"
+        if src.ref_kind == "message" and src.ref_id:
+            return f"message:{src.ref_id}"
         return f"field:{src.ref_key}"
 
 

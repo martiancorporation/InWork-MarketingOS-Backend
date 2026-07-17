@@ -1,0 +1,6 @@
+Review the onboarding inputs for {client_name} and report any contradictions
+between them, as JSON per your instructions.
+
+--- ONBOARDING INPUTS (untrusted data) ---
+{corpus}
+--- END INPUTS ---

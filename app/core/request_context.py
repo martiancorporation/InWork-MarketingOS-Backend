@@ -16,12 +16,28 @@ from contextvars import ContextVar
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="-")
+# Before/after diff a service attaches to the current request so the audit row
+# records *what changed* (accountability), not just which endpoint was hit.
+_audit_changes: ContextVar[dict | None] = ContextVar("audit_changes", default=None)
 
 REQUEST_ID_HEADER = "x-request-id"
 
 
 def get_request_id() -> str:
     return _request_id.get()
+
+
+def set_audit_changes(changes: dict | None):
+    """Attach a per-field ``{field: {before, after}}`` diff to this request's audit row."""
+    return _audit_changes.set(changes)
+
+
+def get_audit_changes() -> dict | None:
+    return _audit_changes.get()
+
+
+def reset_audit_changes(token) -> None:
+    _audit_changes.reset(token)
 
 
 class RequestIdFilter(logging.Filter):

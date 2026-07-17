@@ -132,6 +132,25 @@ def add_message(
     return MessageRead.model_validate(message)
 
 
+@router.post(
+    "/{conversation_id}/messages/{message_id}/add-to-source",
+    response_model=MessageRead,
+    summary="Promote an email into the client's knowledge/RAG layer",
+)
+def add_message_to_source(
+    client_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> MessageRead:
+    ClientService(db).get_client(user, client_id)
+    message = ConversationService(db).add_message_to_source(
+        client_id, conversation_id, message_id
+    )
+    return MessageRead.model_validate(message)
+
+
 @router.patch(
     "/{conversation_id}/messages/{message_id}",
     response_model=MessageRead,

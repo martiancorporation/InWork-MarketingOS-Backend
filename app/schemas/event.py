@@ -30,6 +30,8 @@ class EventPostIn(BaseModel):
     image_url: str | None = Field(None, max_length=1024)
     caption: str | None = Field(None, max_length=MAX_TEXT)
     hashtags: str | None = Field(None, max_length=MAX_LONG_LINE)  # e.g. "#new #drop"
+    cta_label: str | None = Field(None, max_length=80)  # e.g. "Book Now"
+    cta_url: str | None = Field(None, max_length=1024)
 
 
 class EventAdIn(BaseModel):
@@ -49,6 +51,8 @@ class EventPostRead(ORMModel):
     image_url: str | None = None
     caption: str | None = None
     hashtags: str | None = None
+    cta_label: str | None = None
+    cta_url: str | None = None
 
 
 class EventAdRead(ORMModel):
@@ -87,6 +91,7 @@ class EventCreate(BaseModel):
     description: str | None = Field(None, max_length=MAX_TEXT)
     strategy: str | None = Field(None, max_length=MAX_TEXT)
     stage: EventStage = EventStage.draft
+    campaign_id: uuid.UUID | None = None  # group under a campaign (optional)
     post: EventPostIn | None = None
     ad: EventAdIn | None = None
 
@@ -106,6 +111,7 @@ class EventUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=MAX_TEXT)
     strategy: str | None = Field(default=None, max_length=MAX_TEXT)
     stage: EventStage | None = None
+    campaign_id: uuid.UUID | None = None
     post: EventPostIn | None = None
     ad: EventAdIn | None = None
 
@@ -131,6 +137,7 @@ class EventListItem(ORMModel):
 
     id: uuid.UUID
     client_id: uuid.UUID
+    campaign_id: uuid.UUID | None = None
     title: str
     type: EventType
     platform: SocialPlatform
@@ -145,6 +152,7 @@ class EventRead(ORMModel):
 
     id: uuid.UUID
     client_id: uuid.UUID
+    campaign_id: uuid.UUID | None = None
     title: str
     type: EventType
     platform: SocialPlatform
