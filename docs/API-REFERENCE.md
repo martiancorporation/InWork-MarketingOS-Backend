@@ -18,21 +18,22 @@
 8. [Module 5 — Client Assignments](#module-5--client-assignments-admin) *(Agency admin)*
 9. [Module 6 — Client Dashboard (AI)](#module-6--client-dashboard-ai) *(Client Dashboard)*
 10. [Module 7 — Client Intelligence](#module-7--client-intelligence) *(Project AI / admin debug)*
-11. [Module 8 — Analytics](#module-8--analytics) *(Analytics screen)*
-12. [Module 9 — Campaigns](#module-9--campaigns) *(Campaigns / Dashboard)*
-13. [Module 10 — Alerts (Watchdog)](#module-10--alerts-watchdog) *(Dashboard alerts panel)*
-14. [Module 11 — Marketing Calendar](#module-11--marketing-calendar) *(Content Calendar)*
-15. [Module 12 — Conversations (Shared Inbox)](#module-12--conversations-shared-inbox) *(Conversations)*
-16. [Module 13 — Compliance](#module-13--compliance) *(Compliance Gate)*
-17. [Module 14 — Plan (Kanban)](#module-14--plan-kanban) *(Plan screen)*
-18. [Module 15 — Reports](#module-15--reports) *(Reports screen)*
-19. [Module 16 — Integrations](#module-16--integrations) *(Integration screen)*
-20. [Module 17 — Uploads](#module-17--uploads) *(Global file service)*
-21. [Module 18 — Notifications](#module-18--notifications) *(Notification Center)*
-22. [Module 19 — Automation / Platform Ops](#module-19--automation--platform-ops-admin) *(Admin / scheduler)*
-23. [Module 20 — AI Usage](#module-20--ai-usage-admin) *(Token Usage screen)*
-24. [Module 21 — Audit Log](#module-21--audit-log-admin) *(Audit Logs screen)*
-25. [Appendix A — Enum reference](#appendix-a--enum-reference)
+11. [Module 8 — Ask AI (Project Assistant)](#module-8--ask-ai-project-assistant) *(Project-AI / Ask-AI chat)*
+12. [Module 9 — Analytics](#module-9--analytics) *(Analytics screen)*
+13. [Module 10 — Campaigns](#module-10--campaigns) *(Campaigns / Dashboard)*
+14. [Module 11 — Alerts (Watchdog)](#module-11--alerts-watchdog) *(Dashboard alerts panel)*
+15. [Module 12 — Marketing Calendar](#module-12--marketing-calendar) *(Content Calendar)*
+16. [Module 13 — Conversations (Shared Inbox)](#module-13--conversations-shared-inbox) *(Conversations)*
+17. [Module 14 — Compliance](#module-14--compliance) *(Compliance Gate)*
+18. [Module 15 — Plan (Kanban)](#module-15--plan-kanban) *(Plan screen)*
+19. [Module 16 — Reports](#module-16--reports) *(Reports screen)*
+20. [Module 17 — Integrations](#module-17--integrations) *(Integration screen)*
+21. [Module 18 — Uploads](#module-18--uploads) *(Global file service)*
+22. [Module 19 — Notifications](#module-19--notifications) *(Notification Center)*
+23. [Module 20 — Automation / Platform Ops](#module-20--automation--platform-ops-admin) *(Admin / scheduler)*
+24. [Module 21 — AI Usage](#module-21--ai-usage-admin) *(Token Usage screen)*
+25. [Module 22 — Audit Log](#module-22--audit-log-admin) *(Audit Logs screen)*
+26. [Appendix A — Enum reference](#appendix-a--enum-reference)
 
 ---
 
@@ -104,6 +105,7 @@ Only three endpoints are throttled (per worker; sliding window; disabled in dev/
 | `POST /auth/login` | 10 requests / 60s |
 | `POST /clients/onboarding/extract-brand` | 10 requests / 60s |
 | `GET /clients/{id}/dashboard` | 30 requests / 60s |
+| `POST /clients/{id}/assistant/chats/{chat_id}/messages` | 30 requests / 60s |
 
 On exceed → `429`. The frontend should surface a friendly "please slow down" toast and back off.
 
@@ -120,20 +122,21 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 | 5 | Assignments | Agency | Users & Access / Client assignment | Admin |
 | 6 | Dashboard (AI) | Client | Client Dashboard | All (scoped) |
 | 7 | Intelligence | Client | Project-AI / Rules / Agent-Log (+ admin debug) | All (scoped) / Admin |
-| 8 | Analytics | Client | Analytics | All (scoped) |
-| 9 | Campaigns | Client | Campaigns / Dashboard | All (scoped) |
-| 10 | Alerts (Watchdog) | Client | Dashboard alerts panel | All (scoped) |
-| 11 | Calendar | Client | Content Calendar | All (scoped) |
-| 12 | Conversations | Client | Conversations (Shared Inbox) | All (scoped) |
-| 13 | Compliance | Client | Compliance Gate | All (scoped) |
-| 14 | Plan | Client | Plan (Kanban) | All (scoped) |
-| 15 | Reports | Client | Reports | All (scoped) |
-| 16 | Integrations | Client | Integration | All (scoped) |
-| 17 | Uploads | Global | (used by onboarding docs, reports, attachments) | All (owner-scoped) |
-| 18 | Notifications | Global | Notification Center | All (per-user) |
-| 19 | Automation | Agency | (scheduler; admin manual trigger) | Admin |
-| 20 | AI Usage | Agency | Token Usage | Admin |
-| 21 | Audit Log | Agency | Audit Logs | Admin |
+| 8 | Ask AI (Project Assistant) | Client | Project-AI (Ask AI) | All (scoped) |
+| 9 | Analytics | Client | Analytics | All (scoped) |
+| 10 | Campaigns | Client | Campaigns / Dashboard | All (scoped) |
+| 11 | Alerts (Watchdog) | Client | Dashboard alerts panel | All (scoped) |
+| 12 | Calendar | Client | Content Calendar | All (scoped) |
+| 13 | Conversations | Client | Conversations (Shared Inbox) | All (scoped) |
+| 14 | Compliance | Client | Compliance Gate | All (scoped) |
+| 15 | Plan | Client | Plan (Kanban) | All (scoped) |
+| 16 | Reports | Client | Reports | All (scoped) |
+| 17 | Integrations | Client | Integration | All (scoped) |
+| 18 | Uploads | Global | (used by onboarding docs, reports, attachments) | All (owner-scoped) |
+| 19 | Notifications | Global | Notification Center | All (per-user) |
+| 20 | Automation | Agency | (scheduler; admin manual trigger) | Admin |
+| 21 | AI Usage | Agency | Token Usage | Admin |
+| 22 | Audit Log | Agency | Audit Logs | Admin |
 
 **Typical flow:** Login → (agency) see Clients → Onboard a client (8-step wizard, with AI brand extraction + consistency check) → Assign the client to a manager/user → open the client → Dashboard (AI health/brief/watchdog/recommendations) → work across Analytics, Calendar, Conversations, Compliance, Plan, Reports, Integrations. Admins additionally use Automation, Token Usage, Audit Logs.
 
@@ -223,7 +226,7 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
   - `status` — `ClientStatus | None`
 - **Success `200`:** `ClientRead`.
 - **Errors:** `401`; `403`; `404`; `422`.
-- **Note:** This edit records a **field-level before/after diff** in the audit log (see Module 21).
+- **Note:** This edit records a **field-level before/after diff** in the audit log (see Module 22).
 - **Why/when:** Admin changes a client's status or basic profile fields.
 
 ---
@@ -276,7 +279,7 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 
 ### `POST /api/v1/clients/{client_id}/documents`  *(step 7 — Documents)*
 - **Auth:** Admin only. **Rate limited:** No.
-- **Request payload:** `DocumentsRequest` (strict): `documents` — `list[DocumentRef]` **required**, `1..100`. *(References to already-uploaded files — the file bytes are uploaded via Module 17 first.)*
+- **Request payload:** `DocumentsRequest` (strict): `documents` — `list[DocumentRef]` **required**, `1..100`. *(References to already-uploaded files — the file bytes are uploaded via Module 18 first.)*
 - **Success `201`:** `OnboardingStepResponse`.
 - **Errors:** `401`; `403`; `404`; `422`.
 - **Why/when:** Attach uploaded document references to the client.
@@ -417,7 +420,48 @@ Base path: `/clients` (+ `/{client_id}/...`).
 
 ---
 
-## Module 8 — Analytics
+## Module 8 — Ask AI (Project Assistant)
+**Screen:** Project-AI / "Ask AI about this project" (client). **Role:** All authenticated (scoped). **Frontend notes:** A per-client conversational assistant grounded in the client's intelligence profile + RAG knowledge (brand, goals, compliance, calendar, performance). Flow: create a chat, then POST messages to it; each reply comes back with the `sources` (retrieved knowledge snippets) it used. The ask endpoint is **rate-limited (30/60s)** and is a paid-AI route; it degrades to a deterministic, source-grounded reply when Claude is unconfigured (the reply still returns — never a 5xx). Chats are a **shared per-client surface** (any user with client access sees them; the creator is stamped internally). Backed by the `ai_chats` / `ai_chat_messages` tables.
+
+Base path: `/clients/{client_id}/assistant`.
+
+### `GET /api/v1/clients/{client_id}/assistant/chats`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Query params:** `page`, `page_size`; `context_type` (`str`, ≤40, e.g. `project`).
+- **Success `200`:** `AssistantChatListResponse` = `{ items: AssistantChatRead[], total, page, page_size }`. `AssistantChatRead`: `id`, `title?`, `context_type?`, `context_key?`, `created_at`, `updated_at`. Ordered most-recently-active first.
+- **Errors:** `401`; `404` client inaccessible; `422`.
+- **Object scoping:** admin all; non-admin only assigned; inaccessible → `404`.
+- **Why/when:** List the client's project chats.
+
+### `POST /api/v1/clients/{client_id}/assistant/chats`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Request payload:** `AssistantChatCreate` (strict): `title` (`str | None`, ≤200), `context_type` (`str | None`, ≤40, default `project`), `context_key` (`str | None`, ≤80).
+- **Success `201`:** `AssistantChatRead`.
+- **Errors:** `401`; `404`; `422`.
+- **Why/when:** Start a new chat thread.
+
+### `GET /api/v1/clients/{client_id}/assistant/chats/{chat_id}`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Success `200`:** `AssistantChatDetail` = `AssistantChatRead` + `messages: AssistantMessageRead[]` (chronological). `AssistantMessageRead`: `id`, `role` (`user`/`assistant`/`system`), `content`, `tokens?`, `created_at`.
+- **Errors:** `401`; `404` client or chat.
+- **Why/when:** Open a chat with its full message history.
+
+### `POST /api/v1/clients/{client_id}/assistant/chats/{chat_id}/messages`
+- **Auth:** Authenticated (any role). **Rate limited:** **Yes — 30 / 60s** (paid-AI).
+- **Request payload:** `AssistantAskRequest` (strict): `content` (`str`, **required**, `1..4000`).
+- **Success `201`:** `AssistantAskResponse` = `{ message: AssistantMessageRead (the assistant reply), sources: str[] (retrieved knowledge snippets used to ground it) }`.
+- **Errors:** `401`; `404` client or chat; `422`; `429`.
+- **Why/when:** Ask the project AI a question — persists the user message + assistant reply and returns the reply plus its grounding sources.
+
+### `DELETE /api/v1/clients/{client_id}/assistant/chats/{chat_id}`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Success `200`:** `MessageResponse` = `{ detail: "Chat deleted." }`.
+- **Errors:** `401`; `404`.
+- **Why/when:** Delete a chat thread.
+
+---
+
+## Module 9 — Analytics
 **Screen:** Analytics (client). **Role:** All authenticated (scoped). **Frontend notes:** `/summary` powers the KPI cards and per-platform/daily charts (recharts); `/daily` backs a paginated raw table over a date range. Data lands either via `/ingest` (an integration or manual row entry) or the **`/import` CSV upload** (meeting decision — push reporting data via CSV until all live integrations exist). The CSV header must be `date,platform,impressions,clicks,conversions,leads,spend,revenue`; the endpoint returns per-row error messages so you can show a partial-success summary.
 
 Base path: `/clients/{client_id}/analytics`.
@@ -453,7 +497,7 @@ Base path: `/clients/{client_id}/analytics`.
 
 ---
 
-## Module 9 — Campaigns
+## Module 10 — Campaigns
 **Screen:** Campaigns / Dashboard (client). **Role:** All authenticated (scoped). **Frontend notes:** Campaigns carry both **targets** (`target_cpl`/`target_ctr`/`target_conversion_rate`) and **actual rollup** counters; the health endpoint returns a **goal-relative** score (actual vs agreed targets — the project-level, cross-platform health concept from the meetings). `/compare` powers the A/B view and returns a per-metric `winners` map. `PATCH` autosaves either definition fields or the actual counters (from a manual edit or an integration push).
 
 Base path: `/clients/{client_id}/campaigns`.
@@ -506,8 +550,8 @@ Base path: `/clients/{client_id}/campaigns`.
 
 ---
 
-## Module 10 — Alerts (Watchdog)
-**Screen:** Dashboard alerts panel (client). **Role:** All authenticated (scoped). **Frontend notes:** Alerts are produced by the **KPI watchdog** (breach of an agreed target → operator alert, with the offending metric/threshold/actual so the UI can explain *why*). `/evaluate` runs the watchdog on demand for one client; the platform-wide sweep is Module 19. The acknowledge → resolve flow gives each alert a human owner.
+## Module 11 — Alerts (Watchdog)
+**Screen:** Dashboard alerts panel (client). **Role:** All authenticated (scoped). **Frontend notes:** Alerts are produced by the **KPI watchdog** (breach of an agreed target → operator alert, with the offending metric/threshold/actual so the UI can explain *why*). `/evaluate` runs the watchdog on demand for one client; the platform-wide sweep is Module 20. The acknowledge → resolve flow gives each alert a human owner.
 
 Base path: `/clients/{client_id}/alerts`.
 
@@ -544,7 +588,7 @@ Base path: `/clients/{client_id}/alerts`.
 
 ---
 
-## Module 11 — Marketing Calendar
+## Module 12 — Marketing Calendar
 **Screen:** Content Calendar (client). **Role:** All authenticated (scoped). **Frontend notes:** `GET events` backs both the month grid and the "Drafts & Ideas" panel (filter by `year`+`month`, `stage`, `platform`, `type`, `approval_status`). Create/patch is the "New Post" drawer with nested `post` (caption/hashtags/CTA) and/or `ad` (budget/objective/audience) sub-objects; `PATCH` is a partial autosave. The `/approval` endpoint drives the client-approval workflow (approve / request changes / reject / re-submit for review) and appends to the event's activity log.
 
 Base path: `/clients/{client_id}/calendar`.
@@ -591,7 +635,7 @@ Base path: `/clients/{client_id}/calendar`.
 
 ---
 
-## Module 12 — Conversations (Shared Inbox)
+## Module 13 — Conversations (Shared Inbox)
 **Screen:** Conversations (client). **Role:** All authenticated (scoped). **Frontend notes:** Thread list supports `folder`, `starred`, `category`, and `search` (subject/body). Compose creates a thread + first message; replies post messages into a thread. Message-level `PATCH` moves folder / (un)stars / relabels. The **"add to source"** action is the meeting's manual-PII stance — nothing from the inbox reaches the AI automatically; promoting a message explicitly feeds it into the client's knowledge/RAG layer.
 
 Base path: `/clients/{client_id}/conversations`.
@@ -651,7 +695,7 @@ Base path: `/clients/{client_id}/conversations`.
 
 ---
 
-## Module 13 — Compliance
+## Module 14 — Compliance
 **Screen:** Compliance Gate (client). **Role:** All authenticated (scoped). **Frontend notes:** The register is **additive** — entries are (de)activated, not deleted, so the effective ruleset has history. Any create/update/delete **enqueues an intelligence rebuild** (the effective rules feed the client's AI directives); `/sync` forces that rebuild immediately instead of waiting for the debounced enqueue. Filter by `kind` and `active_only`.
 
 Base path: `/clients/{client_id}/compliance`.
@@ -691,7 +735,7 @@ Base path: `/clients/{client_id}/compliance`.
 
 ---
 
-## Module 14 — Plan (Kanban)
+## Module 15 — Plan (Kanban)
 **Screen:** Plan (client). **Role:** All authenticated (scoped). **Frontend notes:** Board columns are the `TaskStatus` values (`todo` / `in_progress` / `blocked` / `done`). A kanban drag is just a `PATCH` of `status`; `PATCH` is partial so moving a card never clears its other fields. Filter by `status`, `category`, `assignee_id`.
 
 Base path: `/clients/{client_id}/plan`.
@@ -731,7 +775,7 @@ Base path: `/clients/{client_id}/plan`.
 
 ---
 
-## Module 15 — Reports
+## Module 16 — Reports
 **Screen:** Reports (client). **Role:** All authenticated (scoped). **Frontend notes:** These endpoints are the **report registry/history** — the frontend generates/renders the file (CSV/Excel/PDF), then records it here (config + optional `file_url` pointer). `scope`, `channels`, `sections`, and `save_to_outlook_draft` capture the "what did we generate and how do we deliver it" choices from the report screen.
 
 Base path: `/clients/{client_id}/reports`.
@@ -771,7 +815,7 @@ Base path: `/clients/{client_id}/reports`.
 
 ---
 
-## Module 16 — Integrations
+## Module 17 — Integrations
 **Screen:** Integration (client). **Role:** All authenticated (scoped) — any user who can see the client may manage its connectors. **Frontend notes:** The connector `key` is one of `ga4` / `search_console` / `google_ads` / `google_lsa` / `meta` / `linkedin`. **Meta and Google Ads use the real per-client OAuth2 flow** (meeting decision): call `oauth/start` → redirect the browser to `authorization_url` (keep the returned `state`) → on the provider callback, call `oauth/complete` with `{code, state}`; the token is stored **encrypted** server-side and never returned. Other providers use the placeholder `connect`. `sync` pulls live insights into analytics; `disconnect` resets the connector. Token columns are never exposed in responses.
 
 Base path: `/clients/{client_id}/integrations`.
@@ -822,7 +866,7 @@ Base path: `/clients/{client_id}/integrations`.
 
 ---
 
-## Module 17 — Uploads
+## Module 18 — Uploads
 **Screen:** Global file service — used by the onboarding **Documents** step, report file attachments, and conversation attachments. **Role:** All authenticated; **owner-scoped** (a non-admin sees only their own uploads; admins see all; inaccessible → `404`). **Frontend notes:** Upload the file bytes here first (multipart), then reference the returned **`storage_key`** wherever a feature needs it (e.g. the onboarding `documents[]`). Download URLs are **short-lived presigned S3 URLs (~15 min)** — fetch a fresh one via `GET /uploads/{id}` right before use rather than caching. If storage is unconfigured server-side, calls return `503`.
 
 Base path: `/uploads`.
@@ -848,7 +892,7 @@ Base path: `/uploads`.
 
 ---
 
-## Module 18 — Notifications
+## Module 19 — Notifications
 **Screen:** Notification Center (global, app shell). **Role:** All authenticated; **per-user** (each caller sees only their own). **Frontend notes:** Poll `unread-count` for the badge; open the center with `GET /notifications` (optionally `unread_only`); mark one read on click, or "clear all" with `read-all`. `link` (when present) is a deep-link the frontend can route to.
 
 Base path: `/notifications`.
@@ -880,7 +924,7 @@ Base path: `/notifications`.
 
 ---
 
-## Module 19 — Automation / Platform Ops (Admin)
+## Module 20 — Automation / Platform Ops (Admin)
 **Screen:** No dedicated end-user screen — these are **admin, platform-wide** operations that also run automatically on a cadence by the scheduler process (`python -m app.scheduler`). Expose them behind an admin "Ops / Automation" panel if you want manual triggers. **Role:** Admin only; **not** assignment-scoped — an admin can act on any client. **Frontend notes:** Use the digest endpoints to build an admin overview of all clients (open alerts, integration/onboarding status). The two `POST` sweeps are manual "run now" triggers of jobs the scheduler already runs.
 
 Base path: `/automation`.
@@ -912,7 +956,7 @@ Base path: `/automation`.
 
 ---
 
-## Module 20 — AI Usage (Admin)
+## Module 21 — AI Usage (Admin)
 **Screen:** Token Usage (agency admin). **Role:** Admin only for platform lists/summary; the per-client summary also allows a non-admin **assigned** to that client. **Frontend notes:** Use `/ai-usage/summary` for the platform token/cost dashboard (breakdowns by feature/model/client/user + daily series); `/ai-usage` for the drill-down event log with filters; `/ai-usage/clients/{id}/summary` for a client-scoped cost view. All figures come from recorded AI calls.
 
 Base path: `/ai-usage`.
@@ -940,7 +984,7 @@ Base path: `/ai-usage`.
 
 ---
 
-## Module 21 — Audit Log (Admin)
+## Module 22 — Audit Log (Admin)
 **Screen:** Audit Logs (agency admin). **Role:** Admin only. **Frontend notes:** Every API request is recorded (actor, action, entity, status, ip, duration). Actions are free-form dotted strings (e.g. `report.pdf.exported`, `recommendation.accepted`, `integration.connect`). Mutating edits (e.g. client update) also record a **field-level `changes` diff** (`{ field: { before, after } }`) — render this as a "what changed" view. Filter by `action` (substring), `entity`, `actor_user_id`, `client_id`.
 
 Base path: `/audit`.

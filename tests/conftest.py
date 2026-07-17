@@ -17,6 +17,10 @@ os.environ["APP_ENV"] = "test"
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["STORAGE_S3_BUCKET"] = ""
 os.environ["STORAGE_S3_REGION"] = ""
+# Scraping/research providers off so brand extraction stays hermetic (no live
+# ScrapingBee/Brave calls); the ScrapingBee/Brave wiring is tested with fakes.
+os.environ["SCRAPINGBEE_API_KEY"] = ""
+os.environ["BRAVE_API_KEY"] = ""
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-must-be-at-least-32-bytes-long-00")
 os.environ.setdefault("DATABASE_URL", "sqlite://")

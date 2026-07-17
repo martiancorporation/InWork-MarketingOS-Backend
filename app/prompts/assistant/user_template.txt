@@ -1,1 +1,10 @@
-[Prompt template placeholder — see README.md in this folder. Fill in during implementation.]
+Operator question:
+{question}
+
+Relevant project knowledge (retrieved for this question):
+{context}
+
+Recent conversation:
+{history}
+
+Answer the question for this client, grounded in the context above.

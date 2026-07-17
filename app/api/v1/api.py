@@ -10,6 +10,7 @@ from app.api.v1.routers import (
     alerts,
     analytics,
     assignments,
+    assistant,
     audit,
     auth,
     automation,
@@ -32,6 +33,7 @@ api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(clients.router)
 api_router.include_router(assignments.router)
+api_router.include_router(assistant.router)
 api_router.include_router(audit.router)
 api_router.include_router(ai_usage.router)
 api_router.include_router(uploads.router)
