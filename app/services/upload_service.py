@@ -122,6 +122,18 @@ class UploadService:
     def get(self, user: User, upload_id: uuid.UUID) -> UploadRead:
         return self._to_read(self._load_owned(user, upload_id))
 
+    def read_bytes(
+        self, user: User, upload_id: uuid.UUID
+    ) -> tuple[bytes, str | None, str]:
+        """Owner-scoped fetch of a stored object's raw bytes + content-type + filename.
+
+        Used by features that need the file contents (e.g. brand extraction from an
+        uploaded document). Non-owner / missing → 404, same as every other read.
+        """
+        upload = self._load_owned(user, upload_id)
+        data = self.storage.download(upload.storage_key)
+        return data, upload.content_type, upload.original_filename
+
     def delete(self, user: User, upload_id: uuid.UUID) -> None:
         upload = self._load_owned(user, upload_id)
         self._safe_delete(upload.storage_key)  # best-effort; still drop the row

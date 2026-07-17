@@ -22,9 +22,9 @@ from starlette.requests import Request
 from starlette.types import ASGIApp
 
 from app.core.request_context import (
+    begin_audit_changes,
     get_audit_changes,
     reset_audit_changes,
-    set_audit_changes,
 )
 from app.core.security import TOKEN_TYPE_ACCESS, decode_token
 from app.db.session import get_session_factory
@@ -66,8 +66,10 @@ class AuditMiddleware:
         status_code = 500
         body_chunks: list[bytes] = []
         buffering = method in _WRITE_METHODS
-        # Fresh per-request slot; a service may fill it with a before/after diff.
-        changes_token = set_audit_changes(None)
+        # Fresh per-request holder; a service may fill it with a before/after diff.
+        # A mutable holder (not a plain set) so the diff survives the sync-route
+        # threadpool hop back to this async middleware.
+        changes_token = begin_audit_changes()
 
         async def send_wrapper(message) -> None:
             nonlocal status_code

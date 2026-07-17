@@ -88,6 +88,20 @@ class RecommendationDecisionRead(ORMModel):
     created_at: datetime
 
 
+class RecProjection(BaseModel):
+    """The expected effect of acting on a recommendation.
+
+    Deliberately allows a *qualitative* estimate (e.g. ``"+10–15%"`` or
+    ``"materially lower"``) so it stays honest when there isn't enough data to
+    model an exact number — ``basis`` says what the estimate is grounded in.
+    """
+
+    metric: str  # e.g. "CTR", "traffic", "CPL", "leads", "attribution coverage"
+    direction: str  # "up" | "down"
+    estimate: str  # the projected change (may be a range or qualitative)
+    basis: str  # why — the evidence the estimate rests on
+
+
 class Recommendation(BaseModel):
     id: str  # stable rec_key, e.g. "rec-connect-integrations"
     title: str
@@ -97,6 +111,9 @@ class Recommendation(BaseModel):
     reason: str
     confidence: int = Field(ge=0, le=100)
     expected_impact: str
+    # Optional structured projection of the expected impact (traffic/CTR/CPL …),
+    # so the UI can show "why + what to expect". Estimates, not guarantees.
+    projection: RecProjection | None = None
     # The latest human decision on this recommendation, if any (merged in on read).
     decision: RecommendationDecisionRead | None = None
 

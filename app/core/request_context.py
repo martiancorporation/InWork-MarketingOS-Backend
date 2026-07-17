@@ -18,6 +18,12 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 _request_id: ContextVar[str] = ContextVar("request_id", default="-")
 # Before/after diff a service attaches to the current request so the audit row
 # records *what changed* (accountability), not just which endpoint was hit.
+#
+# The ContextVar holds a **mutable holder** (not the diff directly). A sync route
+# runs in a threadpool, whose context is a *copy* of the request's — so rebinding
+# a ContextVar inside the route would be lost on the way back to the async audit
+# middleware. Mutating a shared holder object is visible in both contexts (it's
+# the same object by reference), so the diff survives the threadpool hop.
 _audit_changes: ContextVar[dict | None] = ContextVar("audit_changes", default=None)
 
 REQUEST_ID_HEADER = "x-request-id"
@@ -27,13 +33,26 @@ def get_request_id() -> str:
     return _request_id.get()
 
 
-def set_audit_changes(changes: dict | None):
-    """Attach a per-field ``{field: {before, after}}`` diff to this request's audit row."""
-    return _audit_changes.set(changes)
+def begin_audit_changes():
+    """Seed a fresh per-request holder. Call once at the start of a request (the
+    audit middleware does this) and pass the returned token to ``reset``."""
+    return _audit_changes.set({"changes": None})
+
+
+def set_audit_changes(changes: dict | None) -> None:
+    """Attach a per-field ``{field: {before, after}}`` diff to this request's audit
+    row. Mutates the shared holder so it survives the sync-route threadpool hop; if
+    no holder was seeded (e.g. a non-request context), one is created lazily."""
+    holder = _audit_changes.get()
+    if holder is None:
+        _audit_changes.set({"changes": changes})
+    else:
+        holder["changes"] = changes
 
 
 def get_audit_changes() -> dict | None:
-    return _audit_changes.get()
+    holder = _audit_changes.get()
+    return holder["changes"] if holder else None
 
 
 def reset_audit_changes(token) -> None:

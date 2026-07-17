@@ -264,9 +264,99 @@ def test_brand_extraction_when_nothing_can_be_fetched(
     assert "unreachable.example" in body["summary"]
 
 
-def test_brand_extraction_requires_website(client: TestClient, admin_headers: dict):
+def test_brand_extraction_requires_a_source(client: TestClient, admin_headers: dict):
+    # Neither website nor document_upload_id → 422 (validator requires one).
     resp = client.post(f"{API}/clients/onboarding/extract-brand", headers=admin_headers, json={})
     assert resp.status_code == 422
+
+
+def test_brand_extraction_from_document_text(client: TestClient, admin_headers: dict, monkeypatch):
+    # Uploaded document path: file bytes are parsed to text and fed to the model.
+    import uuid
+
+    from app.integrations.anthropic.client import AnthropicClient
+    from app.services.upload_service import UploadService
+
+    monkeypatch.setattr(
+        UploadService,
+        "read_bytes",
+        lambda self, user, upload_id: (
+            b"Acme brand guide: bold navy and orange, Poppins headings.",
+            "text/plain",
+            "brand.txt",
+        ),
+    )
+
+    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
+        assert "Acme brand guide" in prompt  # the document text reached the model
+        return '{"summary":"Bold and confident.","colors":["#001F5B"],"fonts":["Poppins"]}'
+
+    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(AnthropicClient, "complete", fake_complete)
+
+    resp = client.post(
+        f"{API}/clients/onboarding/extract-brand",
+        headers=admin_headers,
+        json={"document_upload_id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ai_generated"] is True
+    assert "Poppins" in body["fonts"]
+    assert "#001F5B" in body["colors"]
+
+
+def test_brand_extraction_from_image_uses_vision(client: TestClient, admin_headers: dict, monkeypatch):
+    # Image document → Claude vision, with the right media_type threaded through.
+    import uuid
+
+    from app.integrations.anthropic.client import AnthropicClient
+    from app.services.upload_service import UploadService
+
+    monkeypatch.setattr(
+        UploadService,
+        "read_bytes",
+        lambda self, user, upload_id: (b"\x89PNG\r\n\x1a\n", "image/png", "logo.png"),
+    )
+    seen: dict = {}
+
+    async def fake_vision(self, *, system, prompt, image, media_type="image/jpeg", context=None):
+        seen["media_type"] = media_type
+        return '{"summary":"Logo-derived theme.","colors":["#FF5722"],"fonts":[]}'
+
+    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(AnthropicClient, "complete_with_image", fake_vision)
+
+    resp = client.post(
+        f"{API}/clients/onboarding/extract-brand",
+        headers=admin_headers,
+        json={"document_upload_id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 200, resp.text
+    assert seen["media_type"] == "image/png"  # png vision, not default jpeg
+    assert "#FF5722" in resp.json()["colors"]
+
+
+def test_brand_extraction_from_document_fallback(client: TestClient, admin_headers: dict, monkeypatch):
+    # Document path with Claude unconfigured → deterministic, provisional result.
+    import uuid
+
+    from app.services.upload_service import UploadService
+
+    monkeypatch.setattr(
+        UploadService,
+        "read_bytes",
+        lambda self, user, upload_id: (b"some notes", "text/plain", "notes.txt"),
+    )
+    resp = client.post(
+        f"{API}/clients/onboarding/extract-brand",
+        headers=admin_headers,
+        json={"document_upload_id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ai_generated"] is False
+    assert "uploaded document" in body["summary"]
 
 
 def test_clients_require_authentication(client: TestClient):

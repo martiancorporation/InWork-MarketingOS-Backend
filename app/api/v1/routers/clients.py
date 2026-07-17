@@ -14,15 +14,17 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from anyio import to_thread
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
 from app.ai.brand_extraction import BrandExtractionService
 from app.ai.features import AiFeature
 from app.ai.usage import AiUsageContext
-from app.api.deps import AdminUser, CurrentUser, DbSession, Pagination
+from app.api.deps import AdminUser, CurrentUser, DbSession, Pagination, StorageDep
 from app.core.rate_limit import RateLimit
 from app.models.client import Client
 from app.models.enums import ClientStatus
+from app.schemas.brand_job import BrandJobRead
 from app.schemas.client import ClientListResponse, ClientRead, ClientUpdate
 from app.schemas.consistency import ConsistencyReport
 from app.schemas.onboarding import (
@@ -35,10 +37,12 @@ from app.schemas.onboarding import (
     OnboardingStepResponse,
     OnboardingStepUpdate,
 )
+from app.services.brand_job_service import BrandJobService
 from app.services.client_service import ClientService
 from app.services.intelligence.intelligence_service import IntelligenceService
 from app.services.onboarding_service import OnboardingService
 from app.services.readiness_service import ReadinessService
+from app.services.upload_service import UploadService
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
@@ -164,14 +168,52 @@ async def check_onboarding_consistency(
     dependencies=[Depends(RateLimit("extract_brand", times=10, seconds=60))],
 )
 async def extract_brand(
-    data: BrandExtractionRequest, user: CurrentUser
+    data: BrandExtractionRequest, user: CurrentUser, db: DbSession, storage: StorageDep
 ) -> BrandExtraction:
+    document = None
+    if data.document_upload_id is not None:
+        # Owner-scoped fetch (404 if not the caller's) then parse off the event loop.
+        raw, content_type, filename = await to_thread.run_sync(
+            UploadService(db, storage).read_bytes, user, data.document_upload_id
+        )
+        document = await to_thread.run_sync(
+            BrandExtractionService.document_from_bytes, raw, content_type, filename
+        )
     context = AiUsageContext(
         feature=AiFeature.BRAND_EXTRACTION,
         user_id=user.id,
-        meta={"website": data.website},
+        meta={"website": data.website, "document_upload_id": str(data.document_upload_id or "")},
     )
-    return await BrandExtractionService().extract(data, context)
+    return await BrandExtractionService().extract(data, context, document=document)
+
+
+@router.post(
+    "/onboarding/extract-brand/jobs",
+    response_model=BrandJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Start an async brand extraction (returns a transaction id to poll)",
+    dependencies=[Depends(RateLimit("extract_brand", times=10, seconds=60))],
+)
+def start_brand_job(
+    data: BrandExtractionRequest,
+    user: CurrentUser,
+    db: DbSession,
+    background: BackgroundTasks,
+) -> BrandJobRead:
+    # For long scrapes/parses (>25s): create the job, return its id immediately,
+    # process in the background; the client polls the GET endpoint for the result.
+    job = BrandJobService(db).create(user, data)
+    background.add_task(BrandJobService.process, job.id)
+    return BrandJobRead.model_validate(job)
+
+
+@router.get(
+    "/onboarding/extract-brand/jobs/{job_id}",
+    response_model=BrandJobRead,
+    summary="Poll an async brand-extraction job",
+)
+def get_brand_job(job_id: uuid.UUID, user: CurrentUser, db: DbSession) -> BrandJobRead:
+    return BrandJobRead.model_validate(BrandJobService(db).get(user, job_id))
 
 
 @router.get("/{client_id}", response_model=ClientRead, summary="Get a client")

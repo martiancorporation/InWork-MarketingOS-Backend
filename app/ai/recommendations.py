@@ -71,6 +71,12 @@ class RecommendationsAgent:
                 "reason": "Without connected platforms the dashboard can't measure spend, leads, or ROI accurately.",
                 "confidence": 90,
                 "expected_impact": "Full-funnel visibility + accurate CPL/ROI",
+                "projection": {
+                    "metric": "attribution coverage",
+                    "direction": "up",
+                    "estimate": "measurable CPL/ROI where it's currently a blind spot",
+                    "basis": f"{s.pending_integrations} platform(s) still unconnected",
+                },
             })
         if s.banned_words or s.required_phrases or s.rules:
             n = len(s.banned_words) + len(s.required_phrases) + len(s.rules)
@@ -94,6 +100,12 @@ class RecommendationsAgent:
                 "reason": "Early performance data is required before optimization recommendations become meaningful.",
                 "confidence": 70,
                 "expected_impact": "Baseline CPL + first leads",
+                "projection": {
+                    "metric": "leads",
+                    "direction": "up",
+                    "estimate": "first baseline leads to start the learning loop",
+                    "basis": "no spend or leads recorded yet",
+                },
             })
         recs.append({
             "id": "rec-refresh-creative",
@@ -104,5 +116,11 @@ class RecommendationsAgent:
             "reason": "Creative fatigue is the most common cause of rising CPL on paid social.",
             "confidence": 65,
             "expected_impact": "Sustained CTR, lower CPL drift",
+            "projection": {
+                "metric": "CTR",
+                "direction": "up",
+                "estimate": "sustained CTR, slower CPL drift",
+                "basis": "creative fatigue is the most common cause of rising CPL",
+            },
         })
         return [Recommendation.model_validate(r) for r in recs]

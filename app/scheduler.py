@@ -17,29 +17,30 @@ import asyncio
 import logging
 import time
 
+from app.core.config import get_settings
 from app.core.logging import configure_logging
-from app.tasks.scheduler import JOBS, run_job
+from app.tasks.scheduler import build_jobs, run_job
 
 logger = logging.getLogger("app.scheduler")
-
-_TICK_SECONDS = 30
 
 
 async def main() -> None:
     configure_logging()
-    logger.info("Scheduler started with jobs: %s", ", ".join(j.name for j in JOBS))
+    settings = get_settings().scheduler
+    jobs = build_jobs(settings)
+    logger.info("Scheduler started with jobs: %s", ", ".join(j.name for j in jobs))
     # Fire each job on startup, then on its interval.
-    last_run: dict[str, float] = {j.name: 0.0 for j in JOBS}
+    last_run: dict[str, float] = {j.name: 0.0 for j in jobs}
     while True:
         now = time.monotonic()
-        for job in JOBS:
+        for job in jobs:
             if now - last_run[job.name] >= job.interval_seconds:
                 try:
                     await run_job(job.name)
                 except Exception:  # a failed run must not kill the scheduler
                     logger.exception("Scheduled job %s failed", job.name)
                 last_run[job.name] = time.monotonic()
-        await asyncio.sleep(_TICK_SECONDS)
+        await asyncio.sleep(settings.tick_seconds)
 
 
 if __name__ == "__main__":

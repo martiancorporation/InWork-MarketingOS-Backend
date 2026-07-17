@@ -6,6 +6,8 @@ compliance → contacts → documents → review) and its AI-assisted brand step
 
 from __future__ import annotations
 
+import uuid
+
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.models.enums import DocumentKind
@@ -190,7 +192,21 @@ class DocumentsRequest(StrictModel):
 # ---- AI-assisted brand extraction ----
 
 class BrandExtractionRequest(StrictModel):
-    website: str = Field(min_length=1, max_length=255)
+    """Extract a brand theme from a website link OR an uploaded document.
+
+    Exactly one source is enough; provide at least one. ``document_upload_id`` is
+    the id returned by the ``/uploads`` service for a previously-uploaded file
+    (PDF/DOCX/brand deck/logo image, …).
+    """
+
+    website: str | None = Field(default=None, max_length=255)
+    document_upload_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _require_a_source(self) -> BrandExtractionRequest:
+        if not (self.website and self.website.strip()) and self.document_upload_id is None:
+            raise ValueError("Provide a website or a document_upload_id.")
+        return self
 
 
 class BrandExtraction(BaseModel):

@@ -1,0 +1,9 @@
+Platform: {platform}
+
+Deterministic pre-check already run (for your awareness — do not just repeat it):
+{precheck}
+
+Draft content:
+{content}
+
+Return the review JSON now.

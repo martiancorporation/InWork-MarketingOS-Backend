@@ -18,6 +18,7 @@ from app.api.v1.routers import (
     campaigns,
     clients,
     compliance,
+    content,
     conversations,
     integrations,
     intelligence,
@@ -43,6 +44,7 @@ api_router.include_router(ai.router)
 api_router.include_router(conversations.router)
 api_router.include_router(reports.router)
 api_router.include_router(compliance.router)
+api_router.include_router(content.router)
 api_router.include_router(analytics.router)
 api_router.include_router(campaigns.router)
 api_router.include_router(alerts.router)

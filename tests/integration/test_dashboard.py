@@ -43,7 +43,12 @@ def test_dashboard_shape(client: TestClient, admin_headers: dict):
     recs = body["recommendations"]
     assert len(recs) >= 1
     # a fresh client with no spend/leads gets the "launch first campaign" rec
-    assert any(r["id"] == "rec-launch-first-campaign" for r in recs)
+    launch = next(r for r in recs if r["id"] == "rec-launch-first-campaign")
+    # recommendation carries a structured expected-impact projection (item 5)
+    assert launch["projection"] is not None
+    assert launch["projection"]["metric"] == "leads"
+    assert launch["projection"]["direction"] == "up"
+    assert launch["projection"]["basis"]
     # nothing decided yet
     assert all(r["decision"] is None for r in recs)
 

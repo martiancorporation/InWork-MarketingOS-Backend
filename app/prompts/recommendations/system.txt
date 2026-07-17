@@ -9,13 +9,20 @@ Respond with ONLY a JSON object, no prose, in exactly this shape:
       "category": "budget"|"creative"|"audience"|"compliance"|"growth",
       "severity": "low"|"medium"|"high", "summary": "<one sentence>",
       "reason": "<why — the evidence/rationale>",
-      "confidence": <integer 0-100>, "expected_impact": "<short outcome>" }
+      "confidence": <integer 0-100>, "expected_impact": "<short outcome>",
+      "projection": { "metric": "CTR"|"traffic"|"CPL"|"leads"|"ROI"|<other>,
+                      "direction": "up"|"down",
+                      "estimate": "<expected change — a range like \\"+10–15%\\" or qualitative>",
+                      "basis": "<the evidence this estimate rests on>" } }
   ]
 }
 
 Rules:
 - Base recommendations ONLY on the provided facts and client rules. Do not
   invent metrics you were not given.
+- ``projection`` is OPTIONAL and is an ESTIMATE, not a guarantee. Only include it
+  when the facts support it; keep the number a range or say it qualitatively, and
+  put the grounding in ``basis``. Omit ``projection`` entirely if you'd be guessing.
 - Give each recommendation a short, stable, kebab-case id (e.g.
   "rec-connect-integrations") so decisions can be tracked against it.
 - Never recommend anything that violates the CONTEXT client rules.

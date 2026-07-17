@@ -11,6 +11,7 @@ from app.models.alert import Alert
 from app.models.analytics import AnalyticsDaily, StrategyVisual
 from app.models.assignment import ClientAssignment
 from app.models.audit import AuditLog
+from app.models.brand_job import BrandJob
 from app.models.campaign import Campaign
 from app.models.client import (
     Client,
@@ -55,6 +56,7 @@ __all__ = [
     "Alert",
     "AnalyticsDaily",
     "AuditLog",
+    "BrandJob",
     "Campaign",
     "Client",
     "ClientAssignment",

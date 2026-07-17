@@ -43,6 +43,7 @@ from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
 from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.brave import BraveClient
+from app.integrations.documents.extractor import extract_text
 from app.integrations.scrapingbee import ScrapingBeeClient
 from app.prompts.loader import load_prompt, render
 from app.schemas.onboarding import BrandExtraction, BrandExtractionRequest
@@ -53,6 +54,21 @@ logger = logging.getLogger("app.ai.brand_extraction")
 
 _MODEL_ATTEMPTS = 2
 _RESEARCH_RESULTS = 5
+_MAX_DOC_CHARS = 8000  # cap document text fed to the model (parity with web scrape)
+
+
+@dataclass
+class DocumentInput:
+    """A resolved uploaded document to extract a brand theme from.
+
+    Either ``text`` (parsed from PDF/DOCX/etc.) or ``image`` bytes (a logo /
+    brand-deck image → Claude vision) drives the extraction.
+    """
+
+    text: str = ""
+    image: bytes | None = None
+    media_type: str = "image/jpeg"
+    filename: str = ""
 
 
 @dataclass
@@ -80,10 +96,47 @@ class BrandExtractionService:
         self._scrapingbee = scrapingbee or ScrapingBeeClient()
         self._brave = brave or BraveClient()
 
+    @staticmethod
+    def document_from_bytes(
+        data: bytes, content_type: str | None, filename: str = ""
+    ) -> DocumentInput:
+        """Turn an uploaded file's bytes into a ``DocumentInput``.
+
+        Images (a logo / brand-deck screenshot) go through Claude vision; every
+        other type is parsed to text via the shared document extractor.
+        """
+        ctype = (content_type or "").split(";")[0].strip().lower()
+        if ctype.startswith("image/"):
+            return DocumentInput(image=data, media_type=ctype or "image/jpeg", filename=filename)
+        result = extract_text(data, content_type, filename)
+        return DocumentInput(text=(result.text or "")[:_MAX_DOC_CHARS], filename=filename)
+
     async def extract(
-        self, data: BrandExtractionRequest, context: AiUsageContext | None = None
+        self,
+        data: BrandExtractionRequest,
+        context: AiUsageContext | None = None,
+        *,
+        document: DocumentInput | None = None,
     ) -> BrandExtraction:
-        sig = await self._collect(data.website)
+        if document is not None:
+            # Brand from an uploaded document: use its parsed text and/or image
+            # (vision) directly — no web fetch.
+            sig = _Signals(
+                text=document.text,
+                colors=[],
+                fonts=[],
+                screenshot=document.image,
+                theme_color=None,
+                description=None,
+                source="document",
+            )
+            media_type = document.media_type
+            label = document.filename or "the uploaded document"
+        else:
+            sig = await self._collect(data.website)
+            media_type = "image/jpeg"
+            label = data.website or "the website"
+
         # Declared theme-color leads, then measured colors — both beat any guess.
         colors = _dedupe(([sig.theme_color] if sig.theme_color else []) + sig.colors)
 
@@ -92,12 +145,12 @@ class BrandExtractionService:
         if not self._client.is_configured:
             return self._fallback(data, colors, sig.fonts, sig.description)
 
-        # Optional web research (Brave) enriches the text the model reasons over.
-        research = await self._research(data.website)
+        # Optional web research (Brave) enriches the text — website path only.
+        research = await self._research(data.website) if data.website else ""
         text = f"{sig.text}\n\n{research}".strip() if research else sig.text
 
         payload = await self._analyze(
-            data.website, text, colors, sig.fonts, sig.screenshot, context
+            label, text, colors, sig.fonts, sig.screenshot, context, media_type=media_type
         )
         if payload is None:
             return self._fallback(data, colors, sig.fonts, sig.description)
@@ -185,6 +238,8 @@ class BrandExtractionService:
         fonts: list[str],
         screenshot: bytes | None,
         context: AiUsageContext | None = None,
+        *,
+        media_type: str = "image/jpeg",
     ) -> dict[str, Any] | None:
         """One model call (retried once): vision when we have a screenshot,
         text-only otherwise. Returns ``None`` on repeated failure."""
@@ -208,7 +263,11 @@ class BrandExtractionService:
             try:
                 if screenshot is not None:
                     raw = await self._client.complete_with_image(
-                        system=system, prompt=prompt, image=screenshot, context=context
+                        system=system,
+                        prompt=prompt,
+                        image=screenshot,
+                        media_type=media_type,
+                        context=context,
                     )
                 else:
                     raw = await self._client.complete(
@@ -228,7 +287,8 @@ class BrandExtractionService:
 
     @staticmethod
     def _default_summary(data: BrandExtractionRequest) -> str:
-        return f"Draft brand theme based on {data.website}. Review and refine before saving."
+        source = data.website or "the uploaded document"
+        return f"Draft brand theme based on {source}. Review and refine before saving."
 
     def _fallback(
         self,
