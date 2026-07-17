@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import enum
 
-from sqlalchemy import JSON, TIMESTAMP, Uuid
+from sqlalchemy import JSON, TIMESTAMP, Float, Uuid
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import TypeDecorator
@@ -53,6 +53,26 @@ class Embedding(TypeDecorator):
 
     impl = JSON
     cache_ok = True
+
+    class Comparator(TypeDecorator.Comparator):
+        """Expose pgvector's distance operators on this column.
+
+        A ``TypeDecorator`` doesn't proxy the pgvector ``Vector`` comparator, so
+        ``column.cosine_distance(...)`` would ``AttributeError``. We surface the
+        native operators (``<=>`` cosine, ``<->`` L2, ``<#>`` inner product)
+        directly — only ever used on Postgres (SQLite search is done in Python).
+        """
+
+        def cosine_distance(self, other):
+            return self.op("<=>", return_type=Float())(other)
+
+        def l2_distance(self, other):
+            return self.op("<->", return_type=Float())(other)
+
+        def max_inner_product(self, other):
+            return self.op("<#>", return_type=Float())(other)
+
+    comparator_factory = Comparator
 
     def __init__(self, dim: int, **kwargs) -> None:
         self.dim = dim

@@ -29,12 +29,20 @@ from app.services.intelligence.orchestrator import IntelligenceOrchestrator
 logger = logging.getLogger("app.worker")
 
 
-async def process_job(job: IntelJob) -> None:
-    """Run one job's pipeline on its own session. Assumes the job is claimed."""
+async def process_job(job_id: uuid.UUID) -> None:
+    """Run one claimed job's pipeline on its own session.
+
+    The job was claimed (and committed) in a *separate* session, so the instance
+    that was passed around is detached with expired attributes — using it here
+    would raise ``DetachedInstanceError``. Re-load it fresh in this session.
+    """
     from app.core.config import get_settings
 
     session = get_session_factory()()
     queue = JobQueue(session)
+    job = session.get(IntelJob, job_id)
+    if job is None:
+        return
     try:
         client = session.get(Client, job.client_id)
         if client is None:
@@ -51,7 +59,7 @@ async def process_job(job: IntelJob) -> None:
         )
         queue.succeed(job)
     except Exception as exc:  # noqa: BLE001 - retry/dead-letter, never crash the loop
-        logger.exception("Job %s failed", job.id)
+        logger.exception("Job %s failed", job_id)
         session.rollback()
         queue.fail(job, str(exc))
     finally:
@@ -62,11 +70,14 @@ async def _claim_and_run(worker_id: str) -> bool:
     session = get_session_factory()()
     try:
         job = JobQueue(session).claim_next(worker_id)
+        # Read the id while the session is still open (claim commits → attributes
+        # expire); the job is then processed in its own fresh session.
+        job_id = job.id if job is not None else None
     finally:
         session.close()
-    if job is None:
+    if job_id is None:
         return False
-    await process_job(job)
+    await process_job(job_id)
     return True
 
 
