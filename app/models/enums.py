@@ -153,16 +153,35 @@ class EventStage(str, enum.Enum):
 
 
 class SocialPlatform(str, enum.Enum):
+    """Analytics / content platform bucket.
+
+    Broader than the Phase-1 *onboarding channel* set (BE-02): it also names the
+    data-source buckets that integration syncs write into ``analytics_daily``
+    (``ga4``, ``seo`` for Search Console, ``google_lsa``, ``google`` for Ads).
+
+    Phase-1 (BE-02) narrowed the marketing channels to Meta, Google, Google LSA,
+    SEO and Influencer. The channels ``x``, ``pinterest`` and ``email`` are
+    **deprecated** — they are rejected at the onboarding input edge
+    (``app/schemas/onboarding.py``) but kept as enum members so existing
+    ``marketing_events``/``analytics_daily`` rows (and Postgres, which cannot drop
+    an enum value) stay valid.
+    """
+
     instagram = "instagram"
     facebook = "facebook"
     youtube = "youtube"
     tiktok = "tiktok"
-    x = "x"
     linkedin = "linkedin"
-    pinterest = "pinterest"
-    google = "google"
-    email = "email"
+    google = "google"          # Google Ads analytics bucket
+    google_lsa = "google_lsa"  # Google Local Services Ads (Phase-1 channel + LSA sync)
+    ga4 = "ga4"                # GA4 web-analytics bucket (distinct from google ads)
+    seo = "seo"                # SEO channel + Search Console sync bucket
+    influencer = "influencer"  # Phase-1 influencer channel
     other = "other"
+    # ---- deprecated (Phase-1 removed; kept for existing rows only) ----
+    x = "x"
+    pinterest = "pinterest"
+    email = "email"
 
 
 class ApprovalStatus(str, enum.Enum):
