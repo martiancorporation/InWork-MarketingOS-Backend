@@ -25,9 +25,12 @@ def _campaign(client, headers, cid, **overrides):
 
 
 def _patch(client, headers, cid, camp_id, **metrics):
-    assert client.patch(
-        f"{API}/clients/{cid}/campaigns/{camp_id}", headers=headers, json=metrics
-    ).status_code == 200
+    assert (
+        client.patch(
+            f"{API}/clients/{cid}/campaigns/{camp_id}", headers=headers, json=metrics
+        ).status_code
+        == 200
+    )
 
 
 def _evaluate(client, headers, cid):
@@ -62,9 +65,7 @@ def test_reevaluate_updates_not_duplicates(client: TestClient, admin_headers: di
     _evaluate(client, admin_headers, cid)
     second = _evaluate(client, admin_headers, cid)
     assert second["opened"] == 0 and second["updated"] >= 1
-    listing = client.get(
-        f"{API}/clients/{cid}/alerts?status=open", headers=admin_headers
-    ).json()
+    listing = client.get(f"{API}/clients/{cid}/alerts?status=open", headers=admin_headers).json()
     assert sum(1 for a in listing["items"] if a["metric"] == "cpl") == 1
 
 
@@ -118,9 +119,7 @@ def test_list_filter_by_severity(client: TestClient, admin_headers: dict):
 def test_scoping_unassigned_404(client: TestClient, admin_headers: dict, make_user):
     cid = _client_id(client, admin_headers)
     _user, headers = make_user(email="nope@test.com")
-    assert client.post(
-        f"{API}/clients/{cid}/alerts/evaluate", headers=headers
-    ).status_code == 404
+    assert client.post(f"{API}/clients/{cid}/alerts/evaluate", headers=headers).status_code == 404
 
 
 def test_requires_auth(client: TestClient, admin_headers: dict):

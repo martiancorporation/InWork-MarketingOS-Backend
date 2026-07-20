@@ -48,7 +48,9 @@ def test_deleted_changes_maps_enum_to_value():
 
 
 def _client_id(client, admin_headers):
-    resp = client.post(f"{API}/clients/onboarding", headers=admin_headers, json=onboarding_payload())
+    resp = client.post(
+        f"{API}/clients/onboarding", headers=admin_headers, json=onboarding_payload()
+    )
     assert resp.status_code == 201, resp.text
     return uuid.UUID(resp.json()["client"]["id"])
 

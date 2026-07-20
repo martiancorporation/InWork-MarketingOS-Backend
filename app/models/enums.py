@@ -10,9 +10,11 @@ import enum
 
 
 class UserRole(str, enum.Enum):
-    admin = "admin"      # full access: manage users, onboard clients, assign clients, see all
-    manager = "manager"  # non-admin; sees only assigned clients (gets all client-capabilities on them)
-    user = "user"        # non-admin; sees only assigned clients (capabilities scoped per assignment)
+    admin = "admin"  # full access: manage users, onboard clients, assign clients, see all
+    manager = (
+        "manager"  # non-admin; sees only assigned clients (gets all client-capabilities on them)
+    )
+    user = "user"  # non-admin; sees only assigned clients (capabilities scoped per assignment)
 
 
 class ClientCapability(str, enum.Enum):
@@ -28,11 +30,11 @@ class ClientCapability(str, enum.Enum):
     """
 
     manage_integrations = "manage_integrations"  # connect/disconnect connectors
-    review_results = "review_results"            # act on recommendations / KPI alerts
-    review_creatives = "review_creatives"        # approve calendar content
-    manage_calendar = "manage_calendar"          # create/edit calendar items
-    manage_compliance = "manage_compliance"      # edit the compliance register
-    admin = "admin"                              # per-client super-grant (implies all)
+    review_results = "review_results"  # act on recommendations / KPI alerts
+    review_creatives = "review_creatives"  # approve calendar content
+    manage_calendar = "manage_calendar"  # create/edit calendar items
+    manage_compliance = "manage_compliance"  # edit the compliance register
+    admin = "admin"  # per-client super-grant (implies all)
 
 
 # ---- Client intelligence (async build pipeline + RAG) ----
@@ -43,10 +45,10 @@ class ClientCapability(str, enum.Enum):
 class KnowledgeSourceType(str, enum.Enum):
     """Provenance of a knowledge source feeding the client profile."""
 
-    document = "document"          # an uploaded file
+    document = "document"  # an uploaded file
     onboarding_field = "onboarding_field"  # a structured field group from the wizard
-    note = "note"                  # free-text note / instruction
-    website = "website"            # scraped site content
+    note = "note"  # free-text note / instruction
+    website = "website"  # scraped site content
 
 
 class SourceStatus(str, enum.Enum):
@@ -58,20 +60,20 @@ class SourceStatus(str, enum.Enum):
 
 
 class DirectiveType(str, enum.Enum):
-    must = "must"            # required action/inclusion
-    must_not = "must_not"    # hard prohibition
-    prefer = "prefer"        # soft preference
-    avoid = "avoid"          # soft avoidance
+    must = "must"  # required action/inclusion
+    must_not = "must_not"  # hard prohibition
+    prefer = "prefer"  # soft preference
+    avoid = "avoid"  # soft avoidance
     constraint = "constraint"  # factual/technical constraint
 
 
 class DirectiveTier(str, enum.Enum):
     """Priority tier. Higher tiers win conflicts and are never dropped."""
 
-    mandatory = "mandatory"    # P0 — must_not / legal / explicit "do not"
-    required = "required"      # P1 — explicit must
+    mandatory = "mandatory"  # P0 — must_not / legal / explicit "do not"
+    required = "required"  # P1 — explicit must
     preference = "preference"  # P2 — style choices
-    inferred = "inferred"      # P3 — model-derived, lower confidence
+    inferred = "inferred"  # P3 — model-derived, lower confidence
 
 
 class DirectiveStatus(str, enum.Enum):
@@ -88,7 +90,7 @@ class ProfileStatus(str, enum.Enum):
 
 
 class IntelJobType(str, enum.Enum):
-    full_build = "full_build"    # re-extract & re-embed everything
+    full_build = "full_build"  # re-extract & re-embed everything
     incremental = "incremental"  # only changed sources; reuse unchanged chunks
 
 
@@ -192,10 +194,10 @@ class SocialPlatform(str, enum.Enum):
     youtube = "youtube"
     tiktok = "tiktok"
     linkedin = "linkedin"
-    google = "google"          # Google Ads analytics bucket
+    google = "google"  # Google Ads analytics bucket
     google_lsa = "google_lsa"  # Google Local Services Ads (Phase-1 channel + LSA sync)
-    ga4 = "ga4"                # GA4 web-analytics bucket (distinct from google ads)
-    seo = "seo"                # SEO channel + Search Console sync bucket
+    ga4 = "ga4"  # GA4 web-analytics bucket (distinct from google ads)
+    seo = "seo"  # SEO channel + Search Console sync bucket
     influencer = "influencer"  # Phase-1 influencer channel
     other = "other"
     # ---- deprecated (Phase-1 removed; kept for existing rows only) ----
@@ -360,6 +362,7 @@ class ConsistencyLevel(str, enum.Enum):
     ok = "ok"
     warn = "warn"
     error = "error"
+
 
 # Audit actions are deliberately NOT an enum: the app logs free-form, dotted
 # action identifiers per feature (e.g. "report.pdf.exported",

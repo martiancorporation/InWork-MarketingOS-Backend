@@ -15,10 +15,7 @@ class UserRepository(BaseRepository[User]):
         return self.db.scalar(select(User).where(User.email == email.lower()))
 
     def email_exists(self, email: str) -> bool:
-        return (
-            self.db.scalar(select(User.id).where(User.email == email.lower()))
-            is not None
-        )
+        return self.db.scalar(select(User.id).where(User.email == email.lower())) is not None
 
     def list(self, *, offset: int, limit: int) -> tuple[list[User], int]:
         total = int(self.db.scalar(select(func.count()).select_from(User)) or 0)

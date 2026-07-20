@@ -42,16 +42,12 @@ def set_strategy(
     response_model=AdherenceSummary,
     summary="How closely the operator followed the recorded strategy",
 )
-def get_adherence(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
-) -> AdherenceSummary:
+def get_adherence(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> AdherenceSummary:
     ClientService(db).get_client(user, client_id)
     return StrategyService(db).adherence(client_id)
 
 
 @router.get("", response_model=StrategyRead, summary="Get the current strategy")
-def get_strategy(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
-) -> StrategyRead:
+def get_strategy(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> StrategyRead:
     ClientService(db).get_client(user, client_id)
     return StrategyRead.model_validate(StrategyService(db).get_current(client_id))

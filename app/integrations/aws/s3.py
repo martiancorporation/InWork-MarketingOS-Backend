@@ -42,8 +42,7 @@ class S3Storage:
     def _client(self) -> S3Client:
         if not self._settings.is_configured:
             raise ServiceUnavailableError(
-                "File storage is not configured. Set STORAGE_S3_BUCKET and "
-                "STORAGE_S3_REGION."
+                "File storage is not configured. Set STORAGE_S3_BUCKET and STORAGE_S3_REGION."
             )
         if self._client_obj is None:
             try:
@@ -130,9 +129,7 @@ class S3Storage:
         if isinstance(exc, ClientError):
             error = exc.response.get("Error", {})
             code = str(error.get("Code", ""))
-            status_code = (
-                exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            )
+            status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
             if code in {"404", "NoSuchKey", "NotFound"} or status_code == 404:
                 return NotFoundError("Stored file not found.")
         return ServiceUnavailableError("Storage backend is unavailable.")

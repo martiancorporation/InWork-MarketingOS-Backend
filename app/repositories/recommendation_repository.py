@@ -27,9 +27,7 @@ class RecommendationRepository(BaseRepository[RecommendationAction]):
             ).all()
         )
 
-    def latest_by_rec_key(
-        self, client_id: uuid.UUID
-    ) -> dict[str, RecommendationAction]:
+    def latest_by_rec_key(self, client_id: uuid.UUID) -> dict[str, RecommendationAction]:
         """Map each rec_key → its most recent decision for this client."""
         latest: dict[str, RecommendationAction] = {}
         # rows come newest-first, so the first seen per rec_key is the latest.

@@ -87,9 +87,7 @@ class AuditMiddleware:
             duration_ms = int((time.perf_counter() - started) * 1000)
             changes = get_audit_changes()
             try:
-                self._record(
-                    request, method, path, status_code, duration_ms, body_chunks, changes
-                )
+                self._record(request, method, path, status_code, duration_ms, body_chunks, changes)
             except Exception as exc:  # never let auditing break the response
                 logger.warning("audit write failed for %s %s: %s", method, path, exc)
             reset_audit_changes(changes_token)

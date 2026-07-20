@@ -62,65 +62,73 @@ class RecommendationsAgent:
     def _fallback(self, s: DashboardSignals) -> list[Recommendation]:
         recs: list[dict] = []
         if s.pending_integrations:
-            recs.append({
-                "id": "rec-connect-integrations",
-                "title": "Connect your remaining ad & analytics integrations",
-                "category": "growth",
-                "severity": "high",
-                "summary": f"{s.pending_integrations} platform(s) are not connected, so performance and attribution are blind spots.",
-                "reason": "Without connected platforms the dashboard can't measure spend, leads, or ROI accurately.",
-                "confidence": 90,
-                "expected_impact": "Full-funnel visibility + accurate CPL/ROI",
-                "projection": {
-                    "metric": "attribution coverage",
-                    "direction": "up",
-                    "estimate": "measurable CPL/ROI where it's currently a blind spot",
-                    "basis": f"{s.pending_integrations} platform(s) still unconnected",
-                },
-            })
+            recs.append(
+                {
+                    "id": "rec-connect-integrations",
+                    "title": "Connect your remaining ad & analytics integrations",
+                    "category": "growth",
+                    "severity": "high",
+                    "summary": f"{s.pending_integrations} platform(s) are not connected, so performance and attribution are blind spots.",
+                    "reason": "Without connected platforms the dashboard can't measure spend, leads, or ROI accurately.",
+                    "confidence": 90,
+                    "expected_impact": "Full-funnel visibility + accurate CPL/ROI",
+                    "projection": {
+                        "metric": "attribution coverage",
+                        "direction": "up",
+                        "estimate": "measurable CPL/ROI where it's currently a blind spot",
+                        "basis": f"{s.pending_integrations} platform(s) still unconnected",
+                    },
+                }
+            )
         if s.banned_words or s.required_phrases or s.rules:
             n = len(s.banned_words) + len(s.required_phrases) + len(s.rules)
-            recs.append({
-                "id": "rec-enforce-brand-rules",
-                "title": "Enforce brand rules across all generated copy",
-                "category": "compliance",
-                "severity": "medium",
-                "summary": f"{n} brand rule(s) are on file — apply them to every ad, caption, and email.",
-                "reason": "Consistent compliance protects the brand and avoids client rejections in review.",
-                "confidence": 85,
-                "expected_impact": "Fewer approval rejections, on-brand output",
-            })
+            recs.append(
+                {
+                    "id": "rec-enforce-brand-rules",
+                    "title": "Enforce brand rules across all generated copy",
+                    "category": "compliance",
+                    "severity": "medium",
+                    "summary": f"{n} brand rule(s) are on file — apply them to every ad, caption, and email.",
+                    "reason": "Consistent compliance protects the brand and avoids client rejections in review.",
+                    "confidence": 85,
+                    "expected_impact": "Fewer approval rejections, on-brand output",
+                }
+            )
         if s.leads == 0 and s.spend == 0:
-            recs.append({
-                "id": "rec-launch-first-campaign",
-                "title": "Launch the first campaign to start generating data",
-                "category": "budget",
-                "severity": "medium",
-                "summary": "No spend or leads recorded yet — a small initial test will start the learning loop.",
-                "reason": "Early performance data is required before optimization recommendations become meaningful.",
-                "confidence": 70,
-                "expected_impact": "Baseline CPL + first leads",
+            recs.append(
+                {
+                    "id": "rec-launch-first-campaign",
+                    "title": "Launch the first campaign to start generating data",
+                    "category": "budget",
+                    "severity": "medium",
+                    "summary": "No spend or leads recorded yet — a small initial test will start the learning loop.",
+                    "reason": "Early performance data is required before optimization recommendations become meaningful.",
+                    "confidence": 70,
+                    "expected_impact": "Baseline CPL + first leads",
+                    "projection": {
+                        "metric": "leads",
+                        "direction": "up",
+                        "estimate": "first baseline leads to start the learning loop",
+                        "basis": "no spend or leads recorded yet",
+                    },
+                }
+            )
+        recs.append(
+            {
+                "id": "rec-refresh-creative",
+                "title": "Plan a creative refresh cadence",
+                "category": "creative",
+                "severity": "low",
+                "summary": "Rotate fresh hooks and hero assets regularly to avoid audience fatigue.",
+                "reason": "Creative fatigue is the most common cause of rising CPL on paid social.",
+                "confidence": 65,
+                "expected_impact": "Sustained CTR, lower CPL drift",
                 "projection": {
-                    "metric": "leads",
+                    "metric": "CTR",
                     "direction": "up",
-                    "estimate": "first baseline leads to start the learning loop",
-                    "basis": "no spend or leads recorded yet",
+                    "estimate": "sustained CTR, slower CPL drift",
+                    "basis": "creative fatigue is the most common cause of rising CPL",
                 },
-            })
-        recs.append({
-            "id": "rec-refresh-creative",
-            "title": "Plan a creative refresh cadence",
-            "category": "creative",
-            "severity": "low",
-            "summary": "Rotate fresh hooks and hero assets regularly to avoid audience fatigue.",
-            "reason": "Creative fatigue is the most common cause of rising CPL on paid social.",
-            "confidence": 65,
-            "expected_impact": "Sustained CTR, lower CPL drift",
-            "projection": {
-                "metric": "CTR",
-                "direction": "up",
-                "estimate": "sustained CTR, slower CPL drift",
-                "basis": "creative fatigue is the most common cause of rising CPL",
-            },
-        })
+            }
+        )
         return [Recommendation.model_validate(r) for r in recs]

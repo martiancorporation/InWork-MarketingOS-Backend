@@ -104,9 +104,7 @@ class ConversationService:
             page_size=pagination.page_size,
         )
 
-    def get_conversation(
-        self, client_id: uuid.UUID, conversation_id: uuid.UUID
-    ) -> Conversation:
+    def get_conversation(self, client_id: uuid.UUID, conversation_id: uuid.UUID) -> Conversation:
         conv = self.conversations.get_for_client(client_id, conversation_id)
         if conv is None:
             raise NotFoundError("Conversation not found.")
@@ -240,9 +238,7 @@ class ConversationService:
         assert reloaded is not None
         return reloaded
 
-    def delete_conversation(
-        self, client_id: uuid.UUID, conversation_id: uuid.UUID
-    ) -> None:
+    def delete_conversation(self, client_id: uuid.UUID, conversation_id: uuid.UUID) -> None:
         conv = self.get_conversation(client_id, conversation_id)
         self.db.delete(conv)
         self.db.commit()

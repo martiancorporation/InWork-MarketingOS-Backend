@@ -94,7 +94,9 @@ class AnalyticsService:
                 first = exc.errors()[0]
                 errors.append(f"Row {i}: {first.get('loc', ['?'])[0]} — {first.get('msg')}")
         upserted = self.ingest(client_id, rows) if rows else 0
-        return AnalyticsCsvImportResponse(upserted=upserted, skipped=len(errors), errors=errors[:50])
+        return AnalyticsCsvImportResponse(
+            upserted=upserted, skipped=len(errors), errors=errors[:50]
+        )
 
     def list_daily(
         self,
@@ -151,9 +153,7 @@ class AnalyticsService:
                 spend=float(r["spend"]),
                 revenue=float(r["revenue"]),
             )
-            for r in self.analytics.daily_series(
-                client_id, start=start, end=end, platform=platform
-            )
+            for r in self.analytics.daily_series(client_id, start=start, end=end, platform=platform)
         ]
         return AnalyticsSummary(totals=totals, by_platform=by_platform, daily=daily)
 

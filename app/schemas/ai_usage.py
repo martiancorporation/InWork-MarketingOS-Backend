@@ -83,3 +83,31 @@ class ClientUsageSummary(BaseModel):
     by_feature: list[UsageGroupRow]
     by_model: list[UsageGroupRow]
     daily: list[DailyUsage]
+
+
+# ---- cost optimization ---- #
+
+
+class CostSuggestion(BaseModel):
+    """A concrete way to reduce AI spend, with an estimated monthly saving."""
+
+    id: str  # stable key, e.g. "route-cheaper-model:onboarding.brand_extraction"
+    title: str
+    detail: str
+    feature: str | None = None  # the feature the suggestion targets, if specific
+    current_model: str | None = None
+    suggested_model: str | None = None
+    # Estimated USD saving over the analyzed window if the suggestion is applied.
+    estimated_savings: float = 0.0
+    # Share of analyzed cost this suggestion could remove (0-100).
+    savings_pct: int = 0
+    confidence: int = 0  # 0-100
+
+
+class CostOptimizationReport(BaseModel):
+    analyzed_requests: int
+    analyzed_cost: float
+    currency: str = "USD"
+    # Sum of estimated savings across suggestions (a ceiling, not a guarantee).
+    potential_savings: float = 0.0
+    suggestions: list[CostSuggestion] = []

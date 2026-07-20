@@ -95,9 +95,7 @@ def test_disconnect_resets_state(client: TestClient, admin_headers: dict):
         headers=admin_headers,
         json={"account_label": "Acme GA4", "scopes": "analytics.readonly"},
     )
-    resp = client.post(
-        f"{API}/clients/{cid}/integrations/ga4/disconnect", headers=admin_headers
-    )
+    resp = client.post(f"{API}/clients/{cid}/integrations/ga4/disconnect", headers=admin_headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] == "disconnected"
@@ -107,9 +105,7 @@ def test_disconnect_resets_state(client: TestClient, admin_headers: dict):
 
 def test_disconnect_unconfigured_404(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
-    resp = client.post(
-        f"{API}/clients/{cid}/integrations/meta/disconnect", headers=admin_headers
-    )
+    resp = client.post(f"{API}/clients/{cid}/integrations/meta/disconnect", headers=admin_headers)
     assert resp.status_code == 404
 
 

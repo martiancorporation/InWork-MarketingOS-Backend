@@ -13,18 +13,14 @@ from app.repositories.base import BaseRepository
 class NotificationRepository(BaseRepository[Notification]):
     model = Notification
 
-    def get_for_user(
-        self, user_id: uuid.UUID, notification_id: uuid.UUID
-    ) -> Notification | None:
+    def get_for_user(self, user_id: uuid.UUID, notification_id: uuid.UUID) -> Notification | None:
         return self.db.scalar(
             select(Notification).where(
                 Notification.id == notification_id, Notification.user_id == user_id
             )
         )
 
-    def find_unread_by_reckey(
-        self, user_id: uuid.UUID, rec_key: str
-    ) -> Notification | None:
+    def find_unread_by_reckey(self, user_id: uuid.UUID, rec_key: str) -> Notification | None:
         return self.db.scalar(
             select(Notification).where(
                 Notification.user_id == user_id,
@@ -54,9 +50,7 @@ class NotificationRepository(BaseRepository[Notification]):
         conditions = [Notification.user_id == user_id]
         if unread_only:
             conditions.append(Notification.read_at.is_(None))
-        total = self.db.scalar(
-            select(func.count()).select_from(Notification).where(*conditions)
-        )
+        total = self.db.scalar(select(func.count()).select_from(Notification).where(*conditions))
         stmt = (
             select(Notification)
             .where(*conditions)

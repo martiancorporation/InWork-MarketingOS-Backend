@@ -76,9 +76,7 @@ class AlertService:
         self.db.refresh(alert)
         return alert
 
-    def resolve(
-        self, client_id: uuid.UUID, alert_id: uuid.UUID, *, actor_id: uuid.UUID
-    ) -> Alert:
+    def resolve(self, client_id: uuid.UUID, alert_id: uuid.UUID, *, actor_id: uuid.UUID) -> Alert:
         alert = self.get_alert(client_id, alert_id)
         alert.status = AlertStatus.resolved.value
         alert.resolved_by = actor_id
@@ -209,9 +207,7 @@ def _findings_for(c: Campaign) -> list[dict]:
                 "kind": AlertKind.alert.value,
                 "severity": (AlertSeverity.high if over else AlertSeverity.medium).value,
                 "title": f"{c.name}: budget {'exceeded' if over else 'nearly spent'}",
-                "detail": (
-                    f"Spend ${float(c.spend):.2f} of ${float(c.budget_usd):.2f} budget."
-                ),
+                "detail": (f"Spend ${float(c.spend):.2f} of ${float(c.budget_usd):.2f} budget."),
                 "metric": "budget",
                 "threshold": float(c.budget_usd),
                 "actual": round(float(c.spend), 2),

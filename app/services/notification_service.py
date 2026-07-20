@@ -45,9 +45,7 @@ class NotificationService:
     ) -> Notification:
         """Create (or, when a ``rec_key`` matches an unread one, refresh) a notification."""
         level_value = getattr(level, "value", level)
-        existing = (
-            self.notifications.find_unread_by_reckey(user_id, rec_key) if rec_key else None
-        )
+        existing = self.notifications.find_unread_by_reckey(user_id, rec_key) if rec_key else None
         if existing is not None:
             existing.title = title
             existing.body = body
@@ -58,8 +56,14 @@ class NotificationService:
             notification = existing
         else:
             notification = Notification(
-                user_id=user_id, kind=kind, level=level_value, title=title,
-                body=body, client_id=client_id, link=link, rec_key=rec_key,
+                user_id=user_id,
+                kind=kind,
+                level=level_value,
+                title=title,
+                body=body,
+                client_id=client_id,
+                link=link,
+                rec_key=rec_key,
             )
             self.notifications.add(notification)
         if commit:
@@ -67,15 +71,11 @@ class NotificationService:
             self.db.refresh(notification)
         return notification
 
-    def notify_client_team(
-        self, client_id: uuid.UUID, *, title: str, **kwargs
-    ) -> int:
+    def notify_client_team(self, client_id: uuid.UUID, *, title: str, **kwargs) -> int:
         """Notify every user assigned to a client. Returns how many were notified."""
         assignments = AssignmentRepository(self.db).list_for_client(client_id)
         for a in assignments:
-            self.notify(
-                a.user_id, title=title, client_id=client_id, commit=False, **kwargs
-            )
+            self.notify(a.user_id, title=title, client_id=client_id, commit=False, **kwargs)
         self.db.commit()
         return len(assignments)
 

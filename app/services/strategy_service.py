@@ -69,15 +69,11 @@ class StrategyService:
         rejected = counts.get("rejected", 0)
         total_recs = accepted + modified + rejected
         decision_adherence = (
-            round((accepted + 0.5 * modified) / total_recs, 4)
-            if total_recs
-            else None
+            round((accepted + 0.5 * modified) / total_recs, 4) if total_recs else None
         )
 
         tasks_done, tasks_total = self.tasks.completion_counts(client_id)
-        task_completion = (
-            round(tasks_done / tasks_total, 4) if tasks_total else None
-        )
+        task_completion = round(tasks_done / tasks_total, 4) if tasks_total else None
 
         basis: list[str] = []
         components: list[float] = []
@@ -87,9 +83,7 @@ class StrategyService:
         if task_completion is not None:
             basis.append("task_completion")
             components.append(task_completion)
-        adherence_score = (
-            round(sum(components) / len(components) * 100) if components else None
-        )
+        adherence_score = round(sum(components) / len(components) * 100) if components else None
 
         return AdherenceSummary(
             client_id=client_id,

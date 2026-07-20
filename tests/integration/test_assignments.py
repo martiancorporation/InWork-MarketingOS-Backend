@@ -9,7 +9,9 @@ from tests.helpers import onboarding_payload
 
 
 def _client_id(client, admin_headers, name="Acme Co."):
-    resp = client.post(f"{API}/clients/onboarding", headers=admin_headers, json=onboarding_payload(name=name))
+    resp = client.post(
+        f"{API}/clients/onboarding", headers=admin_headers, json=onboarding_payload(name=name)
+    )
     assert resp.status_code == 201
     return resp.json()["client"]["id"]
 
@@ -17,7 +19,9 @@ def _client_id(client, admin_headers, name="Acme Co."):
 def test_admin_assigns_client_to_user(client: TestClient, admin_headers: dict, make_user):
     user, _ = make_user()
     cid = _client_id(client, admin_headers)
-    resp = client.post(f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]})
+    resp = client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
     assert resp.status_code == 201
     assert resp.json()["user"]["email"] == user["email"]
 
@@ -25,15 +29,21 @@ def test_admin_assigns_client_to_user(client: TestClient, admin_headers: dict, m
 def test_duplicate_assignment_409(client: TestClient, admin_headers: dict, make_user):
     user, _ = make_user()
     cid = _client_id(client, admin_headers)
-    client.post(f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]})
-    dup = client.post(f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]})
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
+    dup = client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
     assert dup.status_code == 409
 
 
 def test_list_assignments(client: TestClient, admin_headers: dict, make_user):
     user, _ = make_user()
     cid = _client_id(client, admin_headers)
-    client.post(f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]})
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
     resp = client.get(f"{API}/clients/{cid}/assignments", headers=admin_headers)
     assert resp.status_code == 200
     assert resp.json()["total"] == 1
@@ -42,10 +52,14 @@ def test_list_assignments(client: TestClient, admin_headers: dict, make_user):
 def test_unassign(client: TestClient, admin_headers: dict, make_user):
     user, _ = make_user()
     cid = _client_id(client, admin_headers)
-    client.post(f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]})
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
     resp = client.delete(f"{API}/clients/{cid}/assignments/{user['id']}", headers=admin_headers)
     assert resp.status_code == 204
-    assert client.get(f"{API}/clients/{cid}/assignments", headers=admin_headers).json()["total"] == 0
+    assert (
+        client.get(f"{API}/clients/{cid}/assignments", headers=admin_headers).json()["total"] == 0
+    )
 
 
 def test_unassign_unknown_404(client: TestClient, admin_headers: dict, make_user):
@@ -78,5 +92,7 @@ def test_assign_unknown_client_404(client: TestClient, admin_headers: dict, make
 def test_non_admin_cannot_assign(client: TestClient, admin_headers: dict, make_user):
     user, user_headers = make_user()
     cid = _client_id(client, admin_headers)
-    resp = client.post(f"{API}/clients/{cid}/assignments", headers=user_headers, json={"user_id": user["id"]})
+    resp = client.post(
+        f"{API}/clients/{cid}/assignments", headers=user_headers, json={"user_id": user["id"]}
+    )
     assert resp.status_code == 403

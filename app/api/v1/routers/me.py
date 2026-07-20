@@ -20,7 +20,5 @@ router = APIRouter(prefix="/me", tags=["me"])
     response_model=MePendingResponse,
     summary="My pending work across all accessible clients (per-client counts)",
 )
-def my_pending(
-    user: CurrentUser, db: DbSession, pagination: Pagination
-) -> MePendingResponse:
+def my_pending(user: CurrentUser, db: DbSession, pagination: Pagination) -> MePendingResponse:
     return MeService(db).pending(user, pagination=pagination)

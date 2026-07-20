@@ -49,7 +49,9 @@ def storage() -> Generator[FakeStorage, None, None]:
     app.dependency_overrides.pop(get_storage, None)
 
 
-def _upload(client, headers, *, name="notes.pdf", data=b"hello world", ctype="application/pdf", feature=None):
+def _upload(
+    client, headers, *, name="notes.pdf", data=b"hello world", ctype="application/pdf", feature=None
+):
     form = {"feature": feature} if feature else {}
     return client.post(
         f"{API}/uploads",
@@ -60,6 +62,7 @@ def _upload(client, headers, *, name="notes.pdf", data=b"hello world", ctype="ap
 
 
 # ---- upload ----
+
 
 def test_upload(client: TestClient, admin_headers, storage) -> None:
     resp = _upload(client, admin_headers, name="../brief final.pdf", feature="onboarding.documents")
@@ -87,6 +90,7 @@ def test_upload_requires_auth(client: TestClient, storage) -> None:
 
 # ---- get ----
 
+
 def test_get_upload(client: TestClient, admin_headers, storage) -> None:
     created = _upload(client, admin_headers)
     upload_id = created.json()["id"]
@@ -105,6 +109,7 @@ def test_get_missing_returns_404(client: TestClient, admin_headers, storage) -> 
 
 # ---- delete ----
 
+
 def test_delete_upload(client: TestClient, admin_headers, storage) -> None:
     created = _upload(client, admin_headers, name="d.pdf", data=b"data")
     upload_id = created.json()["id"]
@@ -117,6 +122,7 @@ def test_delete_upload(client: TestClient, admin_headers, storage) -> None:
 
 
 # ---- ownership scoping ----
+
 
 def test_user_cannot_access_others_upload(client: TestClient, storage, make_user) -> None:
     _, a_headers = make_user(email="a@test.com", password="passwordA1")
@@ -133,6 +139,7 @@ def test_user_cannot_access_others_upload(client: TestClient, storage, make_user
 
 
 # ---- graceful degradation when storage is unconfigured ----
+
 
 def test_upload_503_when_storage_unconfigured(client: TestClient, admin_headers) -> None:
     app.dependency_overrides[get_storage] = lambda: S3Storage(StorageSettings())

@@ -88,9 +88,7 @@ class GoogleOAuthClient:
             ) from exc
         payload = _safe_json(resp)
         if resp.status_code >= 400 or "error" in payload:
-            message = (
-                payload.get("error_description") or payload.get("error") or resp.text[:200]
-            )
+            message = payload.get("error_description") or payload.get("error") or resp.text[:200]
             raise AppError(
                 f"Google rejected the token request: {message}",
                 code="google_oauth_error",

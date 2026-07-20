@@ -14,25 +14,17 @@ from app.repositories.base import BaseRepository
 class CampaignRepository(BaseRepository[Campaign]):
     model = Campaign
 
-    def get_for_client(
-        self, client_id: uuid.UUID, campaign_id: uuid.UUID
-    ) -> Campaign | None:
+    def get_for_client(self, client_id: uuid.UUID, campaign_id: uuid.UUID) -> Campaign | None:
         return self.db.scalar(
-            select(Campaign).where(
-                Campaign.id == campaign_id, Campaign.client_id == client_id
-            )
+            select(Campaign).where(Campaign.id == campaign_id, Campaign.client_id == client_id)
         )
 
-    def get_many_for_client(
-        self, client_id: uuid.UUID, ids: Sequence[uuid.UUID]
-    ) -> list[Campaign]:
+    def get_many_for_client(self, client_id: uuid.UUID, ids: Sequence[uuid.UUID]) -> list[Campaign]:
         if not ids:
             return []
         return list(
             self.db.scalars(
-                select(Campaign).where(
-                    Campaign.client_id == client_id, Campaign.id.in_(list(ids))
-                )
+                select(Campaign).where(Campaign.client_id == client_id, Campaign.id.in_(list(ids)))
             ).all()
         )
 
@@ -47,14 +39,9 @@ class CampaignRepository(BaseRepository[Campaign]):
         conditions = [Campaign.client_id == client_id]
         if status is not None:
             conditions.append(Campaign.status == status)
-        total = self.db.scalar(
-            select(func.count()).select_from(Campaign).where(*conditions)
-        )
+        total = self.db.scalar(select(func.count()).select_from(Campaign).where(*conditions))
         stmt = (
-            select(Campaign)
-            .where(*conditions)
-            .order_by(Campaign.created_at.desc())
-            .offset(offset)
+            select(Campaign).where(*conditions).order_by(Campaign.created_at.desc()).offset(offset)
         )
         if limit is not None:
             stmt = stmt.limit(limit)

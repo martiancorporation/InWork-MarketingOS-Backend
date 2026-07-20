@@ -80,9 +80,7 @@ def test_chat_detail_orders_messages(client: TestClient, admin_headers: dict):
         headers=admin_headers,
         json={"content": "First question"},
     )
-    detail = client.get(
-        f"{API}/clients/{cid}/assistant/chats/{chat['id']}", headers=admin_headers
-    )
+    detail = client.get(f"{API}/clients/{cid}/assistant/chats/{chat['id']}", headers=admin_headers)
     assert detail.status_code == 200, detail.text
     msgs = detail.json()["messages"]
     assert len(msgs) == 2
@@ -141,8 +139,7 @@ def test_unassigned_user_gets_404(client: TestClient, admin_headers: dict, make_
     _user, user_headers = make_user()
     cid = _client_id(client, admin_headers)
     assert (
-        client.get(f"{API}/clients/{cid}/assistant/chats", headers=user_headers).status_code
-        == 404
+        client.get(f"{API}/clients/{cid}/assistant/chats", headers=user_headers).status_code == 404
     )
 
 

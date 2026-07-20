@@ -209,14 +209,10 @@ class CalendarService:
         *,
         user_id: uuid.UUID | None,
     ) -> None:
-        event.activity.append(
-            EventActivity(action=action, note=note, user_id=user_id)
-        )
+        event.activity.append(EventActivity(action=action, note=note, user_id=user_id))
 
     @staticmethod
-    def _month_range(
-        year: int | None, month: int | None
-    ) -> tuple[date | None, date | None]:
+    def _month_range(year: int | None, month: int | None) -> tuple[date | None, date | None]:
         """Turn an optional (year, month) into an inclusive date window.
 
         ``month`` is 1-12. Passing only one of the two is treated as no filter.

@@ -41,7 +41,7 @@ def derive_audit(
     "clients.assignments.read")``. UUIDs are stripped from the action but the
     first one becomes ``entity_id``.
     """
-    trimmed = path[len(prefix):] if path.startswith(prefix) else path
+    trimmed = path[len(prefix) :] if path.startswith(prefix) else path
     raw = [s for s in trimmed.strip("/").split("/") if s]
 
     entity_id: uuid.UUID | None = None

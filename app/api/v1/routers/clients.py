@@ -31,6 +31,7 @@ from app.schemas.onboarding import (
     BrandExtraction,
     BrandExtractionRequest,
     DocumentsRequest,
+    MissingInfoReport,
     OnboardingDraftRequest,
     OnboardingRequest,
     OnboardingResponse,
@@ -65,9 +66,7 @@ def list_clients(
     search: str | None = Query(None, description="Match name or industry"),
     status: ClientStatus | None = Query(None, description="Filter by status"),
 ) -> ClientListResponse:
-    return ClientService(db).list_clients(
-        user, pagination=pagination, search=search, status=status
-    )
+    return ClientService(db).list_clients(user, pagination=pagination, search=search, status=status)
 
 
 @router.post(
@@ -76,9 +75,7 @@ def list_clients(
     status_code=status.HTTP_201_CREATED,
     summary="Onboard a new client (admin only)",
 )
-def onboard_client(
-    data: OnboardingRequest, admin: AdminUser, db: DbSession
-) -> OnboardingResponse:
+def onboard_client(data: OnboardingRequest, admin: AdminUser, db: DbSession) -> OnboardingResponse:
     client = OnboardingService(db).onboard(admin, data)
     readiness = ReadinessService().report(client)
     return OnboardingResponse(
@@ -159,6 +156,17 @@ async def check_onboarding_consistency(
     client_id: uuid.UUID, admin: AdminUser, db: DbSession
 ) -> ConsistencyReport:
     return await OnboardingService(db).consistency(client_id)
+
+
+@router.post(
+    "/{client_id}/onboarding/missing-info",
+    response_model=MissingInfoReport,
+    summary="AI-detected, industry-specific missing information (admin only)",
+)
+async def detect_missing_info(
+    client_id: uuid.UUID, admin: AdminUser, db: DbSession
+) -> MissingInfoReport:
+    return await OnboardingService(db).missing_info(client_id)
 
 
 @router.post(

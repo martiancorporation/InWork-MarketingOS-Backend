@@ -62,9 +62,7 @@ class ConsistencyAgent:
                 system=system, prompt=prompt, max_tokens=2000, context=context
             )
         except Exception:
-            logger.warning(
-                "Consistency agent failed for client %s", client.id, exc_info=True
-            )
+            logger.warning("Consistency agent failed for client %s", client.id, exc_info=True)
             return self._fallback(client)
 
         payload = parse_json_object(raw)
@@ -93,9 +91,7 @@ class ConsistencyAgent:
 
     def _fallback(self, client: Client) -> ConsistencyResult:
         findings: list[ConsistencyFindingResult] = []
-        haystack = " ".join(
-            filter(None, [client.about_brand, client.brand_voice])
-        ).lower()
+        haystack = " ".join(filter(None, [client.about_brand, client.brand_voice])).lower()
         for word in (
             e.text
             for e in client.compliance_entries

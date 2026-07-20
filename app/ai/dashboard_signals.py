@@ -13,6 +13,24 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class GoalMetric:
+    """One goal-relative KPI: the client's target vs the actual rollup.
+
+    ``higher_is_better`` says which direction is good (CTR/conversion up, CPL
+    down); ``on_track`` is the resolved verdict comparing ``actual`` to ``target``.
+    Fed to both the model prompt and the deterministic fallback so the health
+    score reflects performance-vs-goal, not just setup completeness.
+    """
+
+    label: str
+    target: float
+    actual: float
+    higher_is_better: bool
+    on_track: bool
+    unit: str = ""  # "$", "%", "" — for display/prompt formatting
+
+
+@dataclass
 class DashboardSignals:
     spend: float = 0.0
     leads: int = 0
@@ -28,6 +46,16 @@ class DashboardSignals:
     platforms: list[str] = field(default_factory=list)
     goals: str | None = None
     brand_voice: str | None = None
+    # ---- goal-relative signals (cross-channel campaign targets vs actuals) ----
+    active_campaigns: int = 0
+    goal_metrics: list[GoalMetric] = field(default_factory=list)
+
+    def _fmt(self, value: float, unit: str) -> str:
+        if unit == "$":
+            return f"${value:,.2f}"
+        if unit == "%":
+            return f"{value:,.2f}%"
+        return f"{value:,.2f}"
 
     def as_prompt_facts(self) -> str:
         """A compact, human-readable fact sheet for the model prompt."""
@@ -41,9 +69,20 @@ class DashboardSignals:
             f"- Onboarding complete: {'yes' if self.onboarding_completed else 'no'}",
             f"- Intelligence profile ready: {'yes' if self.has_profile else 'no'}",
             f"- Channels: {', '.join(self.platforms) or 'none specified'}",
+            f"- Active campaigns: {self.active_campaigns}",
             f"- Goals: {self.goals or 'not specified'}",
             f"- Brand voice: {self.brand_voice or 'not specified'}",
         ]
+        if self.goal_metrics:
+            lines.append("- Goal performance (target vs actual):")
+            for m in self.goal_metrics:
+                verdict = "on/ahead of target" if m.on_track else "behind target"
+                lines.append(
+                    f"    - {m.label}: target {self._fmt(m.target, m.unit)}, "
+                    f"actual {self._fmt(m.actual, m.unit)} ({verdict})"
+                )
+        else:
+            lines.append("- Goal performance: no campaign KPI targets/actuals on file yet")
         if self.banned_words:
             lines.append(f"- Banned words/phrases: {', '.join(self.banned_words)}")
         if self.required_phrases:

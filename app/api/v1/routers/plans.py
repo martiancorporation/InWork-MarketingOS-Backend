@@ -66,9 +66,7 @@ def create_task(
     return PlanTaskRead.model_validate(task)
 
 
-@router.get(
-    "/tasks/{task_id}", response_model=PlanTaskRead, summary="Get a plan task"
-)
+@router.get("/tasks/{task_id}", response_model=PlanTaskRead, summary="Get a plan task")
 def get_task(
     client_id: uuid.UUID, task_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> PlanTaskRead:
@@ -77,9 +75,7 @@ def get_task(
     return PlanTaskRead.model_validate(task)
 
 
-@router.patch(
-    "/tasks/{task_id}", response_model=PlanTaskRead, summary="Edit / move a plan task"
-)
+@router.patch("/tasks/{task_id}", response_model=PlanTaskRead, summary="Edit / move a plan task")
 def update_task(
     client_id: uuid.UUID,
     task_id: uuid.UUID,

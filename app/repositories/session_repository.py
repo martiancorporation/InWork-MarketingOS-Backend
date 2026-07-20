@@ -19,9 +19,7 @@ class SessionRepository(BaseRepository[UserSession]):
     model = UserSession
 
     def get_by_token_hash(self, token_hash: str) -> UserSession | None:
-        return self.db.scalar(
-            select(UserSession).where(UserSession.token_hash == token_hash)
-        )
+        return self.db.scalar(select(UserSession).where(UserSession.token_hash == token_hash))
 
     def delete_by_token_hash(self, token_hash: str) -> bool:
         """Revoke a session by its token hash. Returns True if one was removed."""

@@ -41,7 +41,9 @@ def list_events(
     user: CurrentUser,
     db: DbSession,
     pagination: Pagination,
-    year: int | None = Query(None, ge=1970, le=9999, description="Filter to a month (with `month`)"),
+    year: int | None = Query(
+        None, ge=1970, le=9999, description="Filter to a month (with `month`)"
+    ),
     month: int | None = Query(None, ge=1, le=12, description="1-12; pair with `year`"),
     stage: EventStage | None = Query(None, description="draft / scheduled / published / archived"),
     platform: SocialPlatform | None = Query(None),
@@ -75,9 +77,7 @@ def create_event(
     return EventRead.model_validate(event)
 
 
-@router.get(
-    "/events/{event_id}", response_model=EventRead, summary="Get a calendar event"
-)
+@router.get("/events/{event_id}", response_model=EventRead, summary="Get a calendar event")
 def get_event(
     client_id: uuid.UUID, event_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> EventRead:
@@ -86,9 +86,7 @@ def get_event(
     return EventRead.model_validate(event)
 
 
-@router.patch(
-    "/events/{event_id}", response_model=EventRead, summary="Edit / reschedule an event"
-)
+@router.patch("/events/{event_id}", response_model=EventRead, summary="Edit / reschedule an event")
 def update_event(
     client_id: uuid.UUID,
     event_id: uuid.UUID,
@@ -97,9 +95,7 @@ def update_event(
     db: DbSession,
 ) -> EventRead:
     ClientService(db).get_client(user, client_id)
-    event = CalendarService(db).update_event(
-        client_id, event_id, data, actor_id=user.id
-    )
+    event = CalendarService(db).update_event(client_id, event_id, data, actor_id=user.id)
     return EventRead.model_validate(event)
 
 
@@ -116,9 +112,7 @@ def decide_approval(
     db: DbSession,
 ) -> EventRead:
     ClientService(db).get_client(user, client_id)
-    event = CalendarService(db).decide_approval(
-        client_id, event_id, data, actor_id=user.id
-    )
+    event = CalendarService(db).decide_approval(client_id, event_id, data, actor_id=user.id)
     return EventRead.model_validate(event)
 
 

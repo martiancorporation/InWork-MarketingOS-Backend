@@ -23,8 +23,11 @@ def _thread(client, headers, cid):
     resp = client.post(
         f"{API}/clients/{cid}/conversations",
         headers=headers,
-        json={"subject": "Change request", "body": "Please make the logo bigger.",
-              "recipients": [{"email": "jane@acme.com"}]},
+        json={
+            "subject": "Change request",
+            "body": "Please make the logo bigger.",
+            "recipients": [{"email": "jane@acme.com"}],
+        },
     )
     assert resp.status_code == 201, resp.text
     conv = resp.json()
@@ -46,9 +49,7 @@ def test_add_to_source_stamps_message_and_creates_source(
     assert body["knowledge_source_id"] is not None
 
     # A knowledge source row was created for the message.
-    src = db_session.scalar(
-        select(KnowledgeSource).where(KnowledgeSource.ref_kind == "message")
-    )
+    src = db_session.scalar(select(KnowledgeSource).where(KnowledgeSource.ref_kind == "message"))
     assert src is not None
     assert str(src.ref_id) == msg_id
     assert "logo bigger" in (src.extracted_text or "")

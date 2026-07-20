@@ -73,9 +73,7 @@ class AssistantService:
         self.db.refresh(chat)
         return chat
 
-    def get_chat_detail(
-        self, client_id: uuid.UUID, chat_id: uuid.UUID
-    ) -> AssistantChatDetail:
+    def get_chat_detail(self, client_id: uuid.UUID, chat_id: uuid.UUID) -> AssistantChatDetail:
         chat = self._require_chat(client_id, chat_id)
         messages = self.chats.list_messages(chat_id)
         return AssistantChatDetail(
@@ -109,9 +107,7 @@ class AssistantService:
             client_id,
             embedder=get_embedder(),
             ai_client=AnthropicClient(
-                AiUsageContext(
-                    feature=AiFeature.PROJECT_AI, client_id=client_id, user_id=user_id
-                )
+                AiUsageContext(feature=AiFeature.PROJECT_AI, client_id=client_id, user_id=user_id)
             ),
         )
         answer, sources = await agent.answer(content, history=history)

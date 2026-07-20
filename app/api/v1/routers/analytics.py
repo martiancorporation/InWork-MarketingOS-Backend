@@ -33,7 +33,9 @@ _CSV_MAX_BYTES = 5 * 1024 * 1024  # 5 MB cap on an uploaded CSV
 router = APIRouter(prefix="/clients/{client_id}/analytics", tags=["analytics"])
 
 
-@router.post("/ingest", response_model=AnalyticsIngestResponse, summary="Upsert daily analytics rows")
+@router.post(
+    "/ingest", response_model=AnalyticsIngestResponse, summary="Upsert daily analytics rows"
+)
 def ingest(
     client_id: uuid.UUID, data: AnalyticsIngestRequest, user: CurrentUser, db: DbSession
 ) -> AnalyticsIngestResponse:
@@ -51,7 +53,10 @@ async def import_csv(
     client_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
-    file: UploadFile = File(..., description="CSV with header: date,platform,impressions,clicks,conversions,leads,spend,revenue"),
+    file: UploadFile = File(
+        ...,
+        description="CSV with header: date,platform,impressions,clicks,conversions,leads,spend,revenue",
+    ),
 ) -> AnalyticsCsvImportResponse:
     ClientService(db).get_client(user, client_id)
     raw = await file.read()

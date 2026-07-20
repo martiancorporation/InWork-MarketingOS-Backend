@@ -25,4 +25,8 @@ class AiFeature:
     HEALTH_SCORE = "dashboard.health_score"
     EXECUTIVE_BRIEF = "dashboard.executive_brief"
     WATCHDOG = "dashboard.watchdog"
+    OPPORTUNITY = "dashboard.opportunity"
+    QA_REVIEW = "qa.review"
+    MISSING_INFO = "onboarding.missing_info"
+    COST_OPTIMIZATION = "cost.optimization"
     UNKNOWN = "unknown"

@@ -24,7 +24,9 @@ from tests.helpers import onboarding_payload
 
 
 def _onboard(client: TestClient, admin_headers) -> str:
-    resp = client.post(f"{API}/clients/onboarding", headers=admin_headers, json=onboarding_payload())
+    resp = client.post(
+        f"{API}/clients/onboarding", headers=admin_headers, json=onboarding_payload()
+    )
     assert resp.status_code == 201, resp.text
     return resp.json()["client"]["id"]
 
@@ -59,5 +61,7 @@ def test_process_missing_job_is_noop(db_session: Session):
 
     # A job id that doesn't exist must simply no-op, never crash.
     asyncio.run(
-        worker.process_job(uuid.uuid4(), session=db_session, embedder=FakeEmbedder(1024), storage=None)
+        worker.process_job(
+            uuid.uuid4(), session=db_session, embedder=FakeEmbedder(1024), storage=None
+        )
     )

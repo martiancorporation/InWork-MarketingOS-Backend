@@ -17,15 +17,41 @@ def _client_id(client, admin_headers, name="Acme Co."):
 
 
 def _ingest(client, headers, cid, rows):
-    resp = client.post(f"{API}/clients/{cid}/analytics/ingest", headers=headers, json={"rows": rows})
+    resp = client.post(
+        f"{API}/clients/{cid}/analytics/ingest", headers=headers, json={"rows": rows}
+    )
     assert resp.status_code == 200, resp.text
     return resp.json()
 
 
 SEED = [
-    {"date": "2026-09-01", "platform": "instagram", "impressions": 1000, "clicks": 50, "leads": 5, "spend": 100, "revenue": 300},
-    {"date": "2026-09-01", "platform": "facebook", "impressions": 2000, "clicks": 80, "leads": 10, "spend": 150, "revenue": 450},
-    {"date": "2026-09-02", "platform": "instagram", "impressions": 1200, "clicks": 60, "leads": 6, "spend": 120, "revenue": 360},
+    {
+        "date": "2026-09-01",
+        "platform": "instagram",
+        "impressions": 1000,
+        "clicks": 50,
+        "leads": 5,
+        "spend": 100,
+        "revenue": 300,
+    },
+    {
+        "date": "2026-09-01",
+        "platform": "facebook",
+        "impressions": 2000,
+        "clicks": 80,
+        "leads": 10,
+        "spend": 150,
+        "revenue": 450,
+    },
+    {
+        "date": "2026-09-02",
+        "platform": "instagram",
+        "impressions": 1200,
+        "clicks": 60,
+        "leads": 6,
+        "spend": 120,
+        "revenue": 360,
+    },
 ]
 
 
@@ -84,7 +110,9 @@ def test_summary_empty_client(client: TestClient, admin_headers: dict):
 
 def test_ingest_requires_rows(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
-    resp = client.post(f"{API}/clients/{cid}/analytics/ingest", headers=admin_headers, json={"rows": []})
+    resp = client.post(
+        f"{API}/clients/{cid}/analytics/ingest", headers=admin_headers, json={"rows": []}
+    )
     assert resp.status_code == 422
 
 
@@ -93,21 +121,32 @@ def test_analytics_client_scoped(client: TestClient, admin_headers: dict):
     cid_b = _client_id(client, admin_headers, name="Client B")
     _ingest(client, admin_headers, cid_a, SEED)
     # client B sees none of A's data
-    assert client.get(f"{API}/clients/{cid_b}/analytics/daily", headers=admin_headers).json()["total"] == 0
+    assert (
+        client.get(f"{API}/clients/{cid_b}/analytics/daily", headers=admin_headers).json()["total"]
+        == 0
+    )
 
 
 def test_assigned_user_can_read(client: TestClient, admin_headers: dict, make_user):
     user, user_headers = make_user()
     cid = _client_id(client, admin_headers)
-    client.post(f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]})
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
     _ingest(client, admin_headers, cid, SEED)
-    assert client.get(f"{API}/clients/{cid}/analytics/summary", headers=user_headers).status_code == 200
+    assert (
+        client.get(f"{API}/clients/{cid}/analytics/summary", headers=user_headers).status_code
+        == 200
+    )
 
 
 def test_unassigned_user_gets_404(client: TestClient, admin_headers: dict, make_user):
     _user, user_headers = make_user()
     cid = _client_id(client, admin_headers)
-    assert client.get(f"{API}/clients/{cid}/analytics/summary", headers=user_headers).status_code == 404
+    assert (
+        client.get(f"{API}/clients/{cid}/analytics/summary", headers=user_headers).status_code
+        == 404
+    )
 
 
 def test_analytics_requires_auth(client: TestClient, admin_headers: dict):

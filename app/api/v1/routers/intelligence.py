@@ -52,9 +52,7 @@ def get_intelligence(
     response_model=IntelligenceStatus,
     summary="Intelligence build status",
 )
-def get_status(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
-) -> IntelligenceStatus:
+def get_status(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> IntelligenceStatus:
     client = ClientService(db).get_client(user, client_id)
     return IntelligenceService(db).status(client)
 
@@ -88,9 +86,7 @@ def get_version(
     response_model=IntelligenceStatus,
     summary="Force a full intelligence rebuild (admin)",
 )
-def rebuild(
-    client_id: uuid.UUID, admin: AdminUser, db: DbSession
-) -> IntelligenceStatus:
+def rebuild(client_id: uuid.UUID, admin: AdminUser, db: DbSession) -> IntelligenceStatus:
     client = ClientService(db).get_client(admin, client_id)
     return IntelligenceService(db).rebuild(client)
 

@@ -57,9 +57,7 @@ def list_alerts(
     response_model=AlertEvaluateResult,
     summary="Run the KPI watchdog over the client's campaigns",
 )
-def evaluate_alerts(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
-) -> AlertEvaluateResult:
+def evaluate_alerts(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> AlertEvaluateResult:
     ClientService(db).get_client(user, client_id)
     return AlertService(db).evaluate(client_id)
 
@@ -72,31 +70,23 @@ def get_alert(
     return AlertRead.model_validate(AlertService(db).get_alert(client_id, alert_id))
 
 
-@router.post(
-    "/{alert_id}/acknowledge", response_model=AlertRead, summary="Acknowledge an alert"
-)
+@router.post("/{alert_id}/acknowledge", response_model=AlertRead, summary="Acknowledge an alert")
 def acknowledge_alert(
     client_id: uuid.UUID,
     alert_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
     # Acknowledging is a "review results" responsibility (BE-03).
-    _client: Annotated[
-        Client, Depends(require_capability(ClientCapability.review_results))
-    ],
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.review_results))],
 ) -> AlertRead:
     return AlertRead.model_validate(
         AlertService(db).acknowledge(client_id, alert_id, actor_id=user.id)
     )
 
 
-@router.post(
-    "/{alert_id}/resolve", response_model=AlertRead, summary="Resolve an alert"
-)
+@router.post("/{alert_id}/resolve", response_model=AlertRead, summary="Resolve an alert")
 def resolve_alert(
     client_id: uuid.UUID, alert_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> AlertRead:
     ClientService(db).get_client(user, client_id)
-    return AlertRead.model_validate(
-        AlertService(db).resolve(client_id, alert_id, actor_id=user.id)
-    )
+    return AlertRead.model_validate(AlertService(db).resolve(client_id, alert_id, actor_id=user.id))

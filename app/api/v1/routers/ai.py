@@ -23,6 +23,7 @@ from app.models.client import Client
 from app.models.enums import ClientCapability
 from app.schemas.ai import (
     DashboardResponse,
+    OpportunityResponse,
     RecommendationActionListResponse,
     RecommendationActionRead,
     RecommendationDecisionRequest,
@@ -48,13 +49,24 @@ async def get_dashboard(
 
 
 @router.get(
+    "/opportunities",
+    response_model=OpportunityResponse,
+    summary="AI growth opportunities (new markets/keywords) with external research",
+    dependencies=[Depends(RateLimit("ai_opportunities", times=20, seconds=60))],
+)
+async def get_opportunities(
+    client_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> OpportunityResponse:
+    client = ClientService(db).get_client(user, client_id)
+    return await DashboardService(db).opportunities(client, user_id=user.id)
+
+
+@router.get(
     "/setup",
     response_model=SetupStatusResponse,
     summary="Per-client outstanding-setup items + count (red-dot indicator)",
 )
-def get_setup_status(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
-) -> SetupStatusResponse:
+def get_setup_status(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> SetupStatusResponse:
     client = ClientService(db).get_client(user, client_id)
     return DashboardService(db).setup_status(client)
 
@@ -71,14 +83,10 @@ def decide_recommendation(
     user: CurrentUser,
     db: DbSession,
     # Deciding on a recommendation is a "review results" responsibility (BE-03).
-    _client: Annotated[
-        Client, Depends(require_capability(ClientCapability.review_results))
-    ],
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.review_results))],
     rec_key: str = Path(max_length=80, description="Stable recommendation id"),
 ) -> RecommendationActionRead:
-    action = DashboardService(db).record_decision(
-        client_id, rec_key, data, decided_by=user.id
-    )
+    action = DashboardService(db).record_decision(client_id, rec_key, data, decided_by=user.id)
     return RecommendationActionRead.model_validate(action)
 
 

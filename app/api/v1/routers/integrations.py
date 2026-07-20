@@ -48,9 +48,7 @@ def list_integrations(
     return IntegrationService(db).list(client_id)
 
 
-@router.get(
-    "/{key}", response_model=IntegrationRead, summary="Get one integration"
-)
+@router.get("/{key}", response_model=IntegrationRead, summary="Get one integration")
 def get_integration(
     client_id: uuid.UUID, key: IntegrationKey, user: CurrentUser, db: DbSession
 ) -> IntegrationRead:
@@ -116,9 +114,7 @@ def connect_integration(
     db: DbSession,
     # Requires the ``manage_integrations`` capability (admins/managers always pass;
     # 404 if inaccessible, 403 if accessible-but-unauthorized).
-    _client: Annotated[
-        Client, Depends(require_capability(ClientCapability.manage_integrations))
-    ],
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
 ) -> IntegrationRead:
     integration = IntegrationService(db).connect(client_id, key, data)
     return IntegrationRead.model_validate(integration)

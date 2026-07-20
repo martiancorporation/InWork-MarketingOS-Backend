@@ -31,9 +31,7 @@ class MeService:
         self.events = EventRepository(db)
         self.alerts = AlertRepository(db)
 
-    def pending(
-        self, user: User, *, pagination: PaginationParams
-    ) -> MePendingResponse:
+    def pending(self, user: User, *, pagination: PaginationParams) -> MePendingResponse:
         # Admins aggregate across all clients (None = no client filter);
         # non-admins are restricted to the clients assigned to them.
         if user.role == UserRole.admin:
@@ -49,9 +47,7 @@ class MeService:
         clients = {c.id: c for c in self.clients.get_many(list(client_ids))}
 
         rows: list[MePendingClient] = []
-        totals = MePendingTotals(
-            assigned_tasks=0, pending_approvals=0, open_alerts=0, total=0
-        )
+        totals = MePendingTotals(assigned_tasks=0, pending_approvals=0, open_alerts=0, total=0)
         for cid in client_ids:
             client = clients.get(cid)
             if client is None:  # defensive: client removed mid-aggregation

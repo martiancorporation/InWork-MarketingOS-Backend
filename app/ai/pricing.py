@@ -53,7 +53,8 @@ def _load_pricing() -> dict[str, ModelRate]:
         try:
             for model, r in json.loads(raw).items():
                 rates[model] = _rate(
-                    str(r["input"]), str(r["output"]),
+                    str(r["input"]),
+                    str(r["output"]),
                     str(r.get("cache_write", r["input"])),
                     str(r.get("cache_read", r["input"])),
                 )
@@ -103,8 +104,7 @@ def price(model: str, usage: UsageBreakdown) -> CostBreakdown:
     ic = rate.input * usage.input_tokens / _MILLION
     oc = rate.output * usage.output_tokens / _MILLION
     cc = (
-        rate.cache_write * usage.cache_write_tokens
-        + rate.cache_read * usage.cache_read_tokens
+        rate.cache_write * usage.cache_write_tokens + rate.cache_read * usage.cache_read_tokens
     ) / _MILLION
     total = ic + oc + cc
     return CostBreakdown(

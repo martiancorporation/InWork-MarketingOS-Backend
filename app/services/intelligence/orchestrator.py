@@ -80,7 +80,10 @@ class IntelligenceOrchestrator:
             source_by_key[_source_key(src)] = src.id
             if item.needs_rechunk:
                 self.chunks.delete_for_source(src.id)
-                if src.status == SourceStatus.extracted.value and (src.extracted_text or "").strip():
+                if (
+                    src.status == SourceStatus.extracted.value
+                    and (src.extracted_text or "").strip()
+                ):
                     self._embed_source(client.id, src)
 
         # 3. Assemble the full corpus (all current sources, changed or not).
@@ -88,9 +91,7 @@ class IntelligenceOrchestrator:
 
         # 4 & 5. Summary + directives over the complete corpus.
         summary = await self.summary_agent.summarize(client, corpus, ctx)
-        raw_directives = await self.directives_agent.extract(
-            client, corpus, summary.profile, ctx
-        )
+        raw_directives = await self.directives_agent.extract(client, corpus, summary.profile, ctx)
 
         # 6. Reconcile conflicts + compile capability flags.
         reconciled = reconcile(raw_directives)
@@ -146,7 +147,10 @@ class IntelligenceOrchestrator:
         self.db.commit()
         logger.info(
             "Built profile v%s for client %s (%s directives, %s sources)",
-            version, client.id, len(created), len(synced),
+            version,
+            client.id,
+            len(created),
+            len(synced),
         )
         return profile
 
@@ -180,9 +184,7 @@ class IntelligenceOrchestrator:
         cap = self.settings.max_corpus_chars
         # Fields before documents; brand/compliance/goals surface first.
         priority = {"field": 0, "document": 1}
-        ordered = sorted(
-            synced, key=lambda i: priority.get(i.source.ref_kind or "document", 1)
-        )
+        ordered = sorted(synced, key=lambda i: priority.get(i.source.ref_kind or "document", 1))
         for item in ordered:
             src = item.source
             text = (src.extracted_text or "").strip()

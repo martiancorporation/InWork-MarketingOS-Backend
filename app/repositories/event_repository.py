@@ -20,9 +20,7 @@ from app.repositories.base import BaseRepository
 class EventRepository(BaseRepository[MarketingEvent]):
     model = MarketingEvent
 
-    def get_for_client(
-        self, client_id: uuid.UUID, event_id: uuid.UUID
-    ) -> MarketingEvent | None:
+    def get_for_client(self, client_id: uuid.UUID, event_id: uuid.UUID) -> MarketingEvent | None:
         """Load one event (with post/ad/assets/activity eager-loaded) scoped to a client."""
         return self.db.scalar(
             select(MarketingEvent)
@@ -66,9 +64,7 @@ class EventRepository(BaseRepository[MarketingEvent]):
         if approval_status is not None:
             conditions.append(MarketingEvent.approval_status == approval_status)
 
-        total = self.db.scalar(
-            select(func.count()).select_from(MarketingEvent).where(*conditions)
-        )
+        total = self.db.scalar(select(func.count()).select_from(MarketingEvent).where(*conditions))
         stmt = (
             select(MarketingEvent)
             .where(*conditions)

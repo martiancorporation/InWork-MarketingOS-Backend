@@ -60,7 +60,8 @@ class ContextService:
             return ClientContext(version=None, preamble=_no_profile_preamble())
 
         active = [
-            d for d in self.directives.active_for_profile(profile.id)
+            d
+            for d in self.directives.active_for_profile(profile.id)
             if d.status == DirectiveStatus.active.value
         ]
         preamble = _render_preamble(client, active)
@@ -90,11 +91,14 @@ def _no_profile_preamble() -> str:
 def _render_preamble(client: Client, directives: list[ClientDirective]) -> str:
     must_not = [d for d in directives if d.tier == DirectiveTier.mandatory.value]
     required = [d for d in directives if d.tier == DirectiveTier.required.value]
-    prefs = [d for d in directives
-             if d.tier in {DirectiveTier.preference.value, DirectiveTier.inferred.value}]
+    prefs = [
+        d
+        for d in directives
+        if d.tier in {DirectiveTier.preference.value, DirectiveTier.inferred.value}
+    ]
 
     lines = [
-        f"You are acting on behalf of the client \"{client.name}\". "
+        f'You are acting on behalf of the client "{client.name}". '
         "Follow this client's rules exactly. Rules are ordered by priority; "
         "higher sections override lower ones.",
     ]

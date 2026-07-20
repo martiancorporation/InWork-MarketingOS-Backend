@@ -40,12 +40,16 @@ class AiUsageEvent(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     client_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("clients.id", ondelete="SET NULL"), index=True
     )
-    feature: Mapped[str] = mapped_column(String(80), nullable=False)  # origin, e.g. "onboarding.brand_extraction"
+    feature: Mapped[str] = mapped_column(
+        String(80), nullable=False
+    )  # origin, e.g. "onboarding.brand_extraction"
 
     # --- provider / model / call type ---
     provider: Mapped[str] = mapped_column(String(40), nullable=False, default="anthropic")
     model: Mapped[str] = mapped_column(String(80), nullable=False)
-    operation: Mapped[str] = mapped_column(String(40), nullable=False)  # complete / complete_with_image / analyze_url
+    operation: Mapped[str] = mapped_column(
+        String(40), nullable=False
+    )  # complete / complete_with_image / analyze_url
 
     # --- token consumption ---
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -64,7 +68,9 @@ class AiUsageEvent(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     priced: Mapped[bool] = mapped_column(nullable=False, default=True)
 
     # --- outcome / traceability ---
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="success")  # success | error
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="success"
+    )  # success | error
     error: Mapped[str | None] = mapped_column(Text)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     request_id: Mapped[str | None] = mapped_column(String(80))  # provider response id

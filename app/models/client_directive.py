@@ -29,18 +29,20 @@ if TYPE_CHECKING:
 
 class ClientDirective(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "client_directives"
-    __table_args__ = (
-        Index("ix_client_directives_client_tier", "client_id", "tier"),
-    )
+    __table_args__ = (Index("ix_client_directives_client_tier", "client_id", "tier"),)
 
     profile_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("client_profiles.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        GUID,
+        ForeignKey("client_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    type: Mapped[str] = mapped_column(String(16), nullable=False, default=DirectiveType.prefer.value)
+    type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=DirectiveType.prefer.value
+    )
     category: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     tier: Mapped[str] = mapped_column(

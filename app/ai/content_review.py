@@ -25,13 +25,33 @@ from app.services.intelligence.client_agent import ClientAgent
 logger = logging.getLogger("app.ai.content_review")
 
 _SOCIAL = {
-    SocialPlatform.instagram, SocialPlatform.facebook, SocialPlatform.tiktok,
-    SocialPlatform.x, SocialPlatform.linkedin, SocialPlatform.pinterest,
+    SocialPlatform.instagram,
+    SocialPlatform.facebook,
+    SocialPlatform.tiktok,
+    SocialPlatform.x,
+    SocialPlatform.linkedin,
+    SocialPlatform.pinterest,
 }
 _CTA_HINTS = (
-    "shop", "learn", "sign up", "signup", "call", "book", "get", "discover",
-    "contact", "buy", "download", "subscribe", "register", "order", "visit",
-    "explore", "join", "claim", "start",
+    "shop",
+    "learn",
+    "sign up",
+    "signup",
+    "call",
+    "book",
+    "get",
+    "discover",
+    "contact",
+    "buy",
+    "download",
+    "subscribe",
+    "register",
+    "order",
+    "visit",
+    "explore",
+    "join",
+    "claim",
+    "start",
 )
 
 
@@ -80,8 +100,11 @@ class ContentReviewAgent(ClientAgent):
         except Exception:
             logger.warning("Content review AI failed for client %s", self.client_id, exc_info=True)
             return ContentReviewReport(
-                seo=seo, compliance=compliance, brand_voice_aligned=None,
-                issues=base_issues, suggestions=_deterministic_suggestions(seo, base_issues),
+                seo=seo,
+                compliance=compliance,
+                brand_voice_aligned=None,
+                issues=base_issues,
+                suggestions=_deterministic_suggestions(seo, base_issues),
                 ai_generated=False,
             )
         payload = parse_json_object(raw) or {}
@@ -156,9 +179,7 @@ def _deterministic_suggestions(seo: SeoScore, issues: list[str]) -> list[str]:
     if issues:
         # Something's flagged (compliance / SEO / brand-voice) — don't reassure.
         return (
-            ["Address the flagged SEO items before sending for approval."]
-            if seo.score < 85
-            else []
+            ["Address the flagged SEO items before sending for approval."] if seo.score < 85 else []
         )
     return ["Looks solid — a human reviewer can do a final on-brand pass."]
 

@@ -28,9 +28,7 @@ class AssignmentRepository(BaseRepository[ClientAssignment]):
         """The ids of every client assigned to a user (their accessible set)."""
         return list(
             self.db.scalars(
-                select(ClientAssignment.client_id).where(
-                    ClientAssignment.user_id == user_id
-                )
+                select(ClientAssignment.client_id).where(ClientAssignment.user_id == user_id)
             ).all()
         )
 

@@ -81,16 +81,12 @@ def compare_campaigns(
     return CampaignService(db).compare(client_id, ids)
 
 
-@router.get(
-    "/{campaign_id}", response_model=CampaignRead, summary="Get a campaign"
-)
+@router.get("/{campaign_id}", response_model=CampaignRead, summary="Get a campaign")
 def get_campaign(
     client_id: uuid.UUID, campaign_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> CampaignRead:
     ClientService(db).get_client(user, client_id)
-    return CampaignRead.model_validate(
-        CampaignService(db).get_campaign(client_id, campaign_id)
-    )
+    return CampaignRead.model_validate(CampaignService(db).get_campaign(client_id, campaign_id))
 
 
 @router.get(
@@ -105,9 +101,7 @@ def campaign_health(
     return CampaignService(db).health(client_id, campaign_id)
 
 
-@router.patch(
-    "/{campaign_id}", response_model=CampaignRead, summary="Update a campaign"
-)
+@router.patch("/{campaign_id}", response_model=CampaignRead, summary="Update a campaign")
 def update_campaign(
     client_id: uuid.UUID,
     campaign_id: uuid.UUID,
@@ -121,9 +115,7 @@ def update_campaign(
     )
 
 
-@router.delete(
-    "/{campaign_id}", response_model=MessageResponse, summary="Delete a campaign"
-)
+@router.delete("/{campaign_id}", response_model=MessageResponse, summary="Delete a campaign")
 def delete_campaign(
     client_id: uuid.UUID, campaign_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> MessageResponse:

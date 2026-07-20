@@ -29,9 +29,7 @@ class ScrapingBeeClient:
     def is_configured(self) -> bool:
         return self._s.scrapingbee_configured
 
-    def fetch_html(
-        self, url: str, *, render_js: bool = True, timeout: float = 40.0
-    ) -> str | None:
+    def fetch_html(self, url: str, *, render_js: bool = True, timeout: float = 40.0) -> str | None:
         target = normalize_url(url)
         if not target or not self.is_configured:
             return None

@@ -50,12 +50,8 @@ def mark_all_read(user: CurrentUser, db: DbSession) -> MessageResponse:
     return MessageResponse(detail=f"Marked {n} notification(s) read.")
 
 
-@router.post(
-    "/{notification_id}/read", response_model=NotificationRead, summary="Mark one read"
-)
-def mark_read(
-    notification_id: uuid.UUID, user: CurrentUser, db: DbSession
-) -> NotificationRead:
+@router.post("/{notification_id}/read", response_model=NotificationRead, summary="Mark one read")
+def mark_read(notification_id: uuid.UUID, user: CurrentUser, db: DbSession) -> NotificationRead:
     return NotificationRead.model_validate(
         NotificationService(db).mark_read(user.id, notification_id)
     )

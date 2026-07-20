@@ -35,9 +35,7 @@ from app.services.client_service import ClientService
 router = APIRouter(prefix="/clients/{client_id}/assistant", tags=["assistant"])
 
 
-@router.get(
-    "/chats", response_model=AssistantChatListResponse, summary="List project AI chats"
-)
+@router.get("/chats", response_model=AssistantChatListResponse, summary="List project AI chats")
 def list_chats(
     client_id: uuid.UUID,
     user: CurrentUser,
@@ -95,9 +93,7 @@ async def ask(
     return await AssistantService(db).ask(client_id, chat_id, user.id, data.content)
 
 
-@router.delete(
-    "/chats/{chat_id}", response_model=MessageResponse, summary="Delete a chat"
-)
+@router.delete("/chats/{chat_id}", response_model=MessageResponse, summary="Delete a chat")
 def delete_chat(
     client_id: uuid.UUID, chat_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> MessageResponse:

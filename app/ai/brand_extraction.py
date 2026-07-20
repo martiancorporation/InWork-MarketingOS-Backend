@@ -270,12 +270,12 @@ class BrandExtractionService:
                         context=context,
                     )
                 else:
-                    raw = await self._client.complete(
-                        system=system, prompt=prompt, context=context
-                    )
+                    raw = await self._client.complete(system=system, prompt=prompt, context=context)
             except Exception:  # transient API error — retry once, then degrade
                 logger.warning(
-                    "Brand analysis attempt %d failed for %s", attempt + 1, website,
+                    "Brand analysis attempt %d failed for %s",
+                    attempt + 1,
+                    website,
                     exc_info=True,
                 )
                 continue

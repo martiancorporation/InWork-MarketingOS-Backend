@@ -40,9 +40,7 @@ async def _read_capped(file: UploadFile, max_bytes: int) -> bytes:
             break
         buffer.extend(chunk)
         if len(buffer) > max_bytes:
-            raise PayloadTooLargeError(
-                f"File exceeds the {max_bytes // (1024 * 1024)} MB limit."
-            )
+            raise PayloadTooLargeError(f"File exceeds the {max_bytes // (1024 * 1024)} MB limit.")
     return bytes(buffer)
 
 

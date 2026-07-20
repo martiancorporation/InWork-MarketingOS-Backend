@@ -68,9 +68,7 @@ def test_list_includes_progress_and_status(client: TestClient, admin_headers: di
 
 def test_admin_patch_status_to_inactive(client: TestClient, admin_headers: dict):
     cid = _atomic_id(client, admin_headers)
-    resp = client.patch(
-        f"{API}/clients/{cid}", headers=admin_headers, json={"status": "inactive"}
-    )
+    resp = client.patch(f"{API}/clients/{cid}", headers=admin_headers, json={"status": "inactive"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "inactive"
     # persisted
@@ -94,9 +92,7 @@ def test_patch_updates_basic_fields(client: TestClient, admin_headers: dict):
 
 def test_patch_rejects_bad_status(client: TestClient, admin_headers: dict):
     cid = _atomic_id(client, admin_headers)
-    resp = client.patch(
-        f"{API}/clients/{cid}", headers=admin_headers, json={"status": "bogus"}
-    )
+    resp = client.patch(f"{API}/clients/{cid}", headers=admin_headers, json={"status": "bogus"})
     assert resp.status_code == 422
 
 

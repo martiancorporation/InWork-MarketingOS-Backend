@@ -47,7 +47,9 @@ def test_list_and_folder_filter(client: TestClient, admin_headers: dict):
     _new_conversation(client, admin_headers, cid, subject="Draft one", folder="drafts")
     all_threads = client.get(f"{API}/clients/{cid}/conversations", headers=admin_headers).json()
     assert all_threads["total"] == 2
-    sent = client.get(f"{API}/clients/{cid}/conversations?folder=sent", headers=admin_headers).json()
+    sent = client.get(
+        f"{API}/clients/{cid}/conversations?folder=sent", headers=admin_headers
+    ).json()
     assert sent["total"] == 1
     assert sent["items"][0]["subject"] == "Sent one"
 
@@ -56,7 +58,9 @@ def test_search_and_category_filter(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     _new_conversation(client, admin_headers, cid, subject="Budget shift", category="Billing")
     _new_conversation(client, admin_headers, cid, subject="Creative review", category="Campaigns")
-    found = client.get(f"{API}/clients/{cid}/conversations?search=budget", headers=admin_headers).json()
+    found = client.get(
+        f"{API}/clients/{cid}/conversations?search=budget", headers=admin_headers
+    ).json()
     assert found["total"] == 1 and found["items"][0]["subject"] == "Budget shift"
     billing = client.get(
         f"{API}/clients/{cid}/conversations?category=Billing", headers=admin_headers
@@ -127,9 +131,7 @@ def test_conversations_are_client_scoped(client: TestClient, admin_headers: dict
     cid_a = _client_id(client, admin_headers, name="Client A")
     cid_b = _client_id(client, admin_headers, name="Client B")
     conv = _new_conversation(client, admin_headers, cid_a)
-    resp = client.get(
-        f"{API}/clients/{cid_b}/conversations/{conv['id']}", headers=admin_headers
-    )
+    resp = client.get(f"{API}/clients/{cid_b}/conversations/{conv['id']}", headers=admin_headers)
     assert resp.status_code == 404
 
 
@@ -147,7 +149,9 @@ def test_assigned_user_can_use_inbox(client: TestClient, admin_headers: dict, ma
     )
     conv = _new_conversation(client, user_headers, cid)
     assert conv["messages"][0]["sender_user_id"] == user["id"]
-    assert client.get(f"{API}/clients/{cid}/conversations", headers=user_headers).json()["total"] == 1
+    assert (
+        client.get(f"{API}/clients/{cid}/conversations", headers=user_headers).json()["total"] == 1
+    )
 
 
 def test_conversations_require_auth(client: TestClient, admin_headers: dict):

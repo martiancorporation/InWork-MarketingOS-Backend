@@ -24,9 +24,7 @@ class ClientProfileRepository(BaseRepository[ClientProfile]):
 
     def next_version(self, client_id: uuid.UUID) -> int:
         current = self.db.scalar(
-            select(func.max(ClientProfile.version)).where(
-                ClientProfile.client_id == client_id
-            )
+            select(func.max(ClientProfile.version)).where(ClientProfile.client_id == client_id)
         )
         return (current or 0) + 1
 
@@ -52,9 +50,7 @@ class ClientDirectiveRepository(BaseRepository[ClientDirective]):
             ).all()
         )
 
-    def get_owned(
-        self, client_id: uuid.UUID, directive_id: uuid.UUID
-    ) -> ClientDirective | None:
+    def get_owned(self, client_id: uuid.UUID, directive_id: uuid.UUID) -> ClientDirective | None:
         return self.db.scalar(
             select(ClientDirective).where(
                 ClientDirective.id == directive_id,

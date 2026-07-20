@@ -95,7 +95,10 @@ class SchedulerService:
                 )
             )
         return WatchdogSweepResult(
-            clients=len(rows), opened=opened, updated=updated, auto_resolved=resolved,
+            clients=len(rows),
+            opened=opened,
+            updated=updated,
+            auto_resolved=resolved,
             per_client=rows,
         )
 
@@ -122,8 +125,11 @@ class SchedulerService:
                     ok, err = False, str(exc)[:300]
                 details.append(
                     SyncSweepRow(
-                        client_id=client.id, client_name=client.name,
-                        key=item.key.value, ok=ok, error=err,
+                        client_id=client.id,
+                        client_name=client.name,
+                        key=item.key.value,
+                        ok=ok,
+                        error=err,
                     )
                 )
         return SyncSweepResult(
@@ -170,7 +176,9 @@ class SchedulerService:
             onboarding_percent=min(percent, 100),
             campaign_count=campaign_count,
             open_alerts=total_open,
-            high=by_sev["high"], medium=by_sev["medium"], low=by_sev["low"],
+            high=by_sev["high"],
+            medium=by_sev["medium"],
+            low=by_sev["low"],
             top_alerts=top,
             connected_integrations=connected,
             pending_integrations=pending,

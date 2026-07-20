@@ -54,8 +54,21 @@ def _event(db: Session, **kw):
 
 def _seed(db: Session):
     c = _client_row(db)
-    _event(db, client_id=c.id, feature="onboarding.brand_extraction", total_cost=0.05, total_tokens=1500)
-    _event(db, client_id=c.id, feature="project_ai.chat", model="claude-sonnet-5", total_cost=0.01, total_tokens=800)
+    _event(
+        db,
+        client_id=c.id,
+        feature="onboarding.brand_extraction",
+        total_cost=0.05,
+        total_tokens=1500,
+    )
+    _event(
+        db,
+        client_id=c.id,
+        feature="project_ai.chat",
+        model="claude-sonnet-5",
+        total_cost=0.01,
+        total_tokens=800,
+    )
     _event(db, client_id=None, feature="assistant.global", total_cost=0.02, total_tokens=300)
     return c
 
@@ -69,17 +82,23 @@ def test_detailed_log_lists_events(client: TestClient, admin_headers: dict, db_s
     assert {"items", "total", "page", "page_size"} <= set(body)
     # each item carries tokens + cost + attribution
     row = body["items"][0]
-    assert {"feature", "model", "total_tokens", "total_cost", "actor_user_id", "client_id"} <= set(row)
+    assert {"feature", "model", "total_tokens", "total_cost", "actor_user_id", "client_id"} <= set(
+        row
+    )
 
 
-def test_detailed_log_filters_by_feature(client: TestClient, admin_headers: dict, db_session: Session):
+def test_detailed_log_filters_by_feature(
+    client: TestClient, admin_headers: dict, db_session: Session
+):
     _seed(db_session)
     resp = client.get(f"{API}/ai-usage?feature=project_ai.chat", headers=admin_headers)
     items = resp.json()["items"]
     assert len(items) == 1 and items[0]["feature"] == "project_ai.chat"
 
 
-def test_platform_summary_totals_and_breakdowns(client: TestClient, admin_headers: dict, db_session: Session):
+def test_platform_summary_totals_and_breakdowns(
+    client: TestClient, admin_headers: dict, db_session: Session
+):
     _seed(db_session)
     resp = client.get(f"{API}/ai-usage/summary", headers=admin_headers)
     assert resp.status_code == 200
@@ -94,7 +113,9 @@ def test_platform_summary_totals_and_breakdowns(client: TestClient, admin_header
     assert len(s["daily"]) >= 1
 
 
-def test_client_summary_scoped_for_admin(client: TestClient, admin_headers: dict, db_session: Session):
+def test_client_summary_scoped_for_admin(
+    client: TestClient, admin_headers: dict, db_session: Session
+):
     c = _seed(db_session)
     resp = client.get(f"{API}/ai-usage/clients/{c.id}/summary", headers=admin_headers)
     assert resp.status_code == 200

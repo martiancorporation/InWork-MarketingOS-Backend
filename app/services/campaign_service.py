@@ -88,7 +88,11 @@ class CampaignService:
         self.db.flush()
         set_audit_changes(
             created_changes(
-                {"name": campaign.name, "status": campaign.status, "budget_usd": campaign.budget_usd}
+                {
+                    "name": campaign.name,
+                    "status": campaign.status,
+                    "budget_usd": campaign.budget_usd,
+                }
             )
         )
         self.db.commit()
@@ -131,7 +135,11 @@ class CampaignService:
         campaign = self.get_campaign(client_id, campaign_id)
         set_audit_changes(
             deleted_changes(
-                {"name": campaign.name, "status": campaign.status, "budget_usd": campaign.budget_usd}
+                {
+                    "name": campaign.name,
+                    "status": campaign.status,
+                    "budget_usd": campaign.budget_usd,
+                }
             )
         )
         self.db.delete(campaign)
@@ -139,9 +147,7 @@ class CampaignService:
 
     # ---- A/B comparison ------------------------------------------------ #
 
-    def compare(
-        self, client_id: uuid.UUID, ids: list[uuid.UUID]
-    ) -> CampaignCompareResponse:
+    def compare(self, client_id: uuid.UUID, ids: list[uuid.UUID]) -> CampaignCompareResponse:
         rows = self.campaigns.get_many_for_client(client_id, ids)
         if not rows:
             raise NotFoundError("No matching campaigns to compare.")
@@ -212,23 +218,22 @@ class CampaignService:
                     "campaign and ingest metrics to enable a health score."
                 ),
                 has_targets=any(
-                    v is not None
-                    for v in (c.target_cpl, c.target_ctr, c.target_conversion_rate)
+                    v is not None for v in (c.target_cpl, c.target_ctr, c.target_conversion_rate)
                 ),
             )
 
         score = int(round(sum(subs) / len(subs)))
         band = (
-            "excellent" if score >= 85
-            else "good" if score >= 70
-            else "attention" if score >= 55
+            "excellent"
+            if score >= 85
+            else "good"
+            if score >= 70
+            else "attention"
+            if score >= 55
             else "critical"
         )
         met = sum(1 for d in drivers if d.delta >= 0)
-        summary = (
-            f"{c.name}: {met}/{len(drivers)} KPI targets met "
-            f"(score {score}/100, {band})."
-        )
+        summary = f"{c.name}: {met}/{len(drivers)} KPI targets met (score {score}/100, {band})."
         return CampaignHealth(
             campaign_id=c.id,
             score=score,

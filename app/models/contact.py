@@ -25,9 +25,7 @@ class ClientContact(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     client_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    side: Mapped[ContactSide] = mapped_column(
-        pg_enum(ContactSide, "contact_side"), nullable=False
-    )
+    side: Mapped[ContactSide] = mapped_column(pg_enum(ContactSide, "contact_side"), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     role: Mapped[str | None] = mapped_column(String(120))
     department: Mapped[str | None] = mapped_column(String(120))

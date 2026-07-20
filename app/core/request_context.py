@@ -84,9 +84,7 @@ class RequestIdMiddleware:
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
                 message.setdefault("headers", [])
-                message["headers"].append(
-                    (REQUEST_ID_HEADER.encode(), request_id.encode())
-                )
+                message["headers"].append((REQUEST_ID_HEADER.encode(), request_id.encode()))
             await send(message)
 
         try:

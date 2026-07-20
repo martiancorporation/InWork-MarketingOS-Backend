@@ -68,9 +68,7 @@ class RateLimit:
         if not get_settings().app.rate_limit_enabled:
             return
         ip = _client_ip(request)
-        if not _allow(
-            self.scope, ip, times=self.times, seconds=self.seconds, now=time.monotonic()
-        ):
+        if not _allow(self.scope, ip, times=self.times, seconds=self.seconds, now=time.monotonic()):
             raise TooManyRequestsError(
                 "Too many requests. Please slow down and try again shortly.",
                 details={"retry_after_seconds": int(self.seconds)},

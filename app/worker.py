@@ -56,13 +56,9 @@ async def process_job(job_id: uuid.UUID, *, session=None, embedder=None, storage
         if client is None:
             queue.succeed(job)  # client gone — nothing to build
             return
-        orchestrator = IntelligenceOrchestrator(
-            session, embedder=embedder, storage=storage
-        )
+        orchestrator = IntelligenceOrchestrator(session, embedder=embedder, storage=storage)
         changed = set((job.payload or {}).get("changed_keys") or [])
-        await orchestrator.build(
-            client, job_type=job.job_type, changed_keys=changed or None
-        )
+        await orchestrator.build(client, job_type=job.job_type, changed_keys=changed or None)
         queue.succeed(job)
     except Exception as exc:  # noqa: BLE001 - retry/dead-letter, never crash the loop
         logger.exception("Job %s failed", job_id)

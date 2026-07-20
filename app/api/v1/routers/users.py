@@ -32,7 +32,5 @@ def list_users(_admin: AdminUser, db: DbSession, pagination: Pagination) -> User
 @router.patch(
     "/{user_id}", response_model=UserRead, summary="Update a user's role / status (admin)"
 )
-def update_user(
-    user_id: uuid.UUID, data: UserUpdate, _admin: AdminUser, db: DbSession
-) -> UserRead:
+def update_user(user_id: uuid.UUID, data: UserUpdate, _admin: AdminUser, db: DbSession) -> UserRead:
     return UserRead.model_validate(UserService(db).update_user(user_id, data))

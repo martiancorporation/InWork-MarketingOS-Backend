@@ -201,9 +201,7 @@ class IntegrationService:
 
     # ---- real OAuth2 (Meta + Google Ads) ------------------------------ #
 
-    def oauth_start(
-        self, client_id: uuid.UUID, key: IntegrationKey
-    ) -> tuple[str, str]:
+    def oauth_start(self, client_id: uuid.UUID, key: IntegrationKey) -> tuple[str, str]:
         """Begin the authorization-code flow: return (authorization_url, state).
 
         The operator sends the client to ``authorization_url``; the provider
@@ -340,9 +338,7 @@ class IntegrationService:
         integration.account_label = account_id
         integration.scopes = _GOOGLE_SCOPES[key]
 
-    async def _discover_google_account(
-        self, key: IntegrationKey, access: str
-    ) -> str | None:
+    async def _discover_google_account(self, key: IntegrationKey, access: str) -> str | None:
         """Bind the first account/property/site the token can read for ``key``."""
         if key == IntegrationKey.google_ads:
             found = await self.google_ads.list_accessible_customers(access)
@@ -365,9 +361,7 @@ class IntegrationService:
         accounts = await self.linkedin_client.list_ad_accounts(access)
         account = accounts[0] if accounts else {}
         integration.access_token_encrypted = self.cipher.encrypt(access)
-        integration.refresh_token_encrypted = (
-            self.cipher.encrypt(refresh) if refresh else None
-        )
+        integration.refresh_token_encrypted = self.cipher.encrypt(refresh) if refresh else None
         integration.token_expires_at = self._expiry(tokens.get("expires_in"))
         integration.external_account_id = account.get("id")
         integration.account_label = account.get("name") or account.get("id")
@@ -518,9 +512,7 @@ class IntegrationService:
             return False
 
     @staticmethod
-    def _disconnected_view(
-        client_id: uuid.UUID, key: IntegrationKey
-    ) -> IntegrationRead:
+    def _disconnected_view(client_id: uuid.UUID, key: IntegrationKey) -> IntegrationRead:
         """A transient ``disconnected`` catalog entry for a never-configured key."""
         now = datetime.now(UTC)
         return IntegrationRead(

@@ -64,8 +64,10 @@ class KnowledgeChunk(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         GUID, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
     )
     source_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("knowledge_sources.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        GUID,
+        ForeignKey("knowledge_sources.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     text: Mapped[str] = mapped_column(Text, nullable=False)
