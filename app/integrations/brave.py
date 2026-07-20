@@ -36,9 +36,7 @@ class BraveClient:
         }
         try:
             with httpx.Client(timeout=timeout) as client:
-                resp = client.get(
-                    _BASE, params={"q": query, "count": count}, headers=headers
-                )
+                resp = client.get(_BASE, params={"q": query, "count": count}, headers=headers)
         except httpx.HTTPError as exc:
             logger.warning("Brave search failed for %r: %s", query, exc)
             return []

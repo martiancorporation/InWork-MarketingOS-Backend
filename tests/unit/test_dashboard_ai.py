@@ -31,9 +31,7 @@ CLIENT = Client(name="Acme Co.")
 
 def test_health_score_ai_path_parses_and_normalizes_band():
     ai = FakeAI('{"score": 82, "band": "critical", "drivers": [{"label": "CTR up", "delta": 5}]}')
-    result = asyncio.run(
-        HealthScoreAgent(ai_client=ai).generate(CLIENT, CTX, DashboardSignals())
-    )
+    result = asyncio.run(HealthScoreAgent(ai_client=ai).generate(CLIENT, CTX, DashboardSignals()))
     assert result.score == 82
     # band is recomputed from the score, overriding whatever the model said
     assert result.band == "good"
@@ -44,7 +42,9 @@ def test_health_score_falls_back_on_bad_json():
     ai = FakeAI("sorry, I can't do that")
     result = asyncio.run(
         HealthScoreAgent(ai_client=ai).generate(
-            CLIENT, CTX, DashboardSignals(onboarding_completed=True, brand_voice="Bold", goals="Grow")
+            CLIENT,
+            CTX,
+            DashboardSignals(onboarding_completed=True, brand_voice="Bold", goals="Grow"),
         )
     )
     # deterministic fallback still produces a valid score
@@ -58,9 +58,7 @@ def test_recommendations_ai_path_parses_items():
         ' "severity": "high", "summary": "s", "reason": "r", "confidence": 88,'
         ' "expected_impact": "big"}]}'
     )
-    recs = asyncio.run(
-        RecommendationsAgent(ai_client=ai).generate(CLIENT, CTX, DashboardSignals())
-    )
+    recs = asyncio.run(RecommendationsAgent(ai_client=ai).generate(CLIENT, CTX, DashboardSignals()))
     assert len(recs) == 1
     assert recs[0].id == "rec-x"
     assert recs[0].confidence == 88

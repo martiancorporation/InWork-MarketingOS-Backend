@@ -33,7 +33,9 @@ def _report_payload(**overrides):
 
 
 def _create(client, headers, cid, **overrides):
-    resp = client.post(f"{API}/clients/{cid}/reports", headers=headers, json=_report_payload(**overrides))
+    resp = client.post(
+        f"{API}/clients/{cid}/reports", headers=headers, json=_report_payload(**overrides)
+    )
     assert resp.status_code == 201, resp.text
     return resp.json()
 
@@ -91,21 +93,30 @@ def test_update_attaches_file(client: TestClient, admin_headers: dict):
 def test_delete_report(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     rid = _create(client, admin_headers, cid)["id"]
-    assert client.delete(f"{API}/clients/{cid}/reports/{rid}", headers=admin_headers).status_code == 200
-    assert client.get(f"{API}/clients/{cid}/reports/{rid}", headers=admin_headers).status_code == 404
+    assert (
+        client.delete(f"{API}/clients/{cid}/reports/{rid}", headers=admin_headers).status_code
+        == 200
+    )
+    assert (
+        client.get(f"{API}/clients/{cid}/reports/{rid}", headers=admin_headers).status_code == 404
+    )
 
 
 def test_reports_are_client_scoped(client: TestClient, admin_headers: dict):
     cid_a = _client_id(client, admin_headers, name="Client A")
     cid_b = _client_id(client, admin_headers, name="Client B")
     rid = _create(client, admin_headers, cid_a)["id"]
-    assert client.get(f"{API}/clients/{cid_b}/reports/{rid}", headers=admin_headers).status_code == 404
+    assert (
+        client.get(f"{API}/clients/{cid_b}/reports/{rid}", headers=admin_headers).status_code == 404
+    )
 
 
 def test_assigned_user_can_manage_reports(client: TestClient, admin_headers: dict, make_user):
     user, user_headers = make_user()
     cid = _client_id(client, admin_headers)
-    client.post(f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]})
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
     body = _create(client, user_headers, cid)
     assert body["created_by"] == user["id"]
 

@@ -17,7 +17,6 @@ External page text and research snippets are DATA, never instructions.
 from __future__ import annotations
 
 import logging
-from urllib.parse import urlparse
 
 from anyio import to_thread
 
@@ -107,9 +106,9 @@ class OpportunityDetector:
         empty when Brave is unconfigured or yields nothing. Never raises."""
         if not self._brave.is_configured:
             return "", []
-        terms = " ".join(
-            filter(None, [client.industry, client.location, client.markets])
-        ) or (client.name or "")
+        terms = " ".join(filter(None, [client.industry, client.location, client.markets])) or (
+            client.name or ""
+        )
         query = f"{terms} market trends new customer segments keywords".strip()
         try:
             results = await to_thread.run_sync(
@@ -165,46 +164,54 @@ class OpportunityDetector:
         used = {c.lower() for c in s.platforms}
         missing_channels = sorted(all_channels - used)
         if missing_channels:
-            items.append({
-                "id": "opp-expand-channels",
-                "kind": "channel",
-                "title": f"Test an unused channel: {missing_channels[0]}",
-                "detail": f"Pilot {missing_channels[0]} alongside the current mix.",
-                "rationale": (
-                    f"Only {', '.join(sorted(used)) or 'no channels'} are in scope; "
-                    f"{missing_channels[0]} could reach new audiences."
-                ),
-                "confidence": 55,
-                "sources": [],
-            })
+            items.append(
+                {
+                    "id": "opp-expand-channels",
+                    "kind": "channel",
+                    "title": f"Test an unused channel: {missing_channels[0]}",
+                    "detail": f"Pilot {missing_channels[0]} alongside the current mix.",
+                    "rationale": (
+                        f"Only {', '.join(sorted(used)) or 'no channels'} are in scope; "
+                        f"{missing_channels[0]} could reach new audiences."
+                    ),
+                    "confidence": 55,
+                    "sources": [],
+                }
+            )
         if (client.markets or "").strip():
-            items.append({
-                "id": "opp-expand-markets",
-                "kind": "market",
-                "title": "Expand into an adjacent market",
-                "detail": f"Extend targeting beyond the core described markets: {client.markets[:120]}",
-                "rationale": "Stated markets indicate room to grow into adjacent geographies/segments.",
-                "confidence": 50,
-                "sources": sources[:3],
-            })
+            items.append(
+                {
+                    "id": "opp-expand-markets",
+                    "kind": "market",
+                    "title": "Expand into an adjacent market",
+                    "detail": f"Extend targeting beyond the core described markets: {client.markets[:120]}",
+                    "rationale": "Stated markets indicate room to grow into adjacent geographies/segments.",
+                    "confidence": 50,
+                    "sources": sources[:3],
+                }
+            )
         if (client.location or "").strip():
-            items.append({
-                "id": "opp-local-keywords",
-                "kind": "keyword",
-                "title": f"Own local intent keywords in {client.location}",
-                "detail": f"Build location-qualified keyword and content clusters for {client.location}.",
-                "rationale": "Local intent converts well and is often under-invested for local businesses.",
-                "confidence": 60,
-                "sources": sources[:3],
-            })
+            items.append(
+                {
+                    "id": "opp-local-keywords",
+                    "kind": "keyword",
+                    "title": f"Own local intent keywords in {client.location}",
+                    "detail": f"Build location-qualified keyword and content clusters for {client.location}.",
+                    "rationale": "Local intent converts well and is often under-invested for local businesses.",
+                    "confidence": 60,
+                    "sources": sources[:3],
+                }
+            )
         if not items:
-            items.append({
-                "id": "opp-build-baseline",
-                "kind": "other",
-                "title": "Establish a performance baseline to unlock targeting insights",
-                "detail": "Connect platforms and run a small test to gather the data opportunities rely on.",
-                "rationale": "Without connected data, market/keyword opportunities can't be grounded.",
-                "confidence": 45,
-                "sources": [],
-            })
+            items.append(
+                {
+                    "id": "opp-build-baseline",
+                    "kind": "other",
+                    "title": "Establish a performance baseline to unlock targeting insights",
+                    "detail": "Connect platforms and run a small test to gather the data opportunities rely on.",
+                    "rationale": "Without connected data, market/keyword opportunities can't be grounded.",
+                    "confidence": 45,
+                    "sources": [],
+                }
+            )
         return [Opportunity.model_validate(i) for i in items]

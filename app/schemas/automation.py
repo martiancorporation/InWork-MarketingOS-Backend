@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 # ---- watchdog sweep ---- #
 
+
 class ClientSweepRow(BaseModel):
     client_id: uuid.UUID
     client_name: str
@@ -32,6 +33,7 @@ class WatchdogSweepResult(BaseModel):
 
 # ---- integration sync sweep ---- #
 
+
 class SyncSweepRow(BaseModel):
     client_id: uuid.UUID
     client_name: str
@@ -48,6 +50,7 @@ class SyncSweepResult(BaseModel):
 
 
 # ---- daily digest ---- #
+
 
 class AlertBrief(BaseModel):
     id: uuid.UUID

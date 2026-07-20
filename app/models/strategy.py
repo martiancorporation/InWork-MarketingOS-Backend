@@ -27,9 +27,7 @@ if TYPE_CHECKING:
 
 class Strategy(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "strategies"
-    __table_args__ = (
-        Index("ix_strategies_client_version", "client_id", "version", unique=True),
-    )
+    __table_args__ = (Index("ix_strategies_client_version", "client_id", "version", unique=True),)
 
     client_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True

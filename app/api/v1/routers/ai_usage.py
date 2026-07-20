@@ -38,8 +38,13 @@ def _filters(
     end: datetime | None,
 ) -> UsageFilters:
     return UsageFilters(
-        client_id=client_id, user_id=user_id, feature=feature, model=model,
-        status=status, start=start, end=end,
+        client_id=client_id,
+        user_id=user_id,
+        feature=feature,
+        model=model,
+        status=status,
+        start=start,
+        end=end,
     )
 
 
@@ -49,7 +54,9 @@ def list_usage(
     db: DbSession,
     pagination: Pagination,
     client_id: uuid.UUID | None = Query(None),
-    user_id: uuid.UUID | None = Query(None, description="Filter by the user who triggered the call"),
+    user_id: uuid.UUID | None = Query(
+        None, description="Filter by the user who triggered the call"
+    ),
     feature: str | None = Query(None, description="Origin, e.g. onboarding.brand_extraction"),
     model: str | None = Query(None),
     status: str | None = Query(None, description="success | error"),
@@ -60,7 +67,11 @@ def list_usage(
     return AiUsageService(db).list(f, pagination)
 
 
-@router.get("/summary", response_model=PlatformUsageSummary, summary="Platform usage & cost analytics (admin)")
+@router.get(
+    "/summary",
+    response_model=PlatformUsageSummary,
+    summary="Platform usage & cost analytics (admin)",
+)
 def platform_summary(
     _admin: AdminUser,
     db: DbSession,
@@ -90,9 +101,7 @@ def platform_optimization(
     start: datetime | None = Query(None),
     end: datetime | None = Query(None),
 ) -> CostOptimizationReport:
-    f = UsageFilters(
-        client_id=client_id, feature=feature, model=model, start=start, end=end
-    )
+    f = UsageFilters(client_id=client_id, feature=feature, model=model, start=start, end=end)
     return AiUsageService(db).optimization(f)
 
 

@@ -65,10 +65,26 @@ _MAX_CANDIDATES = 3
 
 # Fonts that aren't real brand faces.
 _GENERIC_FONTS = {
-    "sans-serif", "serif", "monospace", "cursive", "fantasy", "system-ui",
-    "inherit", "initial", "unset", "-apple-system", "blinkmacsystemfont",
-    "segoe ui", "roboto", "helvetica", "arial", "ui-sans-serif", "ui-serif",
-    "ui-monospace", "sans", "none",
+    "sans-serif",
+    "serif",
+    "monospace",
+    "cursive",
+    "fantasy",
+    "system-ui",
+    "inherit",
+    "initial",
+    "unset",
+    "-apple-system",
+    "blinkmacsystemfont",
+    "segoe ui",
+    "roboto",
+    "helvetica",
+    "arial",
+    "ui-sans-serif",
+    "ui-serif",
+    "ui-monospace",
+    "sans",
+    "none",
 }
 # Near-universal, non-distinguishing colors.
 _IGNORED_COLORS = {"#FFFFFF", "#000000", "#FFF", "#000"}

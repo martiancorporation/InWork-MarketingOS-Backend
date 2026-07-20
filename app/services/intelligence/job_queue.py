@@ -42,9 +42,7 @@ class JobQueue:
             return None
 
         run_after = (
-            datetime.now(UTC) + timedelta(seconds=debounce_seconds)
-            if debounce_seconds
-            else None
+            datetime.now(UTC) + timedelta(seconds=debounce_seconds) if debounce_seconds else None
         )
         existing = self.jobs.pending_for_client(client_id)
         if existing is not None:
@@ -72,9 +70,7 @@ class JobQueue:
     def claim_next(self, worker_id: str) -> IntelJob | None:
         """Claim the next runnable job. Commits the claim before returning."""
         now = datetime.now(UTC)
-        is_postgres = (
-            self.db.bind is not None and self.db.bind.dialect.name == "postgresql"
-        )
+        is_postgres = self.db.bind is not None and self.db.bind.dialect.name == "postgresql"
         stmt = (
             select(IntelJob)
             .where(
@@ -125,9 +121,7 @@ class JobQueue:
             job.status = IntelJobStatus.dead.value
         else:
             job.status = IntelJobStatus.queued.value
-            job.run_after = datetime.now(UTC) + timedelta(
-                seconds=min(300, 10 * (2 ** job.attempts))
-            )
+            job.run_after = datetime.now(UTC) + timedelta(seconds=min(300, 10 * (2**job.attempts)))
         job.locked_by = None
         job.locked_at = None
         self.db.commit()

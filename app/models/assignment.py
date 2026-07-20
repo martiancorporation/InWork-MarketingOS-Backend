@@ -46,6 +46,4 @@ class ClientAssignment(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     capabilities: Mapped[list[str] | None] = mapped_column(JSONColumn)
 
     client: Mapped[Client] = relationship(back_populates="assignments")
-    user: Mapped[User] = relationship(
-        back_populates="client_assignments", foreign_keys=[user_id]
-    )
+    user: Mapped[User] = relationship(back_populates="client_assignments", foreign_keys=[user_id])

@@ -21,16 +21,13 @@ def _client_id(client, admin_headers, **overrides):
 def test_default_client_returns_findings(client: TestClient, admin_headers: dict):
     # Platforms selected, but onboarding connects no integrations → a warn.
     cid = _client_id(client, admin_headers)
-    resp = client.post(
-        f"{API}/clients/{cid}/onboarding/consistency", headers=admin_headers
-    )
+    resp = client.post(f"{API}/clients/{cid}/onboarding/consistency", headers=admin_headers)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["ai_generated"] is False  # fallback path (no API key in tests)
     assert data["has_blocking"] is False
     assert any(
-        f["level"] == "warn" and "integrations" in f["message"].lower()
-        for f in data["findings"]
+        f["level"] == "warn" and "integrations" in f["message"].lower() for f in data["findings"]
     )
 
 
@@ -41,27 +38,24 @@ def test_banned_word_is_a_blocking_error(client: TestClient, admin_headers: dict
         brand={"brand_voice": "We are the guaranteed best in town."},
     )
     # Add a banned-word compliance rule that the brand voice violates.
-    assert client.post(
-        f"{API}/clients/{cid}/compliance",
-        headers=admin_headers,
-        json={"kind": "banned", "text": "guaranteed"},
-    ).status_code == 201
-    resp = client.post(
-        f"{API}/clients/{cid}/onboarding/consistency", headers=admin_headers
+    assert (
+        client.post(
+            f"{API}/clients/{cid}/compliance",
+            headers=admin_headers,
+            json={"kind": "banned", "text": "guaranteed"},
+        ).status_code
+        == 201
     )
+    resp = client.post(f"{API}/clients/{cid}/onboarding/consistency", headers=admin_headers)
     data = resp.json()
     assert data["has_blocking"] is True
-    assert any(
-        f["level"] == "error" and "guaranteed" in f["message"] for f in data["findings"]
-    )
+    assert any(f["level"] == "error" and "guaranteed" in f["message"] for f in data["findings"])
 
 
 def test_consistency_is_admin_only(client: TestClient, admin_headers: dict, make_user):
     cid = _client_id(client, admin_headers)
     _user, headers = make_user(email="user@test.com")
-    resp = client.post(
-        f"{API}/clients/{cid}/onboarding/consistency", headers=headers
-    )
+    resp = client.post(f"{API}/clients/{cid}/onboarding/consistency", headers=headers)
     assert resp.status_code == 403
 
 

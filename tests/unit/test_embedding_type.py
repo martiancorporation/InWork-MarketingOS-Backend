@@ -18,9 +18,7 @@ _VEC = [0.1] * 1024
 
 
 def _compiled(expr) -> str:
-    return str(
-        select(KnowledgeChunk.id).order_by(expr).compile(dialect=postgresql.dialect())
-    )
+    return str(select(KnowledgeChunk.id).order_by(expr).compile(dialect=postgresql.dialect()))
 
 
 def test_cosine_distance_compiles_to_pg_operator():

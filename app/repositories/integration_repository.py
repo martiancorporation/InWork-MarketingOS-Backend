@@ -19,9 +19,7 @@ from app.repositories.base import BaseRepository
 class IntegrationRepository(BaseRepository[Integration]):
     model = Integration
 
-    def get_for_client(
-        self, client_id: uuid.UUID, key: IntegrationKey
-    ) -> Integration | None:
+    def get_for_client(self, client_id: uuid.UUID, key: IntegrationKey) -> Integration | None:
         """Load the one connector row for a (client, key), scoped to the client."""
         return self.db.scalar(
             select(Integration).where(

@@ -68,13 +68,18 @@ async def run_job(name: str) -> None:
             result = service.run_watchdog_sweep()
             logger.info(
                 "watchdog sweep: clients=%d opened=%d updated=%d resolved=%d",
-                result.clients, result.opened, result.updated, result.auto_resolved,
+                result.clients,
+                result.opened,
+                result.updated,
+                result.auto_resolved,
             )
         elif name == INTEGRATION_SYNC_JOB:
             sync = await service.sync_integrations_sweep()
             logger.info(
                 "integration sync sweep: clients=%d synced=%d failed=%d",
-                sync.clients, sync.synced, sync.failed,
+                sync.clients,
+                sync.synced,
+                sync.failed,
             )
         elif name == DIGEST_JOB:
             digests = service.build_all_digests()

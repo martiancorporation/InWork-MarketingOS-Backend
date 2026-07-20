@@ -34,9 +34,7 @@ class AuditRepository(BaseRepository[AuditLog]):
         if client_id is not None:
             base = base.where(AuditLog.client_id == client_id)
 
-        total = int(
-            self.db.scalar(select(func.count()).select_from(base.subquery())) or 0
-        )
+        total = int(self.db.scalar(select(func.count()).select_from(base.subquery())) or 0)
         rows = list(
             self.db.scalars(
                 base.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())

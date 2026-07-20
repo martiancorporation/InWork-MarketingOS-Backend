@@ -90,7 +90,9 @@ class HealthScoreAgent:
             if s.pending_integrations:
                 pen = min(8, s.pending_integrations * 3)
                 score -= pen
-                drivers.append({"label": f"{s.pending_integrations} integrations not connected", "delta": -pen})
+                drivers.append(
+                    {"label": f"{s.pending_integrations} integrations not connected", "delta": -pen}
+                )
             score = max(20, min(98, score))
             return HealthScore.model_validate(
                 {"score": score, "band": _band(score), "drivers": drivers[:5]}
@@ -101,11 +103,15 @@ class HealthScoreAgent:
         conn = min(20, s.connected_integrations * 5)
         if conn:
             score += conn
-            drivers.append({"label": f"{s.connected_integrations} integrations connected", "delta": conn})
+            drivers.append(
+                {"label": f"{s.connected_integrations} integrations connected", "delta": conn}
+            )
         if s.pending_integrations:
             pen = min(15, s.pending_integrations * 5)
             score -= pen
-            drivers.append({"label": f"{s.pending_integrations} integrations not connected", "delta": -pen})
+            drivers.append(
+                {"label": f"{s.pending_integrations} integrations not connected", "delta": -pen}
+            )
         if s.onboarding_completed:
             score += 8
             drivers.append({"label": "Onboarding complete", "delta": 8})
@@ -122,7 +128,9 @@ class HealthScoreAgent:
         if s.pending_approvals:
             pen = min(10, s.pending_approvals * 2)
             score -= pen
-            drivers.append({"label": f"{s.pending_approvals} posts awaiting approval", "delta": -pen})
+            drivers.append(
+                {"label": f"{s.pending_approvals} posts awaiting approval", "delta": -pen}
+            )
 
         score = max(20, min(98, score))
         return HealthScore.model_validate(

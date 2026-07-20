@@ -13,6 +13,7 @@ from app.ai.usage import AiUsageContext, usage_from_message
 
 # ---- pricing ----
 
+
 def test_price_known_model():
     cost = price("claude-opus-4-8", UsageBreakdown(input_tokens=1_000_000, output_tokens=1_000_000))
     assert cost.priced is True
@@ -22,7 +23,9 @@ def test_price_known_model():
 
 
 def test_price_includes_cache_tokens():
-    cost = price("claude-opus-4-8", UsageBreakdown(cache_write_tokens=1_000_000, cache_read_tokens=1_000_000))
+    cost = price(
+        "claude-opus-4-8", UsageBreakdown(cache_write_tokens=1_000_000, cache_read_tokens=1_000_000)
+    )
     # 18.75 (write) + 1.50 (read)
     assert cost.cache_cost == Decimal("20.250000")
     assert cost.total_cost == Decimal("20.250000")
@@ -41,12 +44,19 @@ def test_usage_breakdown_total():
 
 def test_usage_from_message_reads_all_fields():
     usage = types.SimpleNamespace(
-        input_tokens=100, output_tokens=50,
-        cache_creation_input_tokens=7, cache_read_input_tokens=3,
+        input_tokens=100,
+        output_tokens=50,
+        cache_creation_input_tokens=7,
+        cache_read_input_tokens=3,
     )
     msg = types.SimpleNamespace(usage=usage)
     b = usage_from_message(msg)
-    assert (b.input_tokens, b.output_tokens, b.cache_write_tokens, b.cache_read_tokens) == (100, 50, 7, 3)
+    assert (b.input_tokens, b.output_tokens, b.cache_write_tokens, b.cache_read_tokens) == (
+        100,
+        50,
+        7,
+        3,
+    )
 
 
 def test_usage_from_message_handles_missing_usage():
@@ -54,6 +64,7 @@ def test_usage_from_message_handles_missing_usage():
 
 
 # ---- instrumentation: every call records usage via record_usage ----
+
 
 class _FakeUsage:
     input_tokens = 120
@@ -118,7 +129,9 @@ def test_failed_call_records_error_event(monkeypatch):
     captured: list[dict] = []
     c = _make_client(monkeypatch, captured, raise_exc=RuntimeError("boom"))
     with pytest.raises(RuntimeError):
-        asyncio.run(c.complete(system="s", prompt="p", context=AiUsageContext(feature="test.feature")))
+        asyncio.run(
+            c.complete(system="s", prompt="p", context=AiUsageContext(feature="test.feature"))
+        )
     assert len(captured) == 1
     assert captured[0]["status"] == "error"
     assert "boom" in captured[0]["error"]

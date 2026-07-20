@@ -20,8 +20,14 @@ from app.models.enums import SourceStatus
 logger = logging.getLogger("app.documents")
 
 _TEXT_TYPES = {
-    "text/plain", "text/markdown", "text/csv", "text/tab-separated-values",
-    "application/json", "application/xml", "text/xml", "text/html",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "text/tab-separated-values",
+    "application/json",
+    "application/xml",
+    "text/xml",
+    "text/html",
 }
 
 
@@ -50,12 +56,16 @@ def extract_text(data: bytes, mime_type: str | None, filename: str = "") -> Extr
             return _ok(_xlsx(data))
         if mime.startswith("image/"):
             # Image OCR/vision extraction is a later enhancement.
-            return ExtractionResult("", SourceStatus.unsupported.value, "image extraction not enabled")
+            return ExtractionResult(
+                "", SourceStatus.unsupported.value, "image extraction not enabled"
+            )
         # Last resort: try to decode as text if it looks textual.
         decoded = _decode(data)
         if decoded.strip():
             return _ok(decoded)
-        return ExtractionResult("", SourceStatus.unsupported.value, f"unsupported type: {mime or ext}")
+        return ExtractionResult(
+            "", SourceStatus.unsupported.value, f"unsupported type: {mime or ext}"
+        )
     except _MissingDep as exc:
         return ExtractionResult("", SourceStatus.unsupported.value, str(exc))
     except Exception as exc:  # noqa: BLE001 - one bad file must not break a build

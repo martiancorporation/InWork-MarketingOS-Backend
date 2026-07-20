@@ -26,18 +26,29 @@ def _seed(db: Session):
     cid = c.id
 
     svc = AuditService(db)
-    svc.record(entity="clients", action="clients.onboarding.create", client_id=cid,
-               entity_id=cid, target_label="POST /clients/onboarding",
-               meta={"status_code": 201, "method": "POST"})
-    svc.record(entity="users", action="users.create", entity_id=uuid.uuid4(),
-               target_label="POST /users", meta={"status_code": 201})
+    svc.record(
+        entity="clients",
+        action="clients.onboarding.create",
+        client_id=cid,
+        entity_id=cid,
+        target_label="POST /clients/onboarding",
+        meta={"status_code": 201, "method": "POST"},
+    )
+    svc.record(
+        entity="users",
+        action="users.create",
+        entity_id=uuid.uuid4(),
+        target_label="POST /users",
+        meta={"status_code": 201},
+    )
     svc.record(entity="auth", action="auth.login.create", meta={"status_code": 200})
     return cid
 
 
 def test_record_persists_row(db_session: Session):
-    row = AuditService(db_session).record(entity="clients", action="clients.read",
-                                          meta={"status_code": 200})
+    row = AuditService(db_session).record(
+        entity="clients", action="clients.read", meta={"status_code": 200}
+    )
     assert row.id is not None
     assert row.action == "clients.read"
     assert row.created_at is not None
@@ -63,7 +74,9 @@ def test_audit_filter_by_entity(client: TestClient, admin_headers: dict, db_sess
     assert items and all(i["entity"] == "clients" for i in items)
 
 
-def test_audit_filter_by_action_substring(client: TestClient, admin_headers: dict, db_session: Session):
+def test_audit_filter_by_action_substring(
+    client: TestClient, admin_headers: dict, db_session: Session
+):
     _seed(db_session)
     resp = client.get(f"{API}/audit?action=login", headers=admin_headers)
     assert resp.status_code == 200

@@ -65,13 +65,9 @@ class UploadService:
         if size_bytes <= 0:
             raise BadRequestError("File size must be greater than zero.")
         if size_bytes > self.settings.max_upload_bytes:
-            raise PayloadTooLargeError(
-                f"File exceeds the {self.settings.max_upload_mb} MB limit."
-            )
+            raise PayloadTooLargeError(f"File exceeds the {self.settings.max_upload_mb} MB limit.")
         if not self.settings.allows_content_type(content_type):
-            raise UnsupportedMediaTypeError(
-                f"Content type '{content_type}' is not allowed."
-            )
+            raise UnsupportedMediaTypeError(f"Content type '{content_type}' is not allowed.")
 
     def _build_key(self, upload_id: uuid.UUID, safe_filename: str) -> str:
         prefix = self.settings.key_prefix.strip("/")
@@ -122,9 +118,7 @@ class UploadService:
     def get(self, user: User, upload_id: uuid.UUID) -> UploadRead:
         return self._to_read(self._load_owned(user, upload_id))
 
-    def read_bytes(
-        self, user: User, upload_id: uuid.UUID
-    ) -> tuple[bytes, str | None, str]:
+    def read_bytes(self, user: User, upload_id: uuid.UUID) -> tuple[bytes, str | None, str]:
         """Owner-scoped fetch of a stored object's raw bytes + content-type + filename.
 
         Used by features that need the file contents (e.g. brand extraction from an
@@ -145,9 +139,7 @@ class UploadService:
     def _load_owned(self, user: User, upload_id: uuid.UUID) -> Upload:
         upload = self.uploads.get(upload_id)
         # 404 (not 403) for someone else's upload so ids can't be probed.
-        if upload is None or (
-            user.role != UserRole.admin and upload.uploaded_by != user.id
-        ):
+        if upload is None or (user.role != UserRole.admin and upload.uploaded_by != user.id):
             raise NotFoundError("Upload not found.")
         return upload
 

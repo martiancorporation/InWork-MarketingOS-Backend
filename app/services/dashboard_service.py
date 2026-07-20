@@ -53,9 +53,7 @@ class DashboardService:
         self.db = db
         self.recommendations = RecommendationRepository(db)
 
-    async def build(
-        self, client: Client, *, user_id: uuid.UUID | None = None
-    ) -> DashboardResponse:
+    async def build(self, client: Client, *, user_id: uuid.UUID | None = None) -> DashboardResponse:
         signals = self._signals(client)
         context = ContextService(self.db).build(client.id)
 
@@ -64,9 +62,13 @@ class DashboardService:
 
         health, brief, watchdog, recs = await asyncio.gather(
             HealthScoreAgent().generate(client, context, signals, usage(AiFeature.HEALTH_SCORE)),
-            ExecutiveBriefAgent().generate(client, context, signals, usage(AiFeature.EXECUTIVE_BRIEF)),
+            ExecutiveBriefAgent().generate(
+                client, context, signals, usage(AiFeature.EXECUTIVE_BRIEF)
+            ),
             WatchdogAgent().generate(client, context, signals, usage(AiFeature.WATCHDOG)),
-            RecommendationsAgent().generate(client, context, signals, usage(AiFeature.RECOMMENDATION)),
+            RecommendationsAgent().generate(
+                client, context, signals, usage(AiFeature.RECOMMENDATION)
+            ),
         )
 
         self._merge_decisions(client.id, recs)
@@ -111,9 +113,7 @@ class DashboardService:
         """Growth opportunities grounded in the client's signals + external research."""
         signals = self._signals(client)
         context = ContextService(self.db).build(client.id)
-        usage = AiUsageContext(
-            feature=AiFeature.OPPORTUNITY, client_id=client.id, user_id=user_id
-        )
+        usage = AiUsageContext(feature=AiFeature.OPPORTUNITY, client_id=client.id, user_id=user_id)
         return await OpportunityDetector().detect(client, context, signals, usage)
 
     # ---- recommendation decisions ---- #
@@ -195,9 +195,7 @@ class DashboardService:
 
     # ---- helpers ---- #
 
-    def _merge_decisions(
-        self, client_id: uuid.UUID, recs: list[Recommendation]
-    ) -> None:
+    def _merge_decisions(self, client_id: uuid.UUID, recs: list[Recommendation]) -> None:
         latest = self.recommendations.latest_by_rec_key(client_id)
         for rec in recs:
             action = latest.get(rec.id)
@@ -209,18 +207,22 @@ class DashboardService:
         connected = sum(1 for i in integrations if i.status == IntegrationStatus.connected)
         pending = len(integrations) - connected
 
-        pending_approvals = self.db.scalar(
-            select(func.count())
-            .select_from(MarketingEvent)
-            .where(
-                MarketingEvent.client_id == client.id,
-                MarketingEvent.approval_status == ApprovalStatus.pending,
+        pending_approvals = (
+            self.db.scalar(
+                select(func.count())
+                .select_from(MarketingEvent)
+                .where(
+                    MarketingEvent.client_id == client.id,
+                    MarketingEvent.approval_status == ApprovalStatus.pending,
+                )
             )
-        ) or 0
+            or 0
+        )
 
         def _texts(kind: ComplianceKind) -> list[str]:
             return [
-                e.text for e in client.compliance_entries
+                e.text
+                for e in client.compliance_entries
                 if getattr(e.kind, "value", e.kind) == kind.value and e.is_active
             ]
 
@@ -275,25 +277,40 @@ def _goal_metrics(campaigns: list) -> list[GoalMetric]:
     # CPL — lower is better (needs spend + leads to be meaningful).
     if target_cpl is not None and leads > 0:
         actual_cpl = spend / leads
-        metrics.append(GoalMetric(
-            label="Cost per lead vs target", target=round(target_cpl, 2),
-            actual=round(actual_cpl, 2), higher_is_better=False,
-            on_track=actual_cpl <= target_cpl, unit="$",
-        ))
+        metrics.append(
+            GoalMetric(
+                label="Cost per lead vs target",
+                target=round(target_cpl, 2),
+                actual=round(actual_cpl, 2),
+                higher_is_better=False,
+                on_track=actual_cpl <= target_cpl,
+                unit="$",
+            )
+        )
     # CTR (%) — higher is better.
     if target_ctr is not None and impressions > 0:
         actual_ctr = clicks / impressions * 100
-        metrics.append(GoalMetric(
-            label="Click-through rate vs target", target=round(target_ctr, 3),
-            actual=round(actual_ctr, 3), higher_is_better=True,
-            on_track=actual_ctr >= target_ctr, unit="%",
-        ))
+        metrics.append(
+            GoalMetric(
+                label="Click-through rate vs target",
+                target=round(target_ctr, 3),
+                actual=round(actual_ctr, 3),
+                higher_is_better=True,
+                on_track=actual_ctr >= target_ctr,
+                unit="%",
+            )
+        )
     # Conversion rate (%) — higher is better.
     if target_cvr is not None and clicks > 0:
         actual_cvr = conversions / clicks * 100
-        metrics.append(GoalMetric(
-            label="Conversion rate vs target", target=round(target_cvr, 3),
-            actual=round(actual_cvr, 3), higher_is_better=True,
-            on_track=actual_cvr >= target_cvr, unit="%",
-        ))
+        metrics.append(
+            GoalMetric(
+                label="Conversion rate vs target",
+                target=round(target_cvr, 3),
+                actual=round(actual_cvr, 3),
+                higher_is_better=True,
+                on_track=actual_cvr >= target_cvr,
+                unit="%",
+            )
+        )
     return metrics

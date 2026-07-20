@@ -96,9 +96,7 @@ class QAReviewer:
         if status not in _VALID_STATUSES:
             status = "ok"
         notes = [
-            str(n).strip()
-            for n in (payload.get("notes") or [])
-            if isinstance(n, str) and n.strip()
+            str(n).strip() for n in (payload.get("notes") or []) if isinstance(n, str) and n.strip()
         ][:_MAX_NOTES]
         summary = payload.get("summary")
         return QAVerdict(

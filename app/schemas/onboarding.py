@@ -209,6 +209,7 @@ class DocumentsRequest(StrictModel):
 
 # ---- AI-assisted brand extraction ----
 
+
 class BrandExtractionRequest(StrictModel):
     """Extract a brand theme from a website link OR an uploaded document.
 
@@ -237,6 +238,7 @@ class BrandExtraction(BaseModel):
 
 
 # ---- Onboarding response ----
+
 
 class ReadinessItem(BaseModel):
     key: str

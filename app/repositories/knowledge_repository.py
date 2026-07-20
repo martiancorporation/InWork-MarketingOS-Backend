@@ -30,9 +30,7 @@ class KnowledgeChunkRepository(BaseRepository[KnowledgeChunk]):
     model = KnowledgeChunk
 
     def delete_for_source(self, source_id: uuid.UUID) -> None:
-        self.db.execute(
-            delete(KnowledgeChunk).where(KnowledgeChunk.source_id == source_id)
-        )
+        self.db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.source_id == source_id))
 
     def search(
         self, client_id: uuid.UUID, query_vec: list[float], top_k: int

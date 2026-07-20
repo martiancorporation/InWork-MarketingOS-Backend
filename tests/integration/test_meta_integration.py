@@ -96,9 +96,7 @@ def test_full_oauth_stores_encrypted_token(
     assert body["account_label"] == "Acme Ad Account"
 
     # The token is stored ENCRYPTED, and decrypts back to the long-lived token.
-    row = db_session.scalar(
-        select(Integration).where(Integration.client_id == uuid.UUID(cid))
-    )
+    row = db_session.scalar(select(Integration).where(Integration.client_id == uuid.UUID(cid)))
     assert row.access_token_encrypted is not None
     assert row.access_token_encrypted != "long-lived-token"  # not plaintext
     assert TokenCipher().decrypt(row.access_token_encrypted) == "long-lived-token"
@@ -130,8 +128,14 @@ def test_sync_pulls_insights_into_analytics(
 
     async def fake_insights(self, token, ad_account_id, *, date_preset="last_30d"):
         assert token == "long-lived-token" and ad_account_id == "act_999"
-        return {"impressions": 1000, "clicks": 50, "spend": 200.0,
-                "leads": 10, "conversions": 3, "revenue": 900.0}
+        return {
+            "impressions": 1000,
+            "clicks": 50,
+            "spend": 200.0,
+            "leads": 10,
+            "conversions": 3,
+            "revenue": 900.0,
+        }
 
     monkeypatch.setattr(MetaClient, "fetch_insights", fake_insights)
     resp = client.post(f"{API}/clients/{cid}/integrations/meta/sync", headers=admin_headers)
@@ -154,10 +158,10 @@ def test_sync_requires_connection(client, admin_headers: dict, meta_configured):
     assert resp.status_code in (400, 404)  # never connected
 
 
-def test_oauth_only_meta_for_now(client, admin_headers: dict, meta_configured):
+def test_oauth_unconfigured_returns_503(client, admin_headers: dict, meta_configured):
     cid = _client_id(client, admin_headers)
     resp = client.post(f"{API}/clients/{cid}/integrations/ga4/oauth/start", headers=admin_headers)
-    assert resp.status_code == 400  # real OAuth is Meta-only right now
+    assert resp.status_code == 503  # GA4 real OAuth is supported but unconfigured here
 
 
 def test_oauth_requires_auth(client, admin_headers: dict):

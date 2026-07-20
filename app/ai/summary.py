@@ -81,16 +81,21 @@ class SummaryAgent:
         """Structured summary from the client's own fields — no model call."""
         goals = (client.goals or "").strip()
         restrictions = [
-            e.text for e in client.compliance_entries
+            e.text
+            for e in client.compliance_entries
             if getattr(e.kind, "value", e.kind) in {"banned", "rule", "required"}
         ]
         profile: dict[str, Any] = {
-            "identity": _join(
-                client.name, client.business_type, client.industry, client.location
-            ),
+            "identity": _join(client.name, client.business_type, client.industry, client.location),
             "wants": goals or None,
-            "does_not_want": _join(*[e.text for e in client.compliance_entries
-                                     if getattr(e.kind, "value", e.kind) == "banned"]) or None,
+            "does_not_want": _join(
+                *[
+                    e.text
+                    for e in client.compliance_entries
+                    if getattr(e.kind, "value", e.kind) == "banned"
+                ]
+            )
+            or None,
             "business_goals": [goals] if goals else [],
             "expectations": None,
             "design_preferences": {
@@ -103,8 +108,10 @@ class SummaryAgent:
             "restrictions": restrictions,
         }
         return SummaryResult(
-            profile=profile, summary_md=_render_md(client, profile),
-            model=None, ai_generated=False,
+            profile=profile,
+            summary_md=_render_md(client, profile),
+            model=None,
+            ai_generated=False,
         )
 
 

@@ -72,9 +72,11 @@ class AnalyticsRepository(BaseRepository[AnalyticsDaily]):
                 platform=platform,
             )
         )
-        stmt = self._scope(
-            select(AnalyticsDaily), client_id, start=start, end=end, platform=platform
-        ).order_by(AnalyticsDaily.date.asc(), AnalyticsDaily.platform.asc()).offset(offset)
+        stmt = (
+            self._scope(select(AnalyticsDaily), client_id, start=start, end=end, platform=platform)
+            .order_by(AnalyticsDaily.date.asc(), AnalyticsDaily.platform.asc())
+            .offset(offset)
+        )
         if limit is not None:
             stmt = stmt.limit(limit)
         return list(self.db.scalars(stmt).all()), int(total or 0)
@@ -87,9 +89,7 @@ class AnalyticsRepository(BaseRepository[AnalyticsDaily]):
         end: date | None = None,
         platform: SocialPlatform | None = None,
     ) -> dict:
-        cols = [
-            func.coalesce(func.sum(getattr(AnalyticsDaily, m)), 0).label(m) for m in _METRICS
-        ]
+        cols = [func.coalesce(func.sum(getattr(AnalyticsDaily, m)), 0).label(m) for m in _METRICS]
         stmt = self._scope(select(*cols), client_id, start=start, end=end, platform=platform)
         return dict(self.db.execute(stmt).one()._mapping)
 
@@ -100,20 +100,24 @@ class AnalyticsRepository(BaseRepository[AnalyticsDaily]):
         start: date | None = None,
         end: date | None = None,
     ) -> list[dict]:
-        stmt = self._scope(
-            select(
-                AnalyticsDaily.platform.label("platform"),
-                func.coalesce(func.sum(AnalyticsDaily.impressions), 0).label("impressions"),
-                func.coalesce(func.sum(AnalyticsDaily.clicks), 0).label("clicks"),
-                func.coalesce(func.sum(AnalyticsDaily.leads), 0).label("leads"),
-                func.coalesce(func.sum(AnalyticsDaily.spend), 0).label("spend"),
-                func.coalesce(func.sum(AnalyticsDaily.revenue), 0).label("revenue"),
-            ),
-            client_id,
-            start=start,
-            end=end,
-            platform=None,
-        ).group_by(AnalyticsDaily.platform).order_by(func.sum(AnalyticsDaily.spend).desc())
+        stmt = (
+            self._scope(
+                select(
+                    AnalyticsDaily.platform.label("platform"),
+                    func.coalesce(func.sum(AnalyticsDaily.impressions), 0).label("impressions"),
+                    func.coalesce(func.sum(AnalyticsDaily.clicks), 0).label("clicks"),
+                    func.coalesce(func.sum(AnalyticsDaily.leads), 0).label("leads"),
+                    func.coalesce(func.sum(AnalyticsDaily.spend), 0).label("spend"),
+                    func.coalesce(func.sum(AnalyticsDaily.revenue), 0).label("revenue"),
+                ),
+                client_id,
+                start=start,
+                end=end,
+                platform=None,
+            )
+            .group_by(AnalyticsDaily.platform)
+            .order_by(func.sum(AnalyticsDaily.spend).desc())
+        )
         return [dict(r._mapping) for r in self.db.execute(stmt).all()]
 
     def daily_series(
@@ -124,18 +128,22 @@ class AnalyticsRepository(BaseRepository[AnalyticsDaily]):
         end: date | None = None,
         platform: SocialPlatform | None = None,
     ) -> list[dict]:
-        stmt = self._scope(
-            select(
-                AnalyticsDaily.date.label("date"),
-                func.coalesce(func.sum(AnalyticsDaily.impressions), 0).label("impressions"),
-                func.coalesce(func.sum(AnalyticsDaily.clicks), 0).label("clicks"),
-                func.coalesce(func.sum(AnalyticsDaily.leads), 0).label("leads"),
-                func.coalesce(func.sum(AnalyticsDaily.spend), 0).label("spend"),
-                func.coalesce(func.sum(AnalyticsDaily.revenue), 0).label("revenue"),
-            ),
-            client_id,
-            start=start,
-            end=end,
-            platform=platform,
-        ).group_by(AnalyticsDaily.date).order_by(AnalyticsDaily.date.asc())
+        stmt = (
+            self._scope(
+                select(
+                    AnalyticsDaily.date.label("date"),
+                    func.coalesce(func.sum(AnalyticsDaily.impressions), 0).label("impressions"),
+                    func.coalesce(func.sum(AnalyticsDaily.clicks), 0).label("clicks"),
+                    func.coalesce(func.sum(AnalyticsDaily.leads), 0).label("leads"),
+                    func.coalesce(func.sum(AnalyticsDaily.spend), 0).label("spend"),
+                    func.coalesce(func.sum(AnalyticsDaily.revenue), 0).label("revenue"),
+                ),
+                client_id,
+                start=start,
+                end=end,
+                platform=platform,
+            )
+            .group_by(AnalyticsDaily.date)
+            .order_by(AnalyticsDaily.date.asc())
+        )
         return [dict(r._mapping) for r in self.db.execute(stmt).all()]

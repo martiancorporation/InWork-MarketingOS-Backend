@@ -76,9 +76,7 @@ def update_entry(
     return ComplianceEntryRead.model_validate(entry)
 
 
-@router.delete(
-    "/{entry_id}", response_model=MessageResponse, summary="Delete a compliance entry"
-)
+@router.delete("/{entry_id}", response_model=MessageResponse, summary="Delete a compliance entry")
 def delete_entry(
     client_id: uuid.UUID, entry_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> MessageResponse:
@@ -92,8 +90,6 @@ def delete_entry(
     response_model=IntelligenceStatus,
     summary="Force the effective ruleset into the AI (triggers a rebuild)",
 )
-def sync_ruleset(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
-) -> IntelligenceStatus:
+def sync_ruleset(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> IntelligenceStatus:
     ClientService(db).get_client(user, client_id)
     return ComplianceService(db).sync(client_id)

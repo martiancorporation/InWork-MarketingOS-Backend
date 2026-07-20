@@ -30,9 +30,7 @@ class SearchConsoleClient:
         """Verified site URLs this token can read, e.g. ['https://acme.com/']."""
         data = await self._request("GET", f"{_BASE}/sites", access_token)
         return [
-            entry.get("siteUrl")
-            for entry in (data.get("siteEntry") or [])
-            if entry.get("siteUrl")
+            entry.get("siteUrl") for entry in (data.get("siteEntry") or []) if entry.get("siteUrl")
         ]
 
     async def fetch_metrics(self, access_token: str, site_url: str) -> dict:

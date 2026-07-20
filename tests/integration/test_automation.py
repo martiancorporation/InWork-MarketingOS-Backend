@@ -68,8 +68,14 @@ def test_integration_sync_sweep_syncs_connected(
     db_session.commit()
 
     async def fake_insights(self, token, ad_account_id, *, date_preset="last_30d"):
-        return {"impressions": 100, "clicks": 5, "spend": 10.0,
-                "leads": 1, "conversions": 0, "revenue": 0.0}
+        return {
+            "impressions": 100,
+            "clicks": 5,
+            "spend": 10.0,
+            "leads": 1,
+            "conversions": 0,
+            "revenue": 0.0,
+        }
 
     monkeypatch.setattr(MetaClient, "fetch_insights", fake_insights)
     resp = client.post(f"{API}/automation/integrations/sync", headers=admin_headers)

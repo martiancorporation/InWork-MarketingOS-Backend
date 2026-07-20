@@ -26,7 +26,9 @@ def onboarding_payload(name: str = "Acme Co.", **overrides: Any) -> dict[str, An
         "goals": "Q1 brand presence; Q2 lead-gen; Q3 e-commerce. Build momentum steadily.",
         "compliance": {"feed": "Never say 'cheap' or 'guaranteed'. Always include 'Made in USA'."},
         "client_contacts": [{"name": "Jane Cooper", "role": "CMO", "email": "jane@acme.com"}],
-        "inwork_contacts": [{"name": "Alex Rivera", "role": "Strategist", "email": "alex@inwork.com"}],
+        "inwork_contacts": [
+            {"name": "Alex Rivera", "role": "Strategist", "email": "alex@inwork.com"}
+        ],
         "documents": [],
     }
     payload.update(overrides)

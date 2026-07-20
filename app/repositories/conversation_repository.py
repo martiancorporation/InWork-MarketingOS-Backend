@@ -62,7 +62,5 @@ class ConversationRepository(BaseRepository[Conversation]):
                 Message.conversation_id == conversation_id,
                 Conversation.client_id == client_id,
             )
-            .options(
-                selectinload(Message.recipients), selectinload(Message.attachments)
-            )
+            .options(selectinload(Message.recipients), selectinload(Message.attachments))
         )

@@ -56,9 +56,7 @@ class AnthropicClient:
             max_retries=self._settings.max_retries,
         )
 
-    async def _invoke(
-        self, create_kwargs: dict, *, operation: str, context: AiUsageContext | None
-    ):
+    async def _invoke(self, create_kwargs: dict, *, operation: str, context: AiUsageContext | None):
         """Run one Messages call and record its token usage + cost.
 
         Records on success (with real usage) and on failure (status=error, zero
@@ -72,14 +70,23 @@ class AnthropicClient:
             message = await client.messages.create(**create_kwargs)
         except Exception as exc:
             record_usage(
-                context=ctx, provider=_PROVIDER, model=model, operation=operation,
-                usage=None, status="error", error=str(exc)[:500],
+                context=ctx,
+                provider=_PROVIDER,
+                model=model,
+                operation=operation,
+                usage=None,
+                status="error",
+                error=str(exc)[:500],
                 duration_ms=int((time.perf_counter() - started) * 1000),
             )
             raise
         record_usage(
-            context=ctx, provider=_PROVIDER, model=model, operation=operation,
-            usage=usage_from_message(message), status="success",
+            context=ctx,
+            provider=_PROVIDER,
+            model=model,
+            operation=operation,
+            usage=usage_from_message(message),
+            status="success",
             request_id=getattr(message, "id", None),
             duration_ms=int((time.perf_counter() - started) * 1000),
         )

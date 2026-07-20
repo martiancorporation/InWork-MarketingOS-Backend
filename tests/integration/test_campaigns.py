@@ -34,9 +34,7 @@ def _create_campaign(client, headers, cid, **overrides):
 
 
 def _ingest_metrics(client, headers, cid, camp_id, **metrics):
-    resp = client.patch(
-        f"{API}/clients/{cid}/campaigns/{camp_id}", headers=headers, json=metrics
-    )
+    resp = client.patch(f"{API}/clients/{cid}/campaigns/{camp_id}", headers=headers, json=metrics)
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -56,13 +54,21 @@ def test_derived_metrics_from_actuals(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     camp = _create_campaign(client, admin_headers, cid)
     body = _ingest_metrics(
-        client, admin_headers, cid, camp["id"],
-        impressions=1000, clicks=20, conversions=2, leads=5, spend=100, revenue=400,
+        client,
+        admin_headers,
+        cid,
+        camp["id"],
+        impressions=1000,
+        clicks=20,
+        conversions=2,
+        leads=5,
+        spend=100,
+        revenue=400,
     )
-    assert body["ctr"] == 2.0          # 20/1000
-    assert body["cpl"] == 20.0         # 100/5
+    assert body["ctr"] == 2.0  # 20/1000
+    assert body["cpl"] == 20.0  # 100/5
     assert body["conversion_rate"] == 10.0  # 2/20
-    assert body["roas"] == 4.0         # 400/100
+    assert body["roas"] == 4.0  # 400/100
 
 
 def test_list_with_status_filter(client: TestClient, admin_headers: dict):
@@ -81,10 +87,12 @@ def test_compare_picks_winners(client: TestClient, admin_headers: dict):
     a = _create_campaign(client, admin_headers, cid, name="A")
     b = _create_campaign(client, admin_headers, cid, name="B")
     # A: better CTR; B: better (lower) CPL.
-    _ingest_metrics(client, admin_headers, cid, a["id"],
-                    impressions=1000, clicks=50, leads=2, spend=100)
-    _ingest_metrics(client, admin_headers, cid, b["id"],
-                    impressions=1000, clicks=10, leads=10, spend=100)
+    _ingest_metrics(
+        client, admin_headers, cid, a["id"], impressions=1000, clicks=50, leads=2, spend=100
+    )
+    _ingest_metrics(
+        client, admin_headers, cid, b["id"], impressions=1000, clicks=10, leads=10, spend=100
+    )
     resp = client.get(
         f"{API}/clients/{cid}/campaigns/compare?ids={a['id']}&ids={b['id']}",
         headers=admin_headers,
@@ -92,27 +100,32 @@ def test_compare_picks_winners(client: TestClient, admin_headers: dict):
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert len(data["rows"]) == 2
-    assert data["winners"]["ctr"] == a["id"]   # 5% vs 1%
-    assert data["winners"]["cpl"] == b["id"]   # $10 vs $50
+    assert data["winners"]["ctr"] == a["id"]  # 5% vs 1%
+    assert data["winners"]["cpl"] == b["id"]  # $10 vs $50
 
 
 def test_compare_requires_two_ids(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     a = _create_campaign(client, admin_headers, cid)
-    resp = client.get(
-        f"{API}/clients/{cid}/campaigns/compare?ids={a['id']}", headers=admin_headers
-    )
+    resp = client.get(f"{API}/clients/{cid}/campaigns/compare?ids={a['id']}", headers=admin_headers)
     assert resp.status_code == 422  # min 2 ids
 
 
 def test_health_meets_targets(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     camp = _create_campaign(client, admin_headers, cid)  # cpl<=25, ctr>=1.5, cvr>=5
-    _ingest_metrics(client, admin_headers, cid, camp["id"],
-                    impressions=1000, clicks=20, conversions=2, leads=5, spend=100)
-    resp = client.get(
-        f"{API}/clients/{cid}/campaigns/{camp['id']}/health", headers=admin_headers
+    _ingest_metrics(
+        client,
+        admin_headers,
+        cid,
+        camp["id"],
+        impressions=1000,
+        clicks=20,
+        conversions=2,
+        leads=5,
+        spend=100,
     )
+    resp = client.get(f"{API}/clients/{cid}/campaigns/{camp['id']}/health", headers=admin_headers)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["has_targets"] is True
@@ -123,12 +136,14 @@ def test_health_meets_targets(client: TestClient, admin_headers: dict):
 def test_health_without_targets(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     camp = _create_campaign(
-        client, admin_headers, cid,
-        target_cpl=None, target_ctr=None, target_conversion_rate=None,
+        client,
+        admin_headers,
+        cid,
+        target_cpl=None,
+        target_ctr=None,
+        target_conversion_rate=None,
     )
-    resp = client.get(
-        f"{API}/clients/{cid}/campaigns/{camp['id']}/health", headers=admin_headers
-    )
+    resp = client.get(f"{API}/clients/{cid}/campaigns/{camp['id']}/health", headers=admin_headers)
     data = resp.json()
     assert data["has_targets"] is False
     assert data["band"] == "attention"
@@ -164,12 +179,16 @@ def test_event_links_to_campaign_and_post_cta(client: TestClient, admin_headers:
 def test_delete_campaign(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     camp = _create_campaign(client, admin_headers, cid)
-    assert client.delete(
-        f"{API}/clients/{cid}/campaigns/{camp['id']}", headers=admin_headers
-    ).status_code == 200
-    assert client.get(
-        f"{API}/clients/{cid}/campaigns/{camp['id']}", headers=admin_headers
-    ).status_code == 404
+    assert (
+        client.delete(
+            f"{API}/clients/{cid}/campaigns/{camp['id']}", headers=admin_headers
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(f"{API}/clients/{cid}/campaigns/{camp['id']}", headers=admin_headers).status_code
+        == 404
+    )
 
 
 def test_bad_status_422(client: TestClient, admin_headers: dict):
@@ -186,9 +205,7 @@ def test_scoping_unassigned_user_404(client: TestClient, admin_headers: dict, ma
     cid = _client_id(client, admin_headers)
     _create_campaign(client, admin_headers, cid)
     _user, headers = make_user(email="nobody@test.com")
-    assert client.get(
-        f"{API}/clients/{cid}/campaigns", headers=headers
-    ).status_code == 404
+    assert client.get(f"{API}/clients/{cid}/campaigns", headers=headers).status_code == 404
 
 
 def test_requires_auth(client: TestClient, admin_headers: dict):

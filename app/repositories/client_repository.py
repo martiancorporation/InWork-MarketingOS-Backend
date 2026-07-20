@@ -30,15 +30,18 @@ class ClientRepository(BaseRepository[Client]):
     ) -> Select:
         if search:
             pattern = f"%{search.strip()}%"
-            stmt = stmt.where(
-                or_(Client.name.ilike(pattern), Client.industry.ilike(pattern))
-            )
+            stmt = stmt.where(or_(Client.name.ilike(pattern), Client.industry.ilike(pattern)))
         if status is not None:
             stmt = stmt.where(Client.status == status)
         return stmt
 
     def list_all(
-        self, *, offset: int, limit: int, search: str | None = None, status: ClientStatus | None = None
+        self,
+        *,
+        offset: int,
+        limit: int,
+        search: str | None = None,
+        status: ClientStatus | None = None,
     ) -> tuple[list[Client], int]:
         """Every client — for admins."""
         base = self._apply_filters(select(Client), search, status)
@@ -55,18 +58,16 @@ class ClientRepository(BaseRepository[Client]):
     ) -> tuple[list[Client], int]:
         """Only clients assigned to ``user_id`` — for non-admins."""
         base = self._apply_filters(
-            select(Client).join(
-                ClientAssignment, ClientAssignment.client_id == Client.id
-            ).where(ClientAssignment.user_id == user_id),
+            select(Client)
+            .join(ClientAssignment, ClientAssignment.client_id == Client.id)
+            .where(ClientAssignment.user_id == user_id),
             search,
             status,
         )
         return self._paginate(base, offset, limit)
 
     def _paginate(self, base: Select, offset: int, limit: int) -> tuple[list[Client], int]:
-        total = int(
-            self.db.scalar(select(func.count()).select_from(base.subquery())) or 0
-        )
+        total = int(self.db.scalar(select(func.count()).select_from(base.subquery())) or 0)
         rows = list(
             self.db.scalars(
                 base.order_by(Client.created_at.desc()).offset(offset).limit(limit)

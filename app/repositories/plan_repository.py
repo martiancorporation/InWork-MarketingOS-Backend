@@ -18,9 +18,7 @@ from app.repositories.base import BaseRepository
 class PlanTaskRepository(BaseRepository[PlanTask]):
     model = PlanTask
 
-    def get_for_client(
-        self, client_id: uuid.UUID, task_id: uuid.UUID
-    ) -> PlanTask | None:
+    def get_for_client(self, client_id: uuid.UUID, task_id: uuid.UUID) -> PlanTask | None:
         """Load one task scoped to a client."""
         return self.db.scalar(
             select(PlanTask).where(
@@ -48,16 +46,11 @@ class PlanTaskRepository(BaseRepository[PlanTask]):
         if assignee_id is not None:
             conditions.append(PlanTask.assignee_id == assignee_id)
 
-        total = self.db.scalar(
-            select(func.count()).select_from(PlanTask).where(*conditions)
-        )
+        total = self.db.scalar(select(func.count()).select_from(PlanTask).where(*conditions))
         # ``due_date asc nulls last`` is tricky cross-DB; newest-first by creation
         # is simple and portable, and matches the board's "recently added" default.
         stmt = (
-            select(PlanTask)
-            .where(*conditions)
-            .order_by(PlanTask.created_at.desc())
-            .offset(offset)
+            select(PlanTask).where(*conditions).order_by(PlanTask.created_at.desc()).offset(offset)
         )
         if limit is not None:
             stmt = stmt.limit(limit)
@@ -81,21 +74,19 @@ class PlanTaskRepository(BaseRepository[PlanTask]):
         if client_ids is not None:
             conditions.append(PlanTask.client_id.in_(client_ids))
         rows = self.db.execute(
-            select(PlanTask.client_id, func.count())
-            .where(*conditions)
-            .group_by(PlanTask.client_id)
+            select(PlanTask.client_id, func.count()).where(*conditions).group_by(PlanTask.client_id)
         ).all()
         return {cid: int(n) for cid, n in rows}
 
     def completion_counts(self, client_id: uuid.UUID) -> tuple[int, int]:
         """Return ``(done, total)`` task counts for a client (BE-06 adherence)."""
         total = self.db.scalar(
-            select(func.count()).select_from(PlanTask).where(
-                PlanTask.client_id == client_id
-            )
+            select(func.count()).select_from(PlanTask).where(PlanTask.client_id == client_id)
         )
         done = self.db.scalar(
-            select(func.count()).select_from(PlanTask).where(
+            select(func.count())
+            .select_from(PlanTask)
+            .where(
                 PlanTask.client_id == client_id,
                 PlanTask.status == TaskStatus.done,
             )

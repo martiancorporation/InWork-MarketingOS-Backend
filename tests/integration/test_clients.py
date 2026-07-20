@@ -9,7 +9,9 @@ from tests.helpers import onboarding_payload
 
 
 def _onboard(client, headers, **overrides):
-    return client.post(f"{API}/clients/onboarding", headers=headers, json=onboarding_payload(**overrides))
+    return client.post(
+        f"{API}/clients/onboarding", headers=headers, json=onboarding_payload(**overrides)
+    )
 
 
 def test_admin_onboards_client(client: TestClient, admin_headers: dict):
@@ -47,7 +49,9 @@ def test_onboarding_requires_at_least_one_platform(client: TestClient, admin_hea
 
 
 def test_onboarding_requires_client_contact_email(client: TestClient, admin_headers: dict):
-    assert _onboard(client, admin_headers, client_contacts=[{"name": "No Email"}]).status_code == 422
+    assert (
+        _onboard(client, admin_headers, client_contacts=[{"name": "No Email"}]).status_code == 422
+    )
 
 
 def test_onboarding_rejects_invalid_hex_color(client: TestClient, admin_headers: dict):
@@ -90,7 +94,9 @@ def test_list_search_and_status_filter(client: TestClient, admin_headers: dict):
     # atomic onboarding creates live clients, so both are status=active
     assert client.get(f"{API}/clients?status=active", headers=admin_headers).json()["total"] == 2
     # ...and none are left at the legacy onboarding status
-    assert client.get(f"{API}/clients?status=onboarding", headers=admin_headers).json()["total"] == 0
+    assert (
+        client.get(f"{API}/clients?status=onboarding", headers=admin_headers).json()["total"] == 0
+    )
 
 
 def _mock_render(monkeypatch, page):
@@ -102,7 +108,9 @@ def _mock_render(monkeypatch, page):
     monkeypatch.setattr("app.ai.brand_extraction.render_page", fake_render_page)
 
 
-def test_brand_extraction_fallback_without_api_key(client: TestClient, admin_headers: dict, monkeypatch):
+def test_brand_extraction_fallback_without_api_key(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
     from app.utils.render import RenderedPage
 
     # Avoid a real browser render; still exercises the no-API-key path.
@@ -131,9 +139,11 @@ def test_brand_extraction_render_plus_vision(client: TestClient, admin_headers: 
     from app.integrations.anthropic.client import AnthropicClient
     from app.utils.render import RenderedPage
 
-    async def fake_complete_with_image(self, *, system, prompt, image, media_type="image/jpeg", max_tokens=None, context=None):
-        assert image == b"jpg"          # the screenshot reached the model
-        assert "site text" in prompt    # so did the rendered text
+    async def fake_complete_with_image(
+        self, *, system, prompt, image, media_type="image/jpeg", max_tokens=None, context=None
+    ):
+        assert image == b"jpg"  # the screenshot reached the model
+        assert "site text" in prompt  # so did the rendered text
         return '{"summary":"Warm DTC brand","colors":["#AABBCC"],"fonts":["Lora"],"tone":"warm","imagery":"bright"}'
 
     monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
@@ -196,7 +206,9 @@ def test_brand_extraction_model_failure_degrades_to_measured_values(
     from app.integrations.anthropic.client import AnthropicClient
     from app.utils.render import RenderedPage
 
-    async def broken_vision(self, *, system, prompt, image, media_type="image/jpeg", max_tokens=None):
+    async def broken_vision(
+        self, *, system, prompt, image, media_type="image/jpeg", max_tokens=None
+    ):
         raise RuntimeError("model unavailable")
 
     monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
@@ -306,7 +318,9 @@ def test_brand_extraction_from_document_text(client: TestClient, admin_headers: 
     assert "#001F5B" in body["colors"]
 
 
-def test_brand_extraction_from_image_uses_vision(client: TestClient, admin_headers: dict, monkeypatch):
+def test_brand_extraction_from_image_uses_vision(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
     # Image document → Claude vision, with the right media_type threaded through.
     import uuid
 
@@ -337,7 +351,9 @@ def test_brand_extraction_from_image_uses_vision(client: TestClient, admin_heade
     assert "#FF5722" in resp.json()["colors"]
 
 
-def test_brand_extraction_from_document_fallback(client: TestClient, admin_headers: dict, monkeypatch):
+def test_brand_extraction_from_document_fallback(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
     # Document path with Claude unconfigured → deterministic, provisional result.
     import uuid
 

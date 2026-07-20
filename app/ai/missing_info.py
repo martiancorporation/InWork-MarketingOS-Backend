@@ -89,9 +89,7 @@ class MissingInfoAgent:
             if not label or not rationale or key in seen_keys:
                 continue
             seen_keys.add(key)
-            ai_items.append(
-                MissingInfoItem(key=key, label=label, rationale=rationale, source="ai")
-            )
+            ai_items.append(MissingInfoItem(key=key, label=label, rationale=rationale, source="ai"))
             if len(ai_items) >= _MAX_ITEMS:
                 break
 

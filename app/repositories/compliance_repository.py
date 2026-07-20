@@ -14,9 +14,7 @@ from app.repositories.base import BaseRepository
 class ComplianceRepository(BaseRepository[ComplianceEntry]):
     model = ComplianceEntry
 
-    def get_for_client(
-        self, client_id: uuid.UUID, entry_id: uuid.UUID
-    ) -> ComplianceEntry | None:
+    def get_for_client(self, client_id: uuid.UUID, entry_id: uuid.UUID) -> ComplianceEntry | None:
         return self.db.scalar(
             select(ComplianceEntry).where(
                 ComplianceEntry.id == entry_id,
@@ -40,9 +38,7 @@ class ComplianceRepository(BaseRepository[ComplianceEntry]):
         if active_only:
             conditions.append(ComplianceEntry.is_active.is_(True))
 
-        total = self.db.scalar(
-            select(func.count()).select_from(ComplianceEntry).where(*conditions)
-        )
+        total = self.db.scalar(select(func.count()).select_from(ComplianceEntry).where(*conditions))
         stmt = (
             select(ComplianceEntry)
             .where(*conditions)

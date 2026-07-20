@@ -66,9 +66,7 @@ def list_clients(
     search: str | None = Query(None, description="Match name or industry"),
     status: ClientStatus | None = Query(None, description="Filter by status"),
 ) -> ClientListResponse:
-    return ClientService(db).list_clients(
-        user, pagination=pagination, search=search, status=status
-    )
+    return ClientService(db).list_clients(user, pagination=pagination, search=search, status=status)
 
 
 @router.post(
@@ -77,9 +75,7 @@ def list_clients(
     status_code=status.HTTP_201_CREATED,
     summary="Onboard a new client (admin only)",
 )
-def onboard_client(
-    data: OnboardingRequest, admin: AdminUser, db: DbSession
-) -> OnboardingResponse:
+def onboard_client(data: OnboardingRequest, admin: AdminUser, db: DbSession) -> OnboardingResponse:
     client = OnboardingService(db).onboard(admin, data)
     readiness = ReadinessService().report(client)
     return OnboardingResponse(

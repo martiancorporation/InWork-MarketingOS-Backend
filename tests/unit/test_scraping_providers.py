@@ -168,7 +168,9 @@ def test_extract_folds_research_into_analysis(monkeypatch):
     svc = BrandExtractionService(scrapingbee=sb, brave=brave)
     monkeypatch.setattr(type(svc._client), "is_configured", property(lambda self: True))
 
-    async def fake_analyze(website, text, colors, fonts, screenshot, context=None, *, media_type="image/jpeg"):
+    async def fake_analyze(
+        website, text, colors, fonts, screenshot, context=None, *, media_type="image/jpeg"
+    ):
         seen["text"] = text
         return {"summary": "ok", "colors": [], "fonts": [], "tone": "warm", "imagery": "x"}
 

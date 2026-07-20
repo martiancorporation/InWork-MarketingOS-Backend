@@ -113,7 +113,9 @@ def admin_headers(client: TestClient, db_session: Session) -> dict[str, str]:
 
 
 @pytest.fixture
-def make_user(client: TestClient, admin_headers: dict[str, str]) -> Callable[..., tuple[dict, dict]]:
+def make_user(
+    client: TestClient, admin_headers: dict[str, str]
+) -> Callable[..., tuple[dict, dict]]:
     """Factory: admin creates a user, returns (user_json, that_user's_auth_header)."""
 
     def _make(

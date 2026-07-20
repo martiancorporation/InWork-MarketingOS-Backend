@@ -50,9 +50,7 @@ class IntegrationsSettings(BaseSettings):
     @property
     def linkedin_configured(self) -> bool:
         return bool(
-            self.linkedin_client_id
-            and self.linkedin_client_secret
-            and self.linkedin_redirect_uri
+            self.linkedin_client_id and self.linkedin_client_secret and self.linkedin_redirect_uri
         )
 
     # Scraping / research providers (used by brand extraction). Optional — the

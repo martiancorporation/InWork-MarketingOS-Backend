@@ -61,51 +61,63 @@ class WatchdogAgent:
     def _fallback(self, s: DashboardSignals) -> list[WatchdogItem]:
         items: list[dict] = []
         if s.pending_integrations:
-            items.append({
-                "id": "w-integrations",
-                "kind": "alert",
-                "severity": "high",
-                "title": f"{s.pending_integrations} integration(s) not connected",
-                "detail": "Analytics and attribution will have gaps until every platform is connected.",
-            })
+            items.append(
+                {
+                    "id": "w-integrations",
+                    "kind": "alert",
+                    "severity": "high",
+                    "title": f"{s.pending_integrations} integration(s) not connected",
+                    "detail": "Analytics and attribution will have gaps until every platform is connected.",
+                }
+            )
         if s.pending_approvals:
-            items.append({
-                "id": "w-approvals",
-                "kind": "alert",
-                "severity": "medium",
-                "title": f"{s.pending_approvals} post(s) awaiting client approval",
-                "detail": "Scheduled content is blocked on client sign-off.",
-            })
+            items.append(
+                {
+                    "id": "w-approvals",
+                    "kind": "alert",
+                    "severity": "medium",
+                    "title": f"{s.pending_approvals} post(s) awaiting client approval",
+                    "detail": "Scheduled content is blocked on client sign-off.",
+                }
+            )
         if not s.onboarding_completed:
-            items.append({
-                "id": "w-onboarding",
-                "kind": "alert",
-                "severity": "medium",
-                "title": "Onboarding is not complete",
-                "detail": "Finish the onboarding wizard so the client profile and rules are fully built.",
-            })
+            items.append(
+                {
+                    "id": "w-onboarding",
+                    "kind": "alert",
+                    "severity": "medium",
+                    "title": "Onboarding is not complete",
+                    "detail": "Finish the onboarding wizard so the client profile and rules are fully built.",
+                }
+            )
         if not s.has_profile:
-            items.append({
-                "id": "w-profile",
-                "kind": "alert",
-                "severity": "low",
-                "title": "Intelligence profile still building",
-                "detail": "The summary and directive rules are being generated in the background.",
-            })
+            items.append(
+                {
+                    "id": "w-profile",
+                    "kind": "alert",
+                    "severity": "low",
+                    "title": "Intelligence profile still building",
+                    "detail": "The summary and directive rules are being generated in the background.",
+                }
+            )
         if s.goals:
-            items.append({
-                "id": "w-goals",
-                "kind": "opportunity",
-                "severity": "low",
-                "title": "Align this week's content with stated goals",
-                "detail": f"Client goals on file: {s.goals[:140]}",
-            })
+            items.append(
+                {
+                    "id": "w-goals",
+                    "kind": "opportunity",
+                    "severity": "low",
+                    "title": "Align this week's content with stated goals",
+                    "detail": f"Client goals on file: {s.goals[:140]}",
+                }
+            )
         if not items:
-            items.append({
-                "id": "w-ok",
-                "kind": "opportunity",
-                "severity": "low",
-                "title": "Account setup looks healthy",
-                "detail": "No blocking issues detected — keep monitoring performance as data accrues.",
-            })
+            items.append(
+                {
+                    "id": "w-ok",
+                    "kind": "opportunity",
+                    "severity": "low",
+                    "title": "Account setup looks healthy",
+                    "detail": "No blocking issues detected — keep monitoring performance as data accrues.",
+                }
+            )
         return [WatchdogItem.model_validate(i) for i in items]

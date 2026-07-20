@@ -33,9 +33,7 @@ class LinkedInClient:
 
     async def list_ad_accounts(self, access_token: str) -> list[dict]:
         """Ad accounts this token can manage (id + name)."""
-        data = await self._request(
-            "GET", f"{_REST}/adAccounts?q=search", access_token
-        )
+        data = await self._request("GET", f"{_REST}/adAccounts?q=search", access_token)
         accounts: list[dict] = []
         for el in data.get("elements") or []:
             acc_id = el.get("id")
@@ -59,13 +57,9 @@ class LinkedInClient:
             "dateRange.end.day": today.day,
             "dateRange.end.month": today.month,
             "dateRange.end.year": today.year,
-            "fields": (
-                "impressions,clicks,costInUsd,externalWebsiteConversions,oneClickLeads"
-            ),
+            "fields": ("impressions,clicks,costInUsd,externalWebsiteConversions,oneClickLeads"),
         }
-        data = await self._request(
-            "GET", f"{_REST}/adAnalytics", access_token, params=params
-        )
+        data = await self._request("GET", f"{_REST}/adAnalytics", access_token, params=params)
         return _normalize(data)
 
     async def _request(

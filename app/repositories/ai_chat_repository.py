@@ -42,9 +42,7 @@ class AiChatRepository(BaseRepository[AiChat]):
         self.db.flush()
         return chat
 
-    def get_for_client(
-        self, client_id: uuid.UUID, chat_id: uuid.UUID
-    ) -> AiChat | None:
+    def get_for_client(self, client_id: uuid.UUID, chat_id: uuid.UUID) -> AiChat | None:
         return self.db.scalar(
             select(AiChat).where(AiChat.id == chat_id, AiChat.client_id == client_id)
         )

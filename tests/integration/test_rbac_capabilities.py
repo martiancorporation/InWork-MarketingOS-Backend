@@ -36,9 +36,7 @@ def _assign(client, admin_headers, cid, uid, caps=None):
 
 
 def _connect(client, headers, cid, key="ga4"):
-    return client.post(
-        f"{API}/clients/{cid}/integrations/{key}/connect", headers=headers, json={}
-    )
+    return client.post(f"{API}/clients/{cid}/integrations/{key}/connect", headers=headers, json={})
 
 
 def _make_alert(db_session: Session, cid: str) -> str:

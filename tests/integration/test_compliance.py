@@ -37,8 +37,18 @@ def test_list_and_kind_filter(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)  # onboarding leaves one "note" entry
     _add(client, admin_headers, cid, kind="banned")
     _add(client, admin_headers, cid, kind="required", text="Always include 'Made in USA'.")
-    assert client.get(f"{API}/clients/{cid}/compliance?kind=banned", headers=admin_headers).json()["total"] == 1
-    assert client.get(f"{API}/clients/{cid}/compliance?kind=required", headers=admin_headers).json()["total"] == 1
+    assert (
+        client.get(f"{API}/clients/{cid}/compliance?kind=banned", headers=admin_headers).json()[
+            "total"
+        ]
+        == 1
+    )
+    assert (
+        client.get(f"{API}/clients/{cid}/compliance?kind=required", headers=admin_headers).json()[
+            "total"
+        ]
+        == 1
+    )
     # note (from onboarding) + banned + required
     assert client.get(f"{API}/clients/{cid}/compliance", headers=admin_headers).json()["total"] == 3
 
@@ -52,7 +62,9 @@ def test_deactivate_hidden_from_active_filter(client: TestClient, admin_headers:
         json={"is_active": False},
     )
     assert patched.status_code == 200 and patched.json()["is_active"] is False
-    active = client.get(f"{API}/clients/{cid}/compliance?active_only=true", headers=admin_headers).json()
+    active = client.get(
+        f"{API}/clients/{cid}/compliance?active_only=true", headers=admin_headers
+    ).json()
     assert all(e["id"] != entry["id"] for e in active["items"])
 
 
@@ -70,8 +82,15 @@ def test_edit_text(client: TestClient, admin_headers: dict):
 def test_delete_entry(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     entry = _add(client, admin_headers, cid, kind="banned")
-    assert client.delete(f"{API}/clients/{cid}/compliance/{entry['id']}", headers=admin_headers).status_code == 200
-    remaining = client.get(f"{API}/clients/{cid}/compliance?kind=banned", headers=admin_headers).json()
+    assert (
+        client.delete(
+            f"{API}/clients/{cid}/compliance/{entry['id']}", headers=admin_headers
+        ).status_code
+        == 200
+    )
+    remaining = client.get(
+        f"{API}/clients/{cid}/compliance?kind=banned", headers=admin_headers
+    ).json()
     assert remaining["total"] == 0
 
 
@@ -97,7 +116,9 @@ def test_entries_are_client_scoped(client: TestClient, admin_headers: dict):
 def test_assigned_user_can_manage(client: TestClient, admin_headers: dict, make_user):
     user, user_headers = make_user()
     cid = _client_id(client, admin_headers)
-    client.post(f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]})
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
     body = _add(client, user_headers, cid, kind="rule", text="Tone: warm, expert.")
     assert body["author_id"] == user["id"]
 

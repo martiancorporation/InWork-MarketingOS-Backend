@@ -36,9 +36,7 @@ def _breaching_campaign(client, admin_headers, cid):
     )
 
 
-def test_watchdog_notifies_assigned_user(
-    client: TestClient, admin_headers: dict, make_user
-):
+def test_watchdog_notifies_assigned_user(client: TestClient, admin_headers: dict, make_user):
     cid = _client_id(client, admin_headers)
     user, headers = make_user(email="specialist@test.com")
     _assign(client, admin_headers, cid, user["id"])

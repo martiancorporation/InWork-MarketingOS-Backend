@@ -77,9 +77,7 @@ def test_list_filter_by_stage(client: TestClient, admin_headers: dict):
 def test_get_event_detail(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     created = _create_event(client, admin_headers, cid)
-    resp = client.get(
-        f"{API}/clients/{cid}/calendar/events/{created['id']}", headers=admin_headers
-    )
+    resp = client.get(f"{API}/clients/{cid}/calendar/events/{created['id']}", headers=admin_headers)
     assert resp.status_code == 200
     assert resp.json()["ad"]["bid_strategy"] == "Lowest cost"
 
@@ -146,9 +144,7 @@ def test_delete_event(client: TestClient, admin_headers: dict):
         f"{API}/clients/{cid}/calendar/events/{created['id']}", headers=admin_headers
     )
     assert resp.status_code == 200
-    gone = client.get(
-        f"{API}/clients/{cid}/calendar/events/{created['id']}", headers=admin_headers
-    )
+    gone = client.get(f"{API}/clients/{cid}/calendar/events/{created['id']}", headers=admin_headers)
     assert gone.status_code == 404
 
 
@@ -190,7 +186,9 @@ def test_unassigned_user_gets_404(client: TestClient, admin_headers: dict, make_
     _user, user_headers = make_user()
     cid = _client_id(client, admin_headers)
     # unassigned user can't even tell the client exists
-    assert client.get(f"{API}/clients/{cid}/calendar/events", headers=user_headers).status_code == 404
+    assert (
+        client.get(f"{API}/clients/{cid}/calendar/events", headers=user_headers).status_code == 404
+    )
     assert (
         client.post(
             f"{API}/clients/{cid}/calendar/events", headers=user_headers, json=_event_payload()

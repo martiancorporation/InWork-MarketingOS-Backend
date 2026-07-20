@@ -70,6 +70,7 @@ class ClientUpdate(BaseModel):
 
 # ---- Detailed read (nested) ----
 
+
 class BrandColorRead(ORMModel):
     hex: str
     label: str | None = None

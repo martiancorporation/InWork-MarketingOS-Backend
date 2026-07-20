@@ -59,9 +59,7 @@ def test_list_filter_by_status(client: TestClient, admin_headers: dict):
 def test_get_task_detail(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     created = _create_task(client, admin_headers, cid)
-    resp = client.get(
-        f"{API}/clients/{cid}/plan/tasks/{created['id']}", headers=admin_headers
-    )
+    resp = client.get(f"{API}/clients/{cid}/plan/tasks/{created['id']}", headers=admin_headers)
     assert resp.status_code == 200
     assert resp.json()["description"] == "Outline the pillars for the quarter."
 
@@ -99,13 +97,9 @@ def test_reassign_via_patch(client: TestClient, admin_headers: dict, make_user):
 def test_delete_task(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     created = _create_task(client, admin_headers, cid)
-    resp = client.delete(
-        f"{API}/clients/{cid}/plan/tasks/{created['id']}", headers=admin_headers
-    )
+    resp = client.delete(f"{API}/clients/{cid}/plan/tasks/{created['id']}", headers=admin_headers)
     assert resp.status_code == 200
-    gone = client.get(
-        f"{API}/clients/{cid}/plan/tasks/{created['id']}", headers=admin_headers
-    )
+    gone = client.get(f"{API}/clients/{cid}/plan/tasks/{created['id']}", headers=admin_headers)
     assert gone.status_code == 404
 
 
@@ -114,9 +108,7 @@ def test_tasks_are_client_scoped(client: TestClient, admin_headers: dict):
     cid_b = _client_id(client, admin_headers, name="Client B")
     created = _create_task(client, admin_headers, cid_a)
     # a task of client A must not be reachable under client B's path
-    resp = client.get(
-        f"{API}/clients/{cid_b}/plan/tasks/{created['id']}", headers=admin_headers
-    )
+    resp = client.get(f"{API}/clients/{cid_b}/plan/tasks/{created['id']}", headers=admin_headers)
     assert resp.status_code == 404
 
 

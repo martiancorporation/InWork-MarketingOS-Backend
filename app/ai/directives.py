@@ -38,15 +38,25 @@ _TIER_BY_TYPE = {
 
 # Deterministic capability net: (pattern) -> (flag, value, text, category).
 _CAPABILITY_RULES: list[tuple[re.Pattern, str, Any, str, str]] = [
-    (re.compile(
-        r"(?:no|not|never|without|don'?t|do\s*n[o']?t|do not|avoid)\b[^.\n]{0,30}"
-        r"ai[- ]?generated|no ai\b[^.\n]{0,20}(?:text|content|copy)|human[- ]written only",
-        re.I),
-     "ai_text_generation", False, "Never use AI-generated text in deliverables", "content"),
-    (re.compile(r"no stock (?:photos|images|imagery)", re.I),
-     "stock_imagery", False, "Do not use stock photos or imagery", "design"),
-    (re.compile(r"no emoji|without emoji", re.I),
-     "emoji", False, "Do not use emoji", "content"),
+    (
+        re.compile(
+            r"(?:no|not|never|without|don'?t|do\s*n[o']?t|do not|avoid)\b[^.\n]{0,30}"
+            r"ai[- ]?generated|no ai\b[^.\n]{0,20}(?:text|content|copy)|human[- ]written only",
+            re.I,
+        ),
+        "ai_text_generation",
+        False,
+        "Never use AI-generated text in deliverables",
+        "content",
+    ),
+    (
+        re.compile(r"no stock (?:photos|images|imagery)", re.I),
+        "stock_imagery",
+        False,
+        "Do not use stock photos or imagery",
+        "design",
+    ),
+    (re.compile(r"no emoji|without emoji", re.I), "emoji", False, "Do not use emoji", "content"),
 ]
 
 
@@ -133,16 +143,28 @@ class DirectivesAgent:
             if d:
                 out.append(d)
         if (client.brand_voice or "").strip():
-            out.append(self._normalize(
-                DirectiveType.prefer.value, "brand",
-                f"Match the brand voice: {client.brand_voice.strip()}", 0.9, "field:brand",
-            ))
+            out.append(
+                self._normalize(
+                    DirectiveType.prefer.value,
+                    "brand",
+                    f"Match the brand voice: {client.brand_voice.strip()}",
+                    0.9,
+                    "field:brand",
+                )
+            )
         return [d for d in out if d]
 
     def _capability_net(self, corpus: str, client: Client) -> list[Directive]:
         haystack = "\n".join(
-            filter(None, [corpus, client.brand_voice, client.color_guidelines,
-                          *[e.text for e in client.compliance_entries]])
+            filter(
+                None,
+                [
+                    corpus,
+                    client.brand_voice,
+                    client.color_guidelines,
+                    *[e.text for e in client.compliance_entries],
+                ],
+            )
         )
         found: list[Directive] = []
         for pattern, flag, value, text, category in _CAPABILITY_RULES:
@@ -165,8 +187,13 @@ class DirectivesAgent:
         if confidence < 0.5 and tier == DirectiveTier.preference.value:
             tier, rank = DirectiveTier.inferred.value, 50
         return Directive(
-            type=dtype, category=category or "general", text=text[:2000],
-            tier=tier, rank=rank, confidence=round(confidence, 3), source_key=source_key,
+            type=dtype,
+            category=category or "general",
+            text=text[:2000],
+            tier=tier,
+            rank=rank,
+            confidence=round(confidence, 3),
+            source_key=source_key,
         )
 
 

@@ -74,45 +74,60 @@ class AiUsageRepository(BaseRepository[AiUsageEvent]):
     def group_totals(
         self, dimension: ColumnElement, f: UsageFilters, *, limit: int = 50
     ) -> list[dict]:
-        stmt = self._apply(
-            select(
-                dimension.label("key"),
-                func.count().label("requests"),
-                func.coalesce(func.sum(AiUsageEvent.total_tokens), 0).label("total_tokens"),
-                func.coalesce(func.sum(AiUsageEvent.total_cost), 0).label("total_cost"),
-            ),
-            f,
-        ).group_by(dimension).order_by(func.sum(AiUsageEvent.total_cost).desc()).limit(limit)
+        stmt = (
+            self._apply(
+                select(
+                    dimension.label("key"),
+                    func.count().label("requests"),
+                    func.coalesce(func.sum(AiUsageEvent.total_tokens), 0).label("total_tokens"),
+                    func.coalesce(func.sum(AiUsageEvent.total_cost), 0).label("total_cost"),
+                ),
+                f,
+            )
+            .group_by(dimension)
+            .order_by(func.sum(AiUsageEvent.total_cost).desc())
+            .limit(limit)
+        )
         return [dict(r._mapping) for r in self.db.execute(stmt).all()]
 
     def by_feature_model(self, f: UsageFilters, *, limit: int = 200) -> list[dict]:
         """Per-(feature, model) rollup used by cost-optimization heuristics."""
-        stmt = self._apply(
-            select(
-                AiUsageEvent.feature.label("feature"),
-                AiUsageEvent.model.label("model"),
-                func.count().label("requests"),
-                func.coalesce(func.sum(AiUsageEvent.input_tokens), 0).label("input_tokens"),
-                func.coalesce(func.sum(AiUsageEvent.output_tokens), 0).label("output_tokens"),
-                func.coalesce(func.sum(AiUsageEvent.cache_read_tokens), 0).label("cache_read_tokens"),
-                func.coalesce(func.sum(AiUsageEvent.total_tokens), 0).label("total_tokens"),
-                func.coalesce(func.sum(AiUsageEvent.total_cost), 0).label("total_cost"),
-            ),
-            f,
-        ).group_by(AiUsageEvent.feature, AiUsageEvent.model).order_by(
-            func.sum(AiUsageEvent.total_cost).desc()
-        ).limit(limit)
+        stmt = (
+            self._apply(
+                select(
+                    AiUsageEvent.feature.label("feature"),
+                    AiUsageEvent.model.label("model"),
+                    func.count().label("requests"),
+                    func.coalesce(func.sum(AiUsageEvent.input_tokens), 0).label("input_tokens"),
+                    func.coalesce(func.sum(AiUsageEvent.output_tokens), 0).label("output_tokens"),
+                    func.coalesce(func.sum(AiUsageEvent.cache_read_tokens), 0).label(
+                        "cache_read_tokens"
+                    ),
+                    func.coalesce(func.sum(AiUsageEvent.total_tokens), 0).label("total_tokens"),
+                    func.coalesce(func.sum(AiUsageEvent.total_cost), 0).label("total_cost"),
+                ),
+                f,
+            )
+            .group_by(AiUsageEvent.feature, AiUsageEvent.model)
+            .order_by(func.sum(AiUsageEvent.total_cost).desc())
+            .limit(limit)
+        )
         return [dict(r._mapping) for r in self.db.execute(stmt).all()]
 
     def daily(self, f: UsageFilters, *, limit: int = 90) -> list[dict]:
         day = func.date(AiUsageEvent.created_at).label("day")
-        stmt = self._apply(
-            select(
-                day,
-                func.count().label("requests"),
-                func.coalesce(func.sum(AiUsageEvent.total_tokens), 0).label("total_tokens"),
-                func.coalesce(func.sum(AiUsageEvent.total_cost), 0).label("total_cost"),
-            ),
-            f,
-        ).group_by(day).order_by(day.desc()).limit(limit)
+        stmt = (
+            self._apply(
+                select(
+                    day,
+                    func.count().label("requests"),
+                    func.coalesce(func.sum(AiUsageEvent.total_tokens), 0).label("total_tokens"),
+                    func.coalesce(func.sum(AiUsageEvent.total_cost), 0).label("total_cost"),
+                ),
+                f,
+            )
+            .group_by(day)
+            .order_by(day.desc())
+            .limit(limit)
+        )
         return [dict(r._mapping) for r in self.db.execute(stmt).all()]

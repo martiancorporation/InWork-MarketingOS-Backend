@@ -38,6 +38,7 @@ def _build(db_session: Session, client_id: str, job_type: str = "full_build"):
 
 # ---- async status ----
 
+
 def test_onboarding_returns_building_status(client: TestClient, admin_headers) -> None:
     resp = client.post(
         f"{API}/clients/onboarding", headers=admin_headers, json=onboarding_payload()
@@ -47,6 +48,7 @@ def test_onboarding_returns_building_status(client: TestClient, admin_headers) -
 
 
 # ---- full build ----
+
 
 def test_full_build_creates_profile_directives_and_flags(
     client: TestClient, admin_headers, db_session: Session
@@ -86,6 +88,7 @@ def test_context_endpoint_exposes_rules_and_retrieval(
 
 # ---- incremental / versioning ----
 
+
 def test_incremental_build_bumps_version_and_supersedes(
     client: TestClient, admin_headers, db_session: Session
 ) -> None:
@@ -107,12 +110,16 @@ def test_incremental_build_bumps_version_and_supersedes(
     v1 = next(v for v in versions if v["version"] == 1)
     assert v1["status"] == "superseded"
     # Current pointer is v2.
-    assert client.get(
-        f"{API}/clients/{cid}/intelligence/status", headers=admin_headers
-    ).json()["version"] == 2
+    assert (
+        client.get(f"{API}/clients/{cid}/intelligence/status", headers=admin_headers).json()[
+            "version"
+        ]
+        == 2
+    )
 
 
 # ---- admin rebuild + conflict resolution ----
+
 
 def test_rebuild_enqueues_job(client: TestClient, admin_headers, db_session: Session) -> None:
     cid = _onboard(client, admin_headers)
@@ -125,14 +132,12 @@ def test_rebuild_enqueues_job(client: TestClient, admin_headers, db_session: Ses
     assert resp.json()["job_status"] == "queued"
 
 
-def test_resolve_directive_dismiss(
-    client: TestClient, admin_headers, db_session: Session
-) -> None:
+def test_resolve_directive_dismiss(client: TestClient, admin_headers, db_session: Session) -> None:
     cid = _onboard(client, admin_headers)
     _build(db_session, cid)
-    directives = client.get(
-        f"{API}/clients/{cid}/intelligence", headers=admin_headers
-    ).json()["directives"]
+    directives = client.get(f"{API}/clients/{cid}/intelligence", headers=admin_headers).json()[
+        "directives"
+    ]
     did = directives[0]["id"]
     resp = client.post(
         f"{API}/clients/{cid}/directives/{did}/resolve",
@@ -145,7 +150,10 @@ def test_resolve_directive_dismiss(
 
 # ---- access scoping ----
 
-def test_intelligence_requires_access(client: TestClient, admin_headers, make_user, db_session) -> None:
+
+def test_intelligence_requires_access(
+    client: TestClient, admin_headers, make_user, db_session
+) -> None:
     cid = _onboard(client, admin_headers)
     _build(db_session, cid)
     _, outsider = make_user(email="outsider@test.com", password="passwordX1")

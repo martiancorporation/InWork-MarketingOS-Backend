@@ -38,16 +38,12 @@ class GlobalAssistantService:
     ) -> GlobalAssistantAskResponse:
         rows = self._accessible_clients(user)
         scope_label = (
-            "all clients"
-            if user.role == UserRole.admin
-            else f"{len(rows)} assigned client(s)"
+            "all clients" if user.role == UserRole.admin else f"{len(rows)} assigned client(s)"
         )
         facts = _portfolio_facts(rows)
 
         agent = GlobalAssistantAgent(
-            ai_client=AnthropicClient(
-                AiUsageContext(feature=AiFeature.ASSISTANT, user_id=user.id)
-            )
+            ai_client=AnthropicClient(AiUsageContext(feature=AiFeature.ASSISTANT, user_id=user.id))
         )
         answer = await agent.answer(
             content,

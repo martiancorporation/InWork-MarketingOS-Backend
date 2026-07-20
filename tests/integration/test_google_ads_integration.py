@@ -96,9 +96,7 @@ def test_full_flow_stores_access_and_refresh_encrypted(
     assert body["status"] == "connected"
     assert body["external_account_id"] == "1234567890"
 
-    row = db_session.scalar(
-        select(Integration).where(Integration.client_id == uuid.UUID(cid))
-    )
+    row = db_session.scalar(select(Integration).where(Integration.client_id == uuid.UUID(cid)))
     cipher = TokenCipher()
     assert cipher.decrypt(row.access_token_encrypted) == "g-access"
     assert row.refresh_token_encrypted is not None
@@ -113,8 +111,14 @@ def test_sync_pulls_metrics_into_analytics(
 
     async def fake_metrics(self, access_token, customer_id):
         assert access_token == "g-access" and customer_id == "1234567890"
-        return {"impressions": 5000, "clicks": 120, "spend": 340.5,
-                "conversions": 18, "leads": 18, "revenue": 1500.0}
+        return {
+            "impressions": 5000,
+            "clicks": 120,
+            "spend": 340.5,
+            "conversions": 18,
+            "leads": 18,
+            "revenue": 1500.0,
+        }
 
     monkeypatch.setattr(GoogleAdsClient, "fetch_metrics", fake_metrics)
     resp = client.post(f"{API}/clients/{cid}/integrations/google_ads/sync", headers=admin_headers)
@@ -147,8 +151,14 @@ def test_sync_refreshes_expired_token(
 
     async def fake_metrics(self, access_token, customer_id):
         assert access_token == "g-access-REFRESHED"  # the refreshed token was used
-        return {"impressions": 1, "clicks": 1, "spend": 1.0,
-                "conversions": 0, "leads": 0, "revenue": 0.0}
+        return {
+            "impressions": 1,
+            "clicks": 1,
+            "spend": 1.0,
+            "conversions": 0,
+            "leads": 0,
+            "revenue": 0.0,
+        }
 
     monkeypatch.setattr(GoogleOAuthClient, "refresh_access_token", fake_refresh)
     monkeypatch.setattr(GoogleAdsClient, "fetch_metrics", fake_metrics)

@@ -147,7 +147,9 @@ class EventActivity(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
-    action: Mapped[str] = mapped_column(String(60), nullable=False)  # status_change / comment / edit
+    action: Mapped[str] = mapped_column(
+        String(60), nullable=False
+    )  # status_change / comment / edit
     note: Mapped[str | None] = mapped_column(Text)
 
     event: Mapped[MarketingEvent] = relationship(back_populates="activity")

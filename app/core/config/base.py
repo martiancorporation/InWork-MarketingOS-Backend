@@ -39,9 +39,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _forbid_placeholder_secret_in_prod(self) -> Settings:
         if self.app.is_production and self.security.uses_placeholder_secret:
-            raise ValueError(
-                "SECRET_KEY must be set to a strong value when APP_ENV=production."
-            )
+            raise ValueError("SECRET_KEY must be set to a strong value when APP_ENV=production.")
         return self
 
 

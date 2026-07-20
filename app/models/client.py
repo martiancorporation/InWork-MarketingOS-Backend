@@ -49,7 +49,9 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     website: Mapped[str | None] = mapped_column(String(255))
     location: Mapped[str | None] = mapped_column(String(160))
     timezone: Mapped[str | None] = mapped_column(String(60))  # IANA tz for scheduling
-    language: Mapped[str | None] = mapped_column(String(60))  # primary language, e.g. "English (US)"
+    language: Mapped[str | None] = mapped_column(
+        String(60)
+    )  # primary language, e.g. "English (US)"
     markets: Mapped[str | None] = mapped_column(Text)
     about_brand: Mapped[str | None] = mapped_column(Text)
     brand_voice: Mapped[str | None] = mapped_column(Text)

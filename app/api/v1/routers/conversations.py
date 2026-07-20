@@ -69,9 +69,7 @@ def create_conversation(
     client_id: uuid.UUID, data: ConversationCreate, user: CurrentUser, db: DbSession
 ) -> ConversationRead:
     ClientService(db).get_client(user, client_id)
-    conv = ConversationService(db).create_conversation(
-        client_id, data, sender_user_id=user.id
-    )
+    conv = ConversationService(db).create_conversation(client_id, data, sender_user_id=user.id)
     return ConversationRead.model_validate(conv)
 
 
@@ -145,9 +143,7 @@ def add_message_to_source(
     db: DbSession,
 ) -> MessageRead:
     ClientService(db).get_client(user, client_id)
-    message = ConversationService(db).add_message_to_source(
-        client_id, conversation_id, message_id
-    )
+    message = ConversationService(db).add_message_to_source(client_id, conversation_id, message_id)
     return MessageRead.model_validate(message)
 
 
@@ -165,7 +161,5 @@ def update_message(
     db: DbSession,
 ) -> MessageRead:
     ClientService(db).get_client(user, client_id)
-    message = ConversationService(db).update_message(
-        client_id, conversation_id, message_id, data
-    )
+    message = ConversationService(db).update_message(client_id, conversation_id, message_id, data)
     return MessageRead.model_validate(message)

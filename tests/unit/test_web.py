@@ -23,12 +23,12 @@ from app.utils.web import (
 @pytest.mark.parametrize(
     "url",
     [
-        "ftp://example.com",          # non-http scheme
-        "file:///etc/passwd",         # non-http scheme
-        "http://localhost:8000",      # loopback
-        "http://127.0.0.1/admin",     # loopback IP
-        "http://169.254.169.254/",    # link-local (cloud metadata)
-        "not-a-url",                  # inferred https, but no dot -> rejected offline
+        "ftp://example.com",  # non-http scheme
+        "file:///etc/passwd",  # non-http scheme
+        "http://localhost:8000",  # loopback
+        "http://127.0.0.1/admin",  # loopback IP
+        "http://169.254.169.254/",  # link-local (cloud metadata)
+        "not-a-url",  # inferred https, but no dot -> rejected offline
     ],
 )
 def test_unsafe_urls_are_rejected(url: str):
@@ -38,13 +38,13 @@ def test_unsafe_urls_are_rejected(url: str):
 @pytest.mark.parametrize(
     "raw,expected",
     [
-        ("acme.com", "https://acme.com"),                 # bare domain -> https
-        ("  acme.com/path  ", "https://acme.com/path"),   # trimmed
-        ("http://acme.com", "http://acme.com"),           # explicit scheme kept
-        ("HTTPS://Acme.com", "HTTPS://Acme.com"),         # scheme preserved as-is
-        ("", None),                                       # empty
-        ("not-a-url", None),                              # inferred, no dot
-        ("ftp://acme.com", None),                         # unsupported scheme
+        ("acme.com", "https://acme.com"),  # bare domain -> https
+        ("  acme.com/path  ", "https://acme.com/path"),  # trimmed
+        ("http://acme.com", "http://acme.com"),  # explicit scheme kept
+        ("HTTPS://Acme.com", "HTTPS://Acme.com"),  # scheme preserved as-is
+        ("", None),  # empty
+        ("not-a-url", None),  # inferred, no dot
+        ("ftp://acme.com", None),  # unsupported scheme
     ],
 )
 def test_normalize_url(raw: str, expected: str | None):
@@ -54,7 +54,7 @@ def test_normalize_url(raw: str, expected: str | None):
 def test_candidate_urls_toggles_www_and_falls_back_to_http():
     cands = candidate_urls("acme.com")
     assert cands[0] == "https://acme.com"
-    assert "https://www.acme.com/" in cands   # www toggle
+    assert "https://www.acme.com/" in cands  # www toggle
     assert any(c.startswith("http://acme.com") for c in cands)  # http fallback
 
 
@@ -68,7 +68,9 @@ def test_get_refuses_redirect_to_internal_host():
 
     def _handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "evil.example":
-            return httpx.Response(302, headers={"location": "http://169.254.169.254/latest/meta-data/"})
+            return httpx.Response(
+                302, headers={"location": "http://169.254.169.254/latest/meta-data/"}
+            )
         raise AssertionError(f"followed redirect to internal host: {request.url}")
 
     client = httpx.Client(transport=httpx.MockTransport(_handler))
@@ -101,8 +103,8 @@ def test_extract_meta_reads_theme_color_and_description():
 def test_extract_colors_dedupes_and_ignores_black_white():
     css = "a{color:#0D6EFD}b{color:#0d6efd;background:#FFFFFF}c{border:#000}d{fill:rgb(220,53,69)}"
     colors = _extract_colors(css)
-    assert "#0D6EFD" in colors          # deduped, case-normalized
-    assert "#DC3545" in colors          # rgb(...) converted to hex
+    assert "#0D6EFD" in colors  # deduped, case-normalized
+    assert "#DC3545" in colors  # rgb(...) converted to hex
     assert "#FFFFFF" not in colors and "#000" not in colors  # noise filtered
 
 

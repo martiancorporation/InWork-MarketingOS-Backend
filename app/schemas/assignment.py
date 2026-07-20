@@ -23,9 +23,7 @@ _MAX_CAPS = len(ClientCapability)
 class AssignmentCreate(StrictModel):
     user_id: uuid.UUID
     # None → full capability set (backward compatible). A list scopes the grant.
-    capabilities: list[ClientCapability] | None = Field(
-        default=None, max_length=_MAX_CAPS
-    )
+    capabilities: list[ClientCapability] | None = Field(default=None, max_length=_MAX_CAPS)
 
 
 class AssignmentUpdate(StrictModel):

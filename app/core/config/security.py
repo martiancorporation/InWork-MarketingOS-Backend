@@ -36,9 +36,7 @@ class SecuritySettings(BaseSettings):
         """A too-short signing key is trivially brute-forceable — reject it in
         every environment (the placeholder itself is comfortably long)."""
         if len(value) < MIN_SECRET_LENGTH:
-            raise ValueError(
-                f"SECRET_KEY must be at least {MIN_SECRET_LENGTH} characters."
-            )
+            raise ValueError(f"SECRET_KEY must be at least {MIN_SECRET_LENGTH} characters.")
         return value
 
     @field_validator("cors_origins")

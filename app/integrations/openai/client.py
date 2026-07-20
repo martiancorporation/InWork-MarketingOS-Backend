@@ -72,14 +72,23 @@ class OpenAIClient:
                 body = resp.json()
         except Exception as exc:
             record_usage(
-                context=ctx, provider=_PROVIDER, model=model, operation="complete",
-                usage=None, status="error", error=str(exc)[:500],
+                context=ctx,
+                provider=_PROVIDER,
+                model=model,
+                operation="complete",
+                usage=None,
+                status="error",
+                error=str(exc)[:500],
                 duration_ms=int((time.perf_counter() - started) * 1000),
             )
             raise
         record_usage(
-            context=ctx, provider=_PROVIDER, model=model, operation="complete",
-            usage=_usage_from_body(body), status="success",
+            context=ctx,
+            provider=_PROVIDER,
+            model=model,
+            operation="complete",
+            usage=_usage_from_body(body),
+            status="success",
             request_id=str(body.get("id") or "") or None,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )

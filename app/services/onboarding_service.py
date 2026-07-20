@@ -67,9 +67,7 @@ class OnboardingService:
     # ---- atomic (whole payload at once) ----
 
     def onboard(self, admin: User, data: OnboardingRequest) -> Client:
-        slug = unique_slug(
-            slugify(data.name, fallback="client"), exists=self.clients.slug_exists
-        )
+        slug = unique_slug(slugify(data.name, fallback="client"), exists=self.clients.slug_exists)
 
         client = Client(
             created_by=admin.id,
@@ -96,9 +94,7 @@ class OnboardingService:
             ClientBrandColor(hex=c.hex, label=c.label, position=i)
             for i, c in enumerate(data.brand.colors)
         ]
-        client.brand_fonts = [
-            ClientBrandFont(family=f) for f in data.brand.fonts if f.strip()
-        ]
+        client.brand_fonts = [ClientBrandFont(family=f) for f in data.brand.fonts if f.strip()]
         client.platforms = [ClientPlatform(channel=ch) for ch in data.platforms]
         client.contacts = [
             *self._contacts(data.client_contacts, ContactSide.client),
@@ -145,18 +141,14 @@ class OnboardingService:
     async def consistency(self, client_id: uuid.UUID) -> ConsistencyReport:
         """Cross-field contradiction check over the onboarding inputs (review step)."""
         client = self.get(client_id)
-        context = AiUsageContext(
-            feature=AiFeature.CONSISTENCY_CHECK, client_id=client_id
-        )
+        context = AiUsageContext(feature=AiFeature.CONSISTENCY_CHECK, client_id=client_id)
         result = await ConsistencyAgent().check(client, context)
         return ConsistencyReport(
             findings=[
                 ConsistencyFinding(level=f.level, message=f.message, step=f.step)
                 for f in result.findings
             ],
-            has_blocking=any(
-                f.level == ConsistencyLevel.error.value for f in result.findings
-            ),
+            has_blocking=any(f.level == ConsistencyLevel.error.value for f in result.findings),
             ai_generated=result.ai_generated,
         )
 
@@ -165,19 +157,14 @@ class OnboardingService:
         readiness checklist. Degrades to the checklist gaps when AI is unconfigured."""
         client = self.get(client_id)
         checklist_gaps = [
-            (item.key, item.label)
-            for item in ReadinessService().report(client).missing
+            (item.key, item.label) for item in ReadinessService().report(client).missing
         ]
-        context = AiUsageContext(
-            feature=AiFeature.MISSING_INFO, client_id=client_id
-        )
+        context = AiUsageContext(feature=AiFeature.MISSING_INFO, client_id=client_id)
         return await MissingInfoAgent().detect(client, checklist_gaps, context)
 
     def create_draft(self, admin: User, data: OnboardingDraftRequest) -> Client:
         """Step 1 gate — open a draft client from the mandatory basics."""
-        slug = unique_slug(
-            slugify(data.name, fallback="client"), exists=self.clients.slug_exists
-        )
+        slug = unique_slug(slugify(data.name, fallback="client"), exists=self.clients.slug_exists)
         client = Client(
             created_by=admin.id,
             slug=slug,
@@ -197,9 +184,7 @@ class OnboardingService:
         self.db.refresh(client)
         return client
 
-    def update_step(
-        self, admin: User, client: Client, data: OnboardingStepUpdate
-    ) -> Client:
+    def update_step(self, admin: User, client: Client, data: OnboardingStepUpdate) -> Client:
         """Apply a partial step save. Only the sections present are written."""
         sent = data.model_fields_set
 
@@ -233,9 +218,7 @@ class OnboardingService:
         self.db.refresh(client)
         return client
 
-    def add_documents(
-        self, admin: User, client: Client, documents: list[DocumentRef]
-    ) -> Client:
+    def add_documents(self, admin: User, client: Client, documents: list[DocumentRef]) -> Client:
         """Attach uploaded document references (step 7)."""
         for d in documents:
             client.documents.append(
@@ -249,8 +232,10 @@ class OnboardingService:
                 )
             )
         self._enqueue_build(
-            client.id, IntelJobType.incremental.value,
-            changed_keys=["documents"], debounce_seconds=5,
+            client.id,
+            IntelJobType.incremental.value,
+            changed_keys=["documents"],
+            debounce_seconds=5,
         )
         self._commit("Could not attach documents — please retry.")
         self.db.refresh(client)
@@ -313,25 +298,17 @@ class OnboardingService:
                 for i, c in enumerate(brand.colors)
             ]
         if "fonts" in brand.model_fields_set and brand.fonts is not None:
-            client.brand_fonts = [
-                ClientBrandFont(family=f) for f in brand.fonts if f.strip()
-            ]
+            client.brand_fonts = [ClientBrandFont(family=f) for f in brand.fonts if f.strip()]
 
     @staticmethod
-    def _apply_compliance(
-        client: Client, compliance: ComplianceIn, admin: User
-    ) -> None:
+    def _apply_compliance(client: Client, compliance: ComplianceIn, admin: User) -> None:
         # The onboarding feed is a single note; replace it on each save so
         # repeated autosaves don't stack duplicates. Other entry kinds (added
         # later in the register) are preserved.
         feed = (compliance.feed or "").strip()
         kept = [e for e in client.compliance_entries if e.kind != ComplianceKind.note]
         if feed:
-            kept.append(
-                ComplianceEntry(
-                    kind=ComplianceKind.note, text=feed, author_id=admin.id
-                )
-            )
+            kept.append(ComplianceEntry(kind=ComplianceKind.note, text=feed, author_id=admin.id))
         client.compliance_entries = kept
 
     def _replace_contacts(

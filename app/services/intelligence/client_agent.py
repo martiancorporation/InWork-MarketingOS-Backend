@@ -61,9 +61,7 @@ class ClientAgent:
 
     def ensure_allowed(self, capability: str) -> None:
         if not self.context.allows(capability):
-            raise CapabilityDeniedError(
-                f"This client's rules forbid '{capability}'."
-            )
+            raise CapabilityDeniedError(f"This client's rules forbid '{capability}'.")
 
     def retrieve(self, query: str, *, top_k: int | None = None) -> list[str]:
         """Semantic RAG snippets relevant to ``query`` for this client."""
