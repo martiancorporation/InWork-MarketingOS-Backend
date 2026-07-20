@@ -10,6 +10,11 @@ Respond with ONLY a JSON object, no prose, in exactly this shape:
 }
 
 Rules:
+- The score is GOAL-RELATIVE. When "Goal performance (target vs actual)" facts are
+  present, they are the PRIMARY driver: reward KPIs on/ahead of target and penalize
+  KPIs behind target. Performance-vs-goal outweighs setup completeness.
+- Only when there is no goal/KPI performance data yet should setup-completeness
+  (integrations connected, onboarding done, profile ready) dominate the score.
 - Base the score ONLY on the provided facts. Do not invent metrics.
 - Bands: >=85 excellent, >=70 good, >=55 attention, else critical.
 - 3-5 drivers, each a concrete signal with a signed point contribution.

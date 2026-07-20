@@ -31,6 +31,7 @@ from app.schemas.onboarding import (
     BrandExtraction,
     BrandExtractionRequest,
     DocumentsRequest,
+    MissingInfoReport,
     OnboardingDraftRequest,
     OnboardingRequest,
     OnboardingResponse,
@@ -159,6 +160,17 @@ async def check_onboarding_consistency(
     client_id: uuid.UUID, admin: AdminUser, db: DbSession
 ) -> ConsistencyReport:
     return await OnboardingService(db).consistency(client_id)
+
+
+@router.post(
+    "/{client_id}/onboarding/missing-info",
+    response_model=MissingInfoReport,
+    summary="AI-detected, industry-specific missing information (admin only)",
+)
+async def detect_missing_info(
+    client_id: uuid.UUID, admin: AdminUser, db: DbSession
+) -> MissingInfoReport:
+    return await OnboardingService(db).missing_info(client_id)
 
 
 @router.post(

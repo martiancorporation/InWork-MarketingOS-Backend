@@ -71,10 +71,33 @@ class HealthScoreAgent:
             return self._fallback(signals)
 
     def _fallback(self, s: DashboardSignals) -> HealthScore:
-        """Deterministic score from real setup + performance signals."""
+        """Deterministic score. Goal-relative first (performance vs the client's
+        KPI targets), then setup-completeness — so a live account with campaign
+        data is scored on how it's doing against goals, not just how set-up it is.
+        """
         drivers: list[dict] = []
-        score = 50
 
+        # ---- goal-relative core: dominates the score when targets/actuals exist ----
+        if s.goal_metrics:
+            score = 60  # neutral baseline; the deltas below move it toward reality
+            per_metric = min(18, 54 // len(s.goal_metrics))  # split ±weight across KPIs
+            for m in s.goal_metrics:
+                delta = per_metric if m.on_track else -per_metric
+                verdict = "on/ahead of target" if m.on_track else "behind target"
+                drivers.append({"label": f"{m.label}: {verdict}", "delta": delta})
+                score += delta
+            # A little setup context still matters, but only at the margins.
+            if s.pending_integrations:
+                pen = min(8, s.pending_integrations * 3)
+                score -= pen
+                drivers.append({"label": f"{s.pending_integrations} integrations not connected", "delta": -pen})
+            score = max(20, min(98, score))
+            return HealthScore.model_validate(
+                {"score": score, "band": _band(score), "drivers": drivers[:5]}
+            )
+
+        # ---- setup-completeness fallback: no goal data yet ----
+        score = 50
         conn = min(20, s.connected_integrations * 5)
         if conn:
             score += conn

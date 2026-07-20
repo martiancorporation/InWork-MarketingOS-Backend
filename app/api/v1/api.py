@@ -20,6 +20,7 @@ from app.api.v1.routers import (
     compliance,
     content,
     conversations,
+    global_assistant,
     integrations,
     intelligence,
     notifications,
@@ -35,6 +36,7 @@ api_router.include_router(users.router)
 api_router.include_router(clients.router)
 api_router.include_router(assignments.router)
 api_router.include_router(assistant.router)
+api_router.include_router(global_assistant.router)
 api_router.include_router(audit.router)
 api_router.include_router(ai_usage.router)
 api_router.include_router(uploads.router)

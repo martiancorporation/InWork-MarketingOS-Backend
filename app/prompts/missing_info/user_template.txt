@@ -1,0 +1,11 @@
+Client: {client_name}
+Industry: {industry}
+Business type: {business_type}
+
+Captured so far:
+{corpus}
+
+Fixed-checklist gaps already known (do not just repeat these — infer what ELSE is missing):
+{checklist_gaps}
+
+Return the missing-information JSON now.

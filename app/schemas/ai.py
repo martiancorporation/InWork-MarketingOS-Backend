@@ -21,6 +21,26 @@ Pace = Literal["on-track", "ahead", "behind"]
 Severity = Literal["low", "medium", "high"]
 RecCategory = Literal["budget", "creative", "audience", "compliance", "growth"]
 WatchdogKind = Literal["alert", "opportunity"]
+QAStatus = Literal["ok", "concerns", "not_reviewed"]
+
+
+# ---- cross-provider QA ---- #
+
+
+class QAVerdict(BaseModel):
+    """Independent verdict from the SECOND LLM provider on generated content.
+
+    ``not_reviewed`` is the clean passthrough returned when QA is disabled or the
+    QA provider is unconfigured — it is never an error, just "no second opinion".
+    """
+
+    status: QAStatus = "not_reviewed"
+    # The provider that produced the review (e.g. "openai"); None when not reviewed.
+    provider: str | None = None
+    # The model that produced the review; None when not reviewed.
+    model: str | None = None
+    notes: list[str] = []
+    summary: str | None = None
 
 
 # ---- health score ---- #
@@ -125,6 +145,33 @@ class DashboardResponse(BaseModel):
     executive_brief: ExecutiveBrief
     watchdog: list[WatchdogItem] = []
     recommendations: list[Recommendation] = []
+    # False when Claude is unconfigured/failed and the deterministic fallback ran.
+    ai_generated: bool
+    # Independent second-provider review of the generated brief + recommendations.
+    # ``status="not_reviewed"`` when QA is disabled/unconfigured (the default).
+    qa_review: QAVerdict = Field(default_factory=QAVerdict)
+
+
+# ---- opportunities (external research) ---- #
+
+OpportunityKind = Literal["market", "location", "keyword", "channel", "audience", "other"]
+
+
+class Opportunity(BaseModel):
+    id: str  # stable key, e.g. "opp-expand-fl-metros"
+    kind: OpportunityKind
+    title: str
+    detail: str
+    rationale: str
+    confidence: int = Field(ge=0, le=100)
+    # Research URLs backing the opportunity (empty for internal-signal opportunities).
+    sources: list[str] = []
+
+
+class OpportunityResponse(BaseModel):
+    items: list[Opportunity] = []
+    # True when external research (Brave/ScrapingBee) contributed grounding.
+    researched: bool
     # False when Claude is unconfigured/failed and the deterministic fallback ran.
     ai_generated: bool
 

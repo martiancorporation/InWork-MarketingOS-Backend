@@ -1,0 +1,15 @@
+CONTEXT (client rules — follow, never contradict):
+{preamble}
+
+Client: {client_name}
+Industry: {industry}
+Location: {location}
+Markets: {markets}
+
+Client signals:
+{facts}
+
+RESEARCH (external web research about the market; may be empty):
+{research}
+
+Return the opportunities JSON now.

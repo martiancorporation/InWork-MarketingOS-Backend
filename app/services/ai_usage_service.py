@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.ai.cost_optimization import build_report
 from app.core.pagination import PaginationParams
 from app.models.ai_usage import AiUsageEvent
 from app.repositories.ai_usage_repository import AiUsageRepository, UsageFilters
@@ -15,6 +16,7 @@ from app.schemas.ai_usage import (
     AiUsageEventRead,
     AiUsageListResponse,
     ClientUsageSummary,
+    CostOptimizationReport,
     DailyUsage,
     PlatformUsageSummary,
     UsageGroupRow,
@@ -55,6 +57,14 @@ class AiUsageService:
             by_model=self._group(AiUsageEvent.model, f),
             daily=self._daily(f),
         )
+
+    def optimization(self, f: UsageFilters) -> CostOptimizationReport:
+        """Deterministic cost-reduction suggestions from recorded usage.
+
+        Works platform-wide or scoped to one client (via ``f.client_id``).
+        """
+        rows = self.repo.by_feature_model(f)
+        return build_report(rows)
 
     # ---- shaping helpers ----
 

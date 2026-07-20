@@ -1,0 +1,11 @@
+CONTEXT (client rules — the content must not contradict these):
+{preamble}
+
+FACTS the content should be grounded in:
+{facts}
+
+CONTENT UNDER REVIEW (produced by another AI provider), labelled "{content_label}":
+{content}
+
+Independently review the content against the context and facts. Return the QA
+JSON verdict now.

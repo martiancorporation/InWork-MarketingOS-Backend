@@ -19,6 +19,7 @@ from app.repositories.ai_usage_repository import UsageFilters
 from app.schemas.ai_usage import (
     AiUsageListResponse,
     ClientUsageSummary,
+    CostOptimizationReport,
     PlatformUsageSummary,
 )
 from app.services.ai_usage_service import AiUsageService
@@ -73,6 +74,44 @@ def platform_summary(
 ) -> PlatformUsageSummary:
     f = _filters(client_id, user_id, feature, model, status, start, end)
     return AiUsageService(db).platform_summary(f)
+
+
+@router.get(
+    "/optimization",
+    response_model=CostOptimizationReport,
+    summary="Platform-wide AI cost-optimization suggestions (admin)",
+)
+def platform_optimization(
+    _admin: AdminUser,
+    db: DbSession,
+    client_id: uuid.UUID | None = Query(None),
+    feature: str | None = Query(None),
+    model: str | None = Query(None),
+    start: datetime | None = Query(None),
+    end: datetime | None = Query(None),
+) -> CostOptimizationReport:
+    f = UsageFilters(
+        client_id=client_id, feature=feature, model=model, start=start, end=end
+    )
+    return AiUsageService(db).optimization(f)
+
+
+@router.get(
+    "/clients/{client_id}/optimization",
+    response_model=CostOptimizationReport,
+    summary="A single client's AI cost-optimization suggestions (admin or assigned user)",
+)
+def client_optimization(
+    client_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    start: datetime | None = Query(None),
+    end: datetime | None = Query(None),
+) -> CostOptimizationReport:
+    # Enforce client access-scoping: 404 if the caller can't see this client.
+    ClientService(db).get_client(user, client_id)
+    f = UsageFilters(client_id=client_id, start=start, end=end)
+    return AiUsageService(db).optimization(f)
 
 
 @router.get(

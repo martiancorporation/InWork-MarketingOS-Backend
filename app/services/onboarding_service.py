@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.consistency import ConsistencyAgent
 from app.ai.features import AiFeature
+from app.ai.missing_info import MissingInfoAgent
 from app.ai.usage import AiUsageContext
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.client import Client, ClientBrandColor, ClientBrandFont, ClientPlatform
@@ -43,12 +44,14 @@ from app.schemas.onboarding import (
     ComplianceIn,
     ContactIn,
     DocumentRef,
+    MissingInfoReport,
     OnboardingDraftRequest,
     OnboardingProgress,
     OnboardingRequest,
     OnboardingStepUpdate,
 )
 from app.services.intelligence.job_queue import JobQueue
+from app.services.readiness_service import ReadinessService
 from app.utils.slug import slugify, unique_slug
 
 FINAL_STEP = 8
@@ -156,6 +159,19 @@ class OnboardingService:
             ),
             ai_generated=result.ai_generated,
         )
+
+    async def missing_info(self, client_id: uuid.UUID) -> MissingInfoReport:
+        """AI-inferred, industry-specific missing information beyond the fixed
+        readiness checklist. Degrades to the checklist gaps when AI is unconfigured."""
+        client = self.get(client_id)
+        checklist_gaps = [
+            (item.key, item.label)
+            for item in ReadinessService().report(client).missing
+        ]
+        context = AiUsageContext(
+            feature=AiFeature.MISSING_INFO, client_id=client_id
+        )
+        return await MissingInfoAgent().detect(client, checklist_gaps, context)
 
     def create_draft(self, admin: User, data: OnboardingDraftRequest) -> Client:
         """Step 1 gate — open a draft client from the mandatory basics."""
