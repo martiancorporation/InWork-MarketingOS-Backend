@@ -18,6 +18,7 @@ from app.core.config.app_settings import AppSettings
 from app.core.config.database import DatabaseSettings
 from app.core.config.integrations import IntegrationsSettings
 from app.core.config.intelligence import IntelligenceSettings
+from app.core.config.qa import OpenAISettings, QASettings
 from app.core.config.scheduler import SchedulerSettings
 from app.core.config.security import SecuritySettings
 from app.core.config.storage import StorageSettings
@@ -28,6 +29,8 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     ai: AISettings = Field(default_factory=AISettings)
+    openai: OpenAISettings = Field(default_factory=OpenAISettings)
+    qa: QASettings = Field(default_factory=QASettings)
     integrations: IntegrationsSettings = Field(default_factory=IntegrationsSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     intelligence: IntelligenceSettings = Field(default_factory=IntelligenceSettings)

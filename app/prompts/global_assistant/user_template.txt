@@ -1,0 +1,12 @@
+Scope: {scope}
+
+Portfolio facts (the clients you can access):
+{facts}
+
+Earlier conversation:
+{history}
+
+User question:
+{question}
+
+Answer the question using only the portfolio facts above.

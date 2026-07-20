@@ -7,6 +7,7 @@ compliance → contacts → documents → review) and its AI-assisted brand step
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
@@ -247,6 +248,25 @@ class ReadinessReport(BaseModel):
     score: int  # 0-100
     completed: list[str]
     missing: list[ReadinessItem]
+
+
+class MissingInfoItem(BaseModel):
+    """A piece of information that appears to be missing for this client.
+
+    ``source`` distinguishes fixed-checklist gaps from AI-inferred, industry-
+    specific ones so the UI can label them differently.
+    """
+
+    key: str
+    label: str
+    rationale: str
+    source: Literal["checklist", "ai"] = "checklist"
+
+
+class MissingInfoReport(BaseModel):
+    items: list[MissingInfoItem] = []
+    # False when the AI pass was unavailable and only the checklist gaps are shown.
+    ai_generated: bool
 
 
 class OnboardingResponse(BaseModel):

@@ -23,6 +23,7 @@ from app.models.client import Client
 from app.models.enums import ClientCapability
 from app.schemas.ai import (
     DashboardResponse,
+    OpportunityResponse,
     RecommendationActionListResponse,
     RecommendationActionRead,
     RecommendationDecisionRequest,
@@ -45,6 +46,19 @@ async def get_dashboard(
 ) -> DashboardResponse:
     client = ClientService(db).get_client(user, client_id)
     return await DashboardService(db).build(client, user_id=user.id)
+
+
+@router.get(
+    "/opportunities",
+    response_model=OpportunityResponse,
+    summary="AI growth opportunities (new markets/keywords) with external research",
+    dependencies=[Depends(RateLimit("ai_opportunities", times=20, seconds=60))],
+)
+async def get_opportunities(
+    client_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> OpportunityResponse:
+    client = ClientService(db).get_client(user, client_id)
+    return await DashboardService(db).opportunities(client, user_id=user.id)
 
 
 @router.get(
