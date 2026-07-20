@@ -12,7 +12,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import GUID, Base, CreatedAtMixin, UUIDPrimaryKeyMixin
+from app.models.base import (
+    GUID,
+    Base,
+    CreatedAtMixin,
+    JSONColumn,
+    UUIDPrimaryKeyMixin,
+)
 
 if TYPE_CHECKING:
     from app.models.client import Client
@@ -33,6 +39,11 @@ class ClientAssignment(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     assigned_by: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
+    # Per-project capabilities this user holds on this client — a JSON list of
+    # ``ClientCapability`` values. ``NULL`` means "full set" so pre-RBAC
+    # assignments keep working unchanged; managers/admins get the full set
+    # regardless (enforced in ``ClientService``).
+    capabilities: Mapped[list[str] | None] = mapped_column(JSONColumn)
 
     client: Mapped[Client] = relationship(back_populates="assignments")
     user: Mapped[User] = relationship(

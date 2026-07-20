@@ -19,6 +19,12 @@ class ClientRepository(BaseRepository[Client]):
     def slug_exists(self, slug: str) -> bool:
         return self.db.scalar(select(Client.id).where(Client.slug == slug)) is not None
 
+    def get_many(self, ids: list[uuid.UUID]) -> list[Client]:
+        """Fetch clients by id (order unspecified). Empty input → empty list."""
+        if not ids:
+            return []
+        return list(self.db.scalars(select(Client).where(Client.id.in_(ids))).all())
+
     def _apply_filters(
         self, stmt: Select, search: str | None, status: ClientStatus | None
     ) -> Select:
