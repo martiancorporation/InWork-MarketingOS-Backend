@@ -25,10 +25,17 @@ class OAuthStartResponse(BaseModel):
 
 
 class OAuthCompleteRequest(StrictModel):
-    """The ``code`` + ``state`` the provider redirected back with (via the SPA)."""
+    """The ``code`` + ``state`` the provider redirected back with (via the SPA).
+
+    For Meta, optionally pin which **ad account** to bind (the one you collected
+    from the client, e.g. ``act_1234567890``). If omitted and the authorized user
+    has exactly one ad account it's used; if they have several, the API asks you
+    to specify one rather than silently guessing.
+    """
 
     code: str = Field(min_length=1, max_length=2048)
     state: str = Field(min_length=1, max_length=1024)
+    ad_account_id: str | None = Field(None, max_length=160)  # Meta: which ad account
 
 
 class IntegrationConnectRequest(BaseModel):

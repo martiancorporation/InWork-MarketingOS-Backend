@@ -55,6 +55,36 @@ _META_KEYS = {IntegrationKey.meta}
 _REAL_KEYS = _META_KEYS | set(_GOOGLE_SCOPES)
 
 
+def _select_ad_account(accounts: list[dict], requested: str | None) -> dict:
+    """Pick which Meta ad account to bind after OAuth.
+
+    - ``requested`` given → match it (``act_`` prefix optional); error if the
+      authorized user can't access it (so a wrong id fails loudly).
+    - none requested + exactly one account → that one.
+    - none requested + several → error asking to specify (never silently guess).
+    - none requested + zero → connect with no account bound.
+    """
+    if requested:
+        want = requested.removeprefix("act_")
+        for acc in accounts:
+            candidates = {
+                str(acc.get("account_id") or "").removeprefix("act_"),
+                str(acc.get("id") or "").removeprefix("act_"),
+            }
+            if want in candidates:
+                return acc
+        raise BadRequestError(
+            "The requested Meta ad account isn't accessible to the authorized user."
+        )
+    if not accounts:
+        return {}
+    if len(accounts) > 1:
+        raise BadRequestError(
+            "This account has multiple Meta ad accounts — pass 'ad_account_id' to pick one."
+        )
+    return accounts[0]
+
+
 class IntegrationService:
     def __init__(
         self,
@@ -160,7 +190,13 @@ class IntegrationService:
         return url, state
 
     async def oauth_complete(
-        self, client_id: uuid.UUID, key: IntegrationKey, code: str, state: str
+        self,
+        client_id: uuid.UUID,
+        key: IntegrationKey,
+        code: str,
+        state: str,
+        *,
+        ad_account_id: str | None = None,
     ) -> Integration:
         """Finish OAuth: exchange the code, store the client's own token(s) encrypted."""
         self._require_real(key)
@@ -168,7 +204,7 @@ class IntegrationService:
             raise BadRequestError("Invalid or expired OAuth state.")
         integration = self._upsert(client_id, key)
         if key in _META_KEYS:
-            await self._complete_meta(integration, code)
+            await self._complete_meta(integration, code, ad_account_id=ad_account_id)
         else:
             await self._complete_google(integration, key, code)
         integration.status = IntegrationStatus.connected
@@ -217,7 +253,9 @@ class IntegrationService:
 
     # ---- per-provider OAuth completion -------------------------------- #
 
-    async def _complete_meta(self, integration: Integration, code: str) -> None:
+    async def _complete_meta(
+        self, integration: Integration, code: str, *, ad_account_id: str | None = None
+    ) -> None:
         oauth = self.meta_oauth
         short = await oauth.exchange_code(code)
         long_lived = await oauth.exchange_long_lived(short.get("access_token", ""))
@@ -226,7 +264,7 @@ class IntegrationService:
             raise BadRequestError("Meta did not return an access token.")
         expires_in = long_lived.get("expires_in") or short.get("expires_in")
         accounts = await oauth.list_ad_accounts(token)
-        account = accounts[0] if accounts else {}
+        account = _select_ad_account(accounts, ad_account_id)
         integration.access_token_encrypted = self.cipher.encrypt(token)
         integration.refresh_token_encrypted = None  # Meta long-lived tokens self-renew
         integration.token_expires_at = self._expiry(expires_in)

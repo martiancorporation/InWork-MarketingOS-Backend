@@ -84,7 +84,7 @@ async def oauth_complete(
 ) -> IntegrationRead:
     ClientService(db).get_client(user, client_id)
     integration = await IntegrationService(db).oauth_complete(
-        client_id, key, data.code, data.state
+        client_id, key, data.code, data.state, ad_account_id=data.ad_account_id
     )
     return IntegrationRead.model_validate(integration)
 

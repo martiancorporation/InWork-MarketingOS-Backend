@@ -163,3 +163,76 @@ def test_oauth_only_meta_for_now(client, admin_headers: dict, meta_configured):
 def test_oauth_requires_auth(client, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     assert client.post(f"{API}/clients/{cid}/integrations/meta/oauth/start").status_code == 401
+
+
+# ---- ad-account selection when the authorized user has several ----
+
+
+@pytest.fixture
+def fake_meta_multi(monkeypatch):
+    async def exchange_code(self, code):
+        return {"access_token": "short-token", "expires_in": 3600}
+
+    async def exchange_long_lived(self, short_token):
+        return {"access_token": "long-lived-token", "expires_in": 5_184_000}
+
+    async def list_ad_accounts(self, token):
+        return [
+            {"account_id": "act_111", "name": "Client Main"},
+            {"account_id": "act_222", "name": "Client Secondary"},
+        ]
+
+    monkeypatch.setattr(MetaOAuthClient, "exchange_code", exchange_code)
+    monkeypatch.setattr(MetaOAuthClient, "exchange_long_lived", exchange_long_lived)
+    monkeypatch.setattr(MetaOAuthClient, "list_ad_accounts", list_ad_accounts)
+
+
+def _state(client, admin_headers, cid):
+    return client.post(
+        f"{API}/clients/{cid}/integrations/meta/oauth/start", headers=admin_headers
+    ).json()["state"]
+
+
+def _complete(client, admin_headers, cid, **extra):
+    return client.post(
+        f"{API}/clients/{cid}/integrations/meta/oauth/complete",
+        headers=admin_headers,
+        json={"code": "c", "state": _state(client, admin_headers, cid), **extra},
+    )
+
+
+def test_multiple_accounts_require_ad_account_id(
+    client, admin_headers: dict, meta_configured, fake_meta_multi
+):
+    cid = _client_id(client, admin_headers)
+    resp = _complete(client, admin_headers, cid)  # no ad_account_id → ambiguous
+    assert resp.status_code == 400
+    assert "ad_account_id" in resp.json()["error"]["message"]
+
+
+def test_ad_account_id_selects_the_right_one(
+    client, admin_headers: dict, meta_configured, fake_meta_multi
+):
+    cid = _client_id(client, admin_headers)
+    resp = _complete(client, admin_headers, cid, ad_account_id="act_222")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["external_account_id"] == "act_222"
+    assert resp.json()["account_label"] == "Client Secondary"
+
+
+def test_ad_account_id_matches_without_act_prefix(
+    client, admin_headers: dict, meta_configured, fake_meta_multi
+):
+    cid = _client_id(client, admin_headers)
+    resp = _complete(client, admin_headers, cid, ad_account_id="111")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["external_account_id"] == "act_111"
+
+
+def test_unknown_ad_account_id_is_rejected(
+    client, admin_headers: dict, meta_configured, fake_meta_multi
+):
+    cid = _client_id(client, admin_headers)
+    resp = _complete(client, admin_headers, cid, ad_account_id="act_does_not_exist")
+    assert resp.status_code == 400
+    assert "isn't accessible" in resp.json()["error"]["message"]

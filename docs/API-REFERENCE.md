@@ -876,7 +876,7 @@ Base path: `/clients/{client_id}/integrations`.
 
 ### `POST /api/v1/clients/{client_id}/integrations/{key}/oauth/complete`
 - **Auth:** Authenticated (any role). **Rate limited:** No.
-- **Request payload:** `OAuthCompleteRequest` (**strict**): `code` (**required**, `1..2048`), `state` (**required**, `1..1024`).
+- **Request payload:** `OAuthCompleteRequest` (**strict**): `code` (**required**, `1..2048`), `state` (**required**, `1..1024`), `ad_account_id` (`str | None`, `≤160`) — **Meta only:** which ad account to bind (the one collected from the client, e.g. `act_1234567890`; `act_` prefix optional). If omitted and the authorized user has exactly one ad account it's used; if several, the API returns `409/400` asking you to specify one (never silently guesses); an id the user can't access → `400`.
 - **Success `200`:** `IntegrationRead` (status now `connected`; token stored encrypted).
 - **Errors:** `401`; `404`; `409` state/CSRF mismatch or already connected; `422`; `503` token exchange failed.
 - **Why/when:** Finish OAuth (callback) — exchange `code` for a token, validating `state`.
