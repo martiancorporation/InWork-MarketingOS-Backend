@@ -78,3 +78,22 @@ class EventRepository(BaseRepository[MarketingEvent]):
         if limit is not None:
             stmt = stmt.limit(limit)
         return list(self.db.scalars(stmt).all()), int(total or 0)
+
+    def pending_approval_counts(
+        self, client_ids: list[uuid.UUID] | None = None
+    ) -> dict[uuid.UUID, int]:
+        """Count events awaiting approval, grouped by client.
+
+        ``client_ids=None`` counts across every client; a list restricts the
+        scope (an empty list yields no rows). Backs the cross-client
+        "what's on you" view (BE-04).
+        """
+        conditions = [MarketingEvent.approval_status == ApprovalStatus.pending]
+        if client_ids is not None:
+            conditions.append(MarketingEvent.client_id.in_(client_ids))
+        rows = self.db.execute(
+            select(MarketingEvent.client_id, func.count())
+            .where(*conditions)
+            .group_by(MarketingEvent.client_id)
+        ).all()
+        return {cid: int(n) for cid, n in rows}

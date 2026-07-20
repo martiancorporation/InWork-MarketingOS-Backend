@@ -149,3 +149,32 @@ class RecommendationActionRead(ORMModel):
 class RecommendationActionListResponse(BaseModel):
     items: list[RecommendationActionRead]
     total: int
+
+
+# ---- per-client outstanding-setup indicator (BE-05) ---- #
+
+SetupItemKey = Literal[
+    "onboarding_incomplete",
+    "no_integrations",
+    "no_intelligence_profile",
+    "pending_approvals",
+]
+
+
+class SetupItem(BaseModel):
+    key: SetupItemKey
+    label: str
+    detail: str
+
+
+class SetupStatusResponse(BaseModel):
+    """The red-dot data: outstanding setup items for a client + their count.
+
+    ``complete`` is True when nothing is outstanding (``count == 0``). Reuses the
+    dashboard signals so the indicator never drifts from the dashboard itself.
+    """
+
+    client_id: uuid.UUID
+    complete: bool
+    count: int
+    items: list[SetupItem] = []

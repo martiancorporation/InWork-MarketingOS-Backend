@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from app.models.plan import PlanTask
     from app.models.recommendation import RecommendationAction
     from app.models.report import Report
+    from app.models.strategy import Strategy
 
 
 class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -141,6 +142,9 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="client", cascade="all, delete-orphan"
     )
     alerts: Mapped[list[Alert]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+    strategies: Mapped[list[Strategy]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
 

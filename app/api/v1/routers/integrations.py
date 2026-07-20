@@ -20,11 +20,13 @@ is built. See ``IntegrationService``.
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from app.api.deps import CurrentUser, DbSession
-from app.models.enums import IntegrationKey
+from app.api.deps import CurrentUser, DbSession, require_capability
+from app.models.client import Client
+from app.models.enums import ClientCapability, IntegrationKey
 from app.schemas.integration import (
     IntegrationConnectRequest,
     IntegrationListResponse,
@@ -111,10 +113,13 @@ def connect_integration(
     client_id: uuid.UUID,
     key: IntegrationKey,
     data: IntegrationConnectRequest,
-    user: CurrentUser,
     db: DbSession,
+    # Requires the ``manage_integrations`` capability (admins/managers always pass;
+    # 404 if inaccessible, 403 if accessible-but-unauthorized).
+    _client: Annotated[
+        Client, Depends(require_capability(ClientCapability.manage_integrations))
+    ],
 ) -> IntegrationRead:
-    ClientService(db).get_client(user, client_id)
     integration = IntegrationService(db).connect(client_id, key, data)
     return IntegrationRead.model_validate(integration)
 

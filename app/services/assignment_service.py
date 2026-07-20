@@ -1,6 +1,8 @@
 """Client-assignment use-cases (admin only — enforced at the router).
 
-Assigning a client to a user is what grants that non-admin user access to it.
+Assigning a client to a user is what grants that non-admin user access to it. An
+assignment can also scope *which* per-project capabilities the user holds on that
+client (granular RBAC, BE-03).
 """
 
 from __future__ import annotations
@@ -11,11 +13,30 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.assignment import ClientAssignment
+from app.models.enums import ClientCapability
 from app.repositories.assignment_repository import AssignmentRepository
 from app.repositories.client_repository import ClientRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.assignment import AssignmentListResponse, AssignmentRead
 from app.schemas.user import UserRead
+from app.services.client_service import capabilities_from_stored
+
+
+def _sorted_caps(caps: list[ClientCapability] | None) -> list[str] | None:
+    """Normalise a requested capability list to a de-duplicated value list.
+
+    Returns ``None`` (→ stored as NULL → full set) when no list is given.
+    """
+    if caps is None:
+        return None
+    # Preserve enum order for stable output; de-dupe.
+    return [c.value for c in ClientCapability if c in set(caps)]
+
+
+def _effective_caps(stored: list[str] | None) -> list[ClientCapability]:
+    """The concrete capability list to expose for a stored (possibly NULL) set."""
+    resolved = capabilities_from_stored(stored)
+    return [c for c in ClientCapability if c in resolved]
 
 
 class AssignmentService:
@@ -26,7 +47,12 @@ class AssignmentService:
         self.users = UserRepository(db)
 
     def assign(
-        self, client_id: uuid.UUID, user_id: uuid.UUID, *, assigned_by: uuid.UUID
+        self,
+        client_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        assigned_by: uuid.UUID,
+        capabilities: list[ClientCapability] | None = None,
     ) -> ClientAssignment:
         if self.clients.get(client_id) is None:
             raise NotFoundError("Client not found.")
@@ -36,9 +62,26 @@ class AssignmentService:
             raise ConflictError("This client is already assigned to that user.")
 
         assignment = ClientAssignment(
-            client_id=client_id, user_id=user_id, assigned_by=assigned_by
+            client_id=client_id,
+            user_id=user_id,
+            assigned_by=assigned_by,
+            capabilities=_sorted_caps(capabilities),
         )
         self.db.add(assignment)
+        self.db.commit()
+        self.db.refresh(assignment)
+        return assignment
+
+    def set_capabilities(
+        self,
+        client_id: uuid.UUID,
+        user_id: uuid.UUID,
+        capabilities: list[ClientCapability],
+    ) -> ClientAssignment:
+        assignment = self.assignments.get(client_id, user_id)
+        if assignment is None:
+            raise NotFoundError("Assignment not found.")
+        assignment.capabilities = _sorted_caps(capabilities)
         self.db.commit()
         self.db.refresh(assignment)
         return assignment
@@ -54,13 +97,15 @@ class AssignmentService:
         if self.clients.get(client_id) is None:
             raise NotFoundError("Client not found.")
         rows = self.assignments.list_for_client(client_id)
-        items = [
-            AssignmentRead(
-                client_id=a.client_id,
-                assigned_by=a.assigned_by,
-                created_at=a.created_at,
-                user=UserRead.model_validate(a.user),
-            )
-            for a in rows
-        ]
+        items = [self.to_read(a) for a in rows]
         return AssignmentListResponse(items=items, total=len(items))
+
+    @staticmethod
+    def to_read(a: ClientAssignment) -> AssignmentRead:
+        return AssignmentRead(
+            client_id=a.client_id,
+            assigned_by=a.assigned_by,
+            created_at=a.created_at,
+            capabilities=_effective_caps(a.capabilities),
+            user=UserRead.model_validate(a.user),
+        )

@@ -13,11 +13,18 @@ before ``/{alert_id}`` so the literal segment wins the match.
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import CurrentUser, DbSession, Pagination
-from app.models.enums import AlertKind, AlertSeverity, AlertStatus
+from app.api.deps import CurrentUser, DbSession, Pagination, require_capability
+from app.models.client import Client
+from app.models.enums import (
+    AlertKind,
+    AlertSeverity,
+    AlertStatus,
+    ClientCapability,
+)
 from app.schemas.alert import AlertEvaluateResult, AlertListResponse, AlertRead
 from app.services.alert_service import AlertService
 from app.services.client_service import ClientService
@@ -69,9 +76,15 @@ def get_alert(
     "/{alert_id}/acknowledge", response_model=AlertRead, summary="Acknowledge an alert"
 )
 def acknowledge_alert(
-    client_id: uuid.UUID, alert_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    alert_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    # Acknowledging is a "review results" responsibility (BE-03).
+    _client: Annotated[
+        Client, Depends(require_capability(ClientCapability.review_results))
+    ],
 ) -> AlertRead:
-    ClientService(db).get_client(user, client_id)
     return AlertRead.model_validate(
         AlertService(db).acknowledge(client_id, alert_id, actor_id=user.id)
     )

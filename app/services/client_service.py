@@ -11,11 +11,12 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.pagination import PaginationParams
 from app.core.request_context import set_audit_changes
+from app.models.assignment import ClientAssignment
 from app.models.client import Client
-from app.models.enums import ClientStatus, UserRole
+from app.models.enums import ClientCapability, ClientStatus, UserRole
 from app.models.user import User
 from app.repositories.assignment_repository import AssignmentRepository
 from app.repositories.client_repository import ClientRepository
@@ -26,6 +27,34 @@ from app.services.audit_service import field_changes
 def _audit_value(value):
     """JSON-safe representation of a field value for the audit diff."""
     return getattr(value, "value", value)
+
+
+# The full per-client capability set. Admins (globally) and managers (on their
+# assigned clients) implicitly hold this whole set; a pre-RBAC assignment (NULL
+# capabilities) is also treated as the full set so nothing breaks.
+ALL_CAPABILITIES: frozenset[ClientCapability] = frozenset(ClientCapability)
+
+
+def capabilities_from_stored(
+    stored: list[str] | None,
+) -> frozenset[ClientCapability]:
+    """Turn a stored JSON capability list into a capability set.
+
+    ``None`` (legacy assignments) → the full set. An explicit list is parsed,
+    ignoring any unknown values; the per-client ``admin`` capability expands to
+    the full set.
+    """
+    if stored is None:
+        return ALL_CAPABILITIES
+    caps: set[ClientCapability] = set()
+    for value in stored:
+        try:
+            caps.add(ClientCapability(value))
+        except ValueError:
+            continue  # tolerate values retired from the enum
+    if ClientCapability.admin in caps:
+        return ALL_CAPABILITIES
+    return frozenset(caps)
 
 
 class ClientService:
@@ -91,6 +120,43 @@ class ClientService:
 
     def _can_access(self, user: User, client_id: uuid.UUID) -> bool:
         return user.role == UserRole.admin or self.assignments.exists(client_id, user.id)
+
+    # ---- granular per-project RBAC (BE-03) ---- #
+
+    def effective_capabilities(
+        self, user: User, client_id: uuid.UUID
+    ) -> frozenset[ClientCapability]:
+        """The capabilities ``user`` holds on ``client_id``.
+
+        Admins hold every capability on every client; managers hold every
+        capability on their assigned clients; a plain user holds exactly the set
+        recorded on their assignment (a ``NULL`` set — legacy — counts as full).
+        An unassigned non-admin holds none.
+        """
+        if user.role == UserRole.admin:
+            return ALL_CAPABILITIES
+        assignment: ClientAssignment | None = self.assignments.get(client_id, user.id)
+        if assignment is None:
+            return frozenset()
+        if user.role == UserRole.manager:
+            return ALL_CAPABILITIES
+        return capabilities_from_stored(assignment.capabilities)
+
+    def require_capability(
+        self, user: User, client_id: uuid.UUID, capability: ClientCapability
+    ) -> Client:
+        """Load a client only if ``user`` may access it AND holds ``capability``.
+
+        Mirrors ``get_client``: an inaccessible client is 404 (never leaked). A
+        client the user *can* see but lacks the capability for is 403 — the
+        resource's existence is already known, so hiding it adds nothing.
+        """
+        client = self.get_client(user, client_id)  # 404 if inaccessible
+        if capability not in self.effective_capabilities(user, client_id):
+            raise ForbiddenError(
+                f"This action requires the '{capability.value}' capability on this client."
+            )
+        return client
 
     @staticmethod
     def _to_item(c: Client) -> ClientListItem:

@@ -36,3 +36,14 @@ class RecommendationRepository(BaseRepository[RecommendationAction]):
         for row in self.list_for_client(client_id):
             latest.setdefault(row.rec_key, row)
         return latest
+
+    def current_decision_counts(self, client_id: uuid.UUID) -> dict[str, int]:
+        """Count the *current* decision per recommendation (latest per rec_key).
+
+        Keyed by ``RecommendationDecision`` value (accepted/modified/rejected).
+        Backs strategy-adherence scoring (BE-06)."""
+        counts: dict[str, int] = {}
+        for action in self.latest_by_rec_key(client_id).values():
+            key = getattr(action.decision, "value", action.decision)
+            counts[key] = counts.get(key, 0) + 1
+        return counts

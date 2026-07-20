@@ -22,9 +22,11 @@ from app.api.v1.routers import (
     conversations,
     integrations,
     intelligence,
+    me,
     notifications,
     plans,
     reports,
+    strategy,
     uploads,
     users,
 )
@@ -52,3 +54,5 @@ api_router.include_router(integrations.router)
 api_router.include_router(plans.router)
 api_router.include_router(automation.router)
 api_router.include_router(notifications.router)
+api_router.include_router(strategy.router)
+api_router.include_router(me.router)

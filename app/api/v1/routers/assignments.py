@@ -1,6 +1,7 @@
 """Client-assignment endpoints (admin only).
 
-Assigning a client to a user is what grants that non-admin access to it.
+Assigning a client to a user is what grants that non-admin access to it. An
+assignment can scope the user's per-project capabilities on that client (BE-03).
 """
 
 from __future__ import annotations
@@ -14,8 +15,8 @@ from app.schemas.assignment import (
     AssignmentCreate,
     AssignmentListResponse,
     AssignmentRead,
+    AssignmentUpdate,
 )
-from app.schemas.user import UserRead
 from app.services.assignment_service import AssignmentService
 
 router = APIRouter(prefix="/clients/{client_id}/assignments", tags=["assignments"])
@@ -37,13 +38,28 @@ def list_assignments(
 def create_assignment(
     client_id: uuid.UUID, data: AssignmentCreate, admin: AdminUser, db: DbSession
 ) -> AssignmentRead:
-    a = AssignmentService(db).assign(client_id, data.user_id, assigned_by=admin.id)
-    return AssignmentRead(
-        client_id=a.client_id,
-        assigned_by=a.assigned_by,
-        created_at=a.created_at,
-        user=UserRead.model_validate(a.user),
+    service = AssignmentService(db)
+    a = service.assign(
+        client_id, data.user_id, assigned_by=admin.id, capabilities=data.capabilities
     )
+    return service.to_read(a)
+
+
+@router.patch(
+    "/{user_id}",
+    response_model=AssignmentRead,
+    summary="Update an assignment's per-project capabilities",
+)
+def update_assignment(
+    client_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: AssignmentUpdate,
+    _admin: AdminUser,
+    db: DbSession,
+) -> AssignmentRead:
+    service = AssignmentService(db)
+    a = service.set_capabilities(client_id, user_id, data.capabilities)
+    return service.to_read(a)
 
 
 @router.delete(

@@ -37,6 +37,8 @@ from app.schemas.ai import (
     RecommendationActionRead,
     RecommendationDecisionRead,
     RecommendationDecisionRequest,
+    SetupItem,
+    SetupStatusResponse,
 )
 from app.services.intelligence.context_service import ContextService
 
@@ -97,6 +99,56 @@ class DashboardService:
         rows = self.recommendations.list_for_client(client_id)
         items = [RecommendationActionRead.model_validate(r) for r in rows]
         return RecommendationActionListResponse(items=items, total=len(items))
+
+    # ---- outstanding-setup indicator (BE-05) ---- #
+
+    def setup_status(self, client: Client) -> SetupStatusResponse:
+        """Outstanding setup items for a client (the red-dot data).
+
+        Deterministic — no AI calls. Derives every item from the same
+        ``_signals`` the dashboard uses, so the badge can never disagree with the
+        dashboard.
+        """
+        signals = self._signals(client)
+        items: list[SetupItem] = []
+        if not signals.onboarding_completed:
+            items.append(
+                SetupItem(
+                    key="onboarding_incomplete",
+                    label="Finish onboarding",
+                    detail=f"Onboarding is at step {client.onboarding_step} of 8.",
+                )
+            )
+        if signals.connected_integrations == 0:
+            items.append(
+                SetupItem(
+                    key="no_integrations",
+                    label="Connect an integration",
+                    detail="No data sources are connected yet.",
+                )
+            )
+        if not signals.has_profile:
+            items.append(
+                SetupItem(
+                    key="no_intelligence_profile",
+                    label="Build the intelligence profile",
+                    detail="No client intelligence profile has been built yet.",
+                )
+            )
+        if signals.pending_approvals > 0:
+            items.append(
+                SetupItem(
+                    key="pending_approvals",
+                    label="Review pending approvals",
+                    detail=f"{signals.pending_approvals} calendar item(s) await approval.",
+                )
+            )
+        return SetupStatusResponse(
+            client_id=client.id,
+            complete=len(items) == 0,
+            count=len(items),
+            items=items,
+        )
 
     # ---- helpers ---- #
 

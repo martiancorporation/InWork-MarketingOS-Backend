@@ -62,3 +62,42 @@ class PlanTaskRepository(BaseRepository[PlanTask]):
         if limit is not None:
             stmt = stmt.limit(limit)
         return list(self.db.scalars(stmt).all()), int(total or 0)
+
+    def open_counts_for_assignee(
+        self,
+        assignee_id: uuid.UUID,
+        client_ids: list[uuid.UUID] | None = None,
+    ) -> dict[uuid.UUID, int]:
+        """Count non-done tasks assigned to a user, grouped by client.
+
+        ``client_ids=None`` counts across every client; a list restricts to those
+        clients (an empty list yields no rows). Backs the cross-client
+        "what's on you" view (BE-04).
+        """
+        conditions = [
+            PlanTask.assignee_id == assignee_id,
+            PlanTask.status != TaskStatus.done,
+        ]
+        if client_ids is not None:
+            conditions.append(PlanTask.client_id.in_(client_ids))
+        rows = self.db.execute(
+            select(PlanTask.client_id, func.count())
+            .where(*conditions)
+            .group_by(PlanTask.client_id)
+        ).all()
+        return {cid: int(n) for cid, n in rows}
+
+    def completion_counts(self, client_id: uuid.UUID) -> tuple[int, int]:
+        """Return ``(done, total)`` task counts for a client (BE-06 adherence)."""
+        total = self.db.scalar(
+            select(func.count()).select_from(PlanTask).where(
+                PlanTask.client_id == client_id
+            )
+        )
+        done = self.db.scalar(
+            select(func.count()).select_from(PlanTask).where(
+                PlanTask.client_id == client_id,
+                PlanTask.status == TaskStatus.done,
+            )
+        )
+        return int(done or 0), int(total or 0)

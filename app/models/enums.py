@@ -11,8 +11,28 @@ import enum
 
 class UserRole(str, enum.Enum):
     admin = "admin"      # full access: manage users, onboard clients, assign clients, see all
-    manager = "manager"  # non-admin; sees only assigned clients
-    user = "user"        # non-admin; sees only assigned clients
+    manager = "manager"  # non-admin; sees only assigned clients (gets all client-capabilities on them)
+    user = "user"        # non-admin; sees only assigned clients (capabilities scoped per assignment)
+
+
+class ClientCapability(str, enum.Enum):
+    """Per-project responsibility a user holds on a client they are assigned to.
+
+    Granular RBAC layered on top of the bare client assignment: an assignment can
+    grant a subset of these so, e.g., one operator only reviews results while
+    another only sets up connectors. Stored as a JSON list on
+    ``client_assignments.capabilities`` (an app-defined, growable set — not a
+    native DB enum). Admins implicitly hold all capabilities on every client;
+    managers hold all on their assigned clients; the ``admin`` capability below is
+    a per-client super-grant that implies every other capability.
+    """
+
+    manage_integrations = "manage_integrations"  # connect/disconnect connectors
+    review_results = "review_results"            # act on recommendations / KPI alerts
+    review_creatives = "review_creatives"        # approve calendar content
+    manage_calendar = "manage_calendar"          # create/edit calendar items
+    manage_compliance = "manage_compliance"      # edit the compliance register
+    admin = "admin"                              # per-client super-grant (implies all)
 
 
 # ---- Client intelligence (async build pipeline + RAG) ----
