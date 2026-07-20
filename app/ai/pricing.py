@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from decimal import Decimal
+
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ _DEFAULT_PRICING: dict[str, ModelRate] = {
 
 def _load_pricing() -> dict[str, ModelRate]:
     rates = dict(_DEFAULT_PRICING)
-    raw = os.getenv("AI_PRICING_JSON")
+    raw = get_settings().ai.pricing_json
     if raw:
         try:
             for model, r in json.loads(raw).items():

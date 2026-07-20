@@ -152,6 +152,58 @@ class AnthropicClient:
         )
         return _text_of(message)
 
+    async def stream(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        context: AiUsageContext | None = None,
+    ):
+        """Yield text deltas from a streaming completion (ChatGPT-style typing).
+
+        An async generator: ``async for delta in client.stream(...)``. Usage is
+        recorded once when the stream closes, from the final message — the same
+        accounting as ``_invoke``, just deferred until the last token.
+        """
+        client = self._new_client()
+        ctx = context or self._context
+        model = self._settings.model
+        started = time.perf_counter()
+        final = None
+        try:
+            async with client.messages.stream(
+                model=model,
+                max_tokens=max_tokens or self._settings.max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": prompt}],
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield text
+                final = await stream.get_final_message()
+        except Exception as exc:
+            record_usage(
+                context=ctx,
+                provider=_PROVIDER,
+                model=model,
+                operation="stream",
+                usage=None,
+                status="error",
+                error=str(exc)[:500],
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+            raise
+        record_usage(
+            context=ctx,
+            provider=_PROVIDER,
+            model=model,
+            operation="stream",
+            usage=usage_from_message(final) if final is not None else None,
+            status="success",
+            request_id=getattr(final, "id", None),
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+
     async def analyze_url(
         self,
         *,

@@ -1,6 +1,6 @@
 """Async brand-extraction job — the transaction-id + poll pattern.
 
-Website scraping / document parsing can exceed a request's safe window (RD's
+Website scraping / document parsing can exceed a request's safe window (the
 ">25s API" concern), so the extract-brand call can be run as a background job:
 the API returns a job id immediately and the client polls this row for the
 result. ``status`` is a plain string (open set: pending / running / done /

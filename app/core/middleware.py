@@ -1,13 +1,21 @@
 """Cross-cutting middleware.
 
-``AuditMiddleware`` records every API request to the ``audit_log`` table: who
-(actor from the JWT), what (a stable dotted action + entity pointer derived from
-the path), the outcome (status code, duration), and request context (ip, user
-agent, query). It runs on its own short-lived DB session and swallows all
-errors, so auditing can never break or slow-fail a request.
+``AuditMiddleware`` records **mutating** API requests (``POST``/``PUT``/``PATCH``/
+``DELETE``) to the ``audit_log`` table: who (actor from the JWT), what (a stable
+dotted action + entity pointer derived from the path), the outcome (status code,
+duration), and request context (ip, user agent, query). Read-only requests
+(``GET``/``HEAD``/``OPTIONS``) are **not** recorded — a read leaves no trace to
+hold anyone accountable for, and auditing them is just noise. It runs on its own
+short-lived DB session and swallows all errors, so auditing can never break or
+slow-fail a request.
 
 For write requests it also peeks at the JSON response to capture the id of a
 freshly-created resource — otherwise a ``POST`` has no id in its path.
+
+Every write records a ``changes`` diff. A service can attach a rich before/after
+diff via ``set_audit_changes`` (preferred — see ``ClientService``); when it does
+not, this middleware falls back to the submitted JSON body (secret fields
+redacted) so a write is never logged with an empty ``changes``.
 """
 
 from __future__ import annotations
@@ -28,15 +36,36 @@ from app.core.request_context import (
 )
 from app.core.security import TOKEN_TYPE_ACCESS, decode_token
 from app.db.session import get_session_factory
-from app.services.audit_service import AuditService, derive_audit
+from app.services.audit_service import AuditService, created_changes, derive_audit
 
 logger = logging.getLogger(__name__)
 
 # Infra endpoints that would just be noise in an audit trail.
 _SKIP_EXACT = {"/health", "/openapi.json", "/favicon.ico"}
 _SKIP_PREFIX = ("/docs", "/redoc")
+# Only mutating requests are audited; reads (GET/HEAD/OPTIONS) are not recorded.
+_AUDIT_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# Methods that carry a body we buffer — for the created-id response peek and the
+# submitted-payload fallback diff.
 _WRITE_METHODS = {"POST", "PUT", "PATCH"}
 _MAX_BODY_PEEK = 100_000  # bytes; larger JSON responses aren't buffered
+_MAX_REQUEST_PEEK = 64_000  # bytes; larger request bodies aren't parsed for the diff
+# Never copy these into a ``changes`` diff, whatever the endpoint.
+_REDACT_KEYS = {
+    "password",
+    "current_password",
+    "new_password",
+    "old_password",
+    "token",
+    "access_token",
+    "refresh_token",
+    "secret",
+    "client_secret",
+    "code",
+    "authorization",
+    "api_key",
+    "apikey",
+}
 
 
 class AuditMiddleware:
@@ -55,7 +84,8 @@ class AuditMiddleware:
         path = request.url.path
         method = request.method
 
-        if method == "OPTIONS" or path in _SKIP_EXACT or path.startswith(_SKIP_PREFIX):
+        # Reads and infra endpoints are never audited — only mutations.
+        if method not in _AUDIT_METHODS or path in _SKIP_EXACT or path.startswith(_SKIP_PREFIX):
             await self.app(scope, receive, send)
             return
         if not path.startswith(self.prefix):
@@ -66,6 +96,16 @@ class AuditMiddleware:
         status_code = 500
         body_chunks: list[bytes] = []
         buffering = method in _WRITE_METHODS
+
+        # Buffer the request body for JSON writes (the submitted-payload fallback
+        # diff), then replay it so the downstream app reads the full body untouched.
+        app_receive = receive
+        request_body = b""
+        if method in _WRITE_METHODS and "application/json" in (
+            request.headers.get("content-type", "").lower()
+        ):
+            request_body, app_receive = await _buffer_request_body(receive, _MAX_REQUEST_PEEK)
+
         # Fresh per-request holder; a service may fill it with a before/after diff.
         # A mutable holder (not a plain set) so the diff survives the sync-route
         # threadpool hop back to this async middleware.
@@ -82,12 +122,15 @@ class AuditMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, receive, send_wrapper)
+            await self.app(scope, app_receive, send_wrapper)
         finally:
             duration_ms = int((time.perf_counter() - started) * 1000)
             changes = get_audit_changes()
             try:
-                self._record(request, method, path, status_code, duration_ms, body_chunks, changes)
+                self._record(
+                    request, method, path, status_code, duration_ms, body_chunks, changes,
+                    request_body,
+                )
             except Exception as exc:  # never let auditing break the response
                 logger.warning("audit write failed for %s %s: %s", method, path, exc)
             reset_audit_changes(changes_token)
@@ -101,10 +144,16 @@ class AuditMiddleware:
         duration_ms: int,
         body_chunks: list[bytes],
         changes: dict | None = None,
+        request_body: bytes = b"",
     ) -> None:
         actor_id = self._actor(request)
         entity, entity_id, action = derive_audit(method, path, prefix=self.prefix)
         client_id = entity_id if entity == "clients" else None
+
+        # No service-provided before/after diff? On a successful write, fall back to
+        # the submitted JSON payload so ``changes`` is never empty for a mutation.
+        if changes is None and request_body and 200 <= status_code < 300:
+            changes = _changes_from_body(request_body)
 
         # For a successful create, the new id lives in the response body, not the path.
         if entity_id is None and 200 <= status_code < 300 and body_chunks:
@@ -170,3 +219,54 @@ class AuditMiddleware:
                 except (ValueError, TypeError):
                     continue
         return None
+
+
+async def _buffer_request_body(receive, cap: int):
+    """Read the request body (so a JSON write's payload can seed the audit diff),
+    then return ``(body, replay_receive)`` where ``replay_receive`` re-emits every
+    consumed ASGI message so the downstream app still reads the full body."""
+    messages: list = []
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        message = await receive()
+        messages.append(message)
+        if message["type"] != "http.request":
+            break
+        chunk = message.get("body", b"")
+        chunks.append(chunk)
+        size += len(chunk)
+        if not message.get("more_body", False) or size > cap:
+            break
+
+    body = b"".join(chunks)
+    index = 0
+
+    async def replay():
+        nonlocal index
+        if index < len(messages):
+            message = messages[index]
+            index += 1
+            return message
+        return await receive()
+
+    return body, replay
+
+
+def _changes_from_body(body: bytes) -> dict | None:
+    """Build a ``{field: {before: None, after: value}}`` diff from a submitted JSON
+    object, with secret-bearing fields redacted. Returns None for non-JSON, a
+    non-object, an empty object, or an oversized body."""
+    if not body or len(body) > _MAX_REQUEST_PEEK:
+        return None
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict) or not data:
+        return None
+    safe = {
+        key: ("***redacted***" if key.lower() in _REDACT_KEYS else value)
+        for key, value in data.items()
+    }
+    return created_changes(safe)

@@ -34,7 +34,10 @@
 24. [Module 21 — Automation / Platform Ops](#module-21--automation--platform-ops-admin) *(Admin / scheduler)*
 25. [Module 22 — AI Usage](#module-22--ai-usage-admin) *(Token Usage screen)*
 26. [Module 23 — Audit Log](#module-23--audit-log-admin) *(Audit Logs screen)*
-27. [Appendix A — Enum reference](#appendix-a--enum-reference)
+27. [Module 24 — Strategy](#module-24--strategy) *(Strategy & adherence)*
+28. [Module 25 — My Work](#module-25--my-work-cross-client) *(cross-client pending / red-dots)*
+29. [Module 26 — Global Assistant](#module-26--global-assistant) *(portfolio-wide Ask AI)*
+30. [Appendix A — Enum reference](#appendix-a--enum-reference)
 
 ---
 
@@ -59,13 +62,15 @@ Every endpoint entry lists: **method + path**, **auth/permissions**, **rate limi
 ### Authentication
 - **Scheme:** JWT bearer (HS256). Obtain a token from `POST /api/v1/auth/login`.
 - **Header on every protected call:** `Authorization: Bearer <access_token>`.
-- **Expiry:** access tokens expire after **30 minutes** by default (`ACCESS_TOKEN_EXPIRE_MINUTES`); the login response returns `expires_in` (seconds). There is **no refresh token / server-side logout** yet — the token is valid until it expires; the frontend should re-login on `401`.
+- **Expiry:** access tokens expire after **30 minutes** by default (`ACCESS_TOKEN_EXPIRE_MINUTES`); the login response returns `expires_in` (seconds). There is **no refresh token** — the frontend should re-login on `401`.
+- **Server-side logout:** tokens are now **revocable**. Each login mints a token carrying a unique `jti` and a matching `UserSession` row; `POST /api/v1/auth/logout` deletes that session so the token stops authenticating **before** it expires. On logout, clear the stored token and route to Login.
 - **No public sign-up.** All users are provisioned by an admin (Module 2).
 
 ### Roles & access model
 - **Roles:** `admin`, `manager`, `user`.
 - **`admin`** — sees and does everything across all clients; only role allowed on admin-only endpoints (user management, onboarding, assignments, intelligence rebuild, automation, AI-usage, audit).
 - **`manager` / `user`** (non-admin) — can only see **clients assigned to them** (via Module 5). Any client they are not assigned to is reported as **`404 Not Found`, never `403`** — so client IDs can't be probed. This "object-level authorization" applies to every `/clients/{client_id}/...` route.
+- **Per-project capabilities (granular RBAC):** on top of the bare client assignment, an assignment can scope **what** a `user` may do on that client via a set of `ClientCapability` values (`manage_integrations`, `review_results`, `review_creatives`, `manage_calendar`, `manage_compliance`, and a per-client `admin` super-grant). **`admin` and `manager` roles implicitly hold every capability** on every client they can see; a plain `user` holds only the capabilities their assignment grants (an assignment created without an explicit set grants the full set, preserving pre-RBAC behaviour). Capability-gated routes return **`403 Forbidden`** when the caller can see the client but lacks the capability (vs. `404` when the client itself is inaccessible). Capability-gated routes today: `POST .../recommendations/{rec_key}/decision` (`review_results`) and `POST .../integrations/{key}/connect` (`manage_integrations`). Manage capabilities per assignment via Module 5.
 - **Uploads** are **owner-scoped** the same way (a non-admin sees only their own uploads).
 - **Notifications** are **per-user** (each caller sees only their own).
 
@@ -107,8 +112,10 @@ A few endpoints are throttled (per worker; sliding window; disabled in dev/test)
 | `POST /clients/onboarding/extract-brand` | 10 requests / 60s |
 | `POST /clients/onboarding/extract-brand/jobs` | 10 requests / 60s |
 | `GET /clients/{id}/dashboard` | 30 requests / 60s |
+| `GET /clients/{id}/opportunities` | 20 requests / 60s |
 | `POST /clients/{id}/assistant/chats/{chat_id}/messages` | 30 requests / 60s |
 | `POST /clients/{id}/content/review` | 30 requests / 60s |
+| `POST /assistant/ask` (global assistant) | 30 requests / 60s |
 
 On exceed → `429`. The frontend should surface a friendly "please slow down" toast and back off.
 
@@ -141,13 +148,16 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 | 21 | Automation | Agency | (scheduler; admin manual trigger) | Admin |
 | 22 | AI Usage | Agency | Token Usage | Admin |
 | 23 | Audit Log | Agency | Audit Logs | Admin |
+| 24 | Strategy | Client | Strategy / adherence | All (scoped) |
+| 25 | My Work | Global | Cross-client pending / red-dot badges | All (per-user) |
+| 26 | Global Assistant | Global | Portfolio-wide "Ask AI" | All (scoped) |
 
 **Typical flow:** Login → (agency) see Clients → Onboard a client (8-step wizard, with AI brand extraction + consistency check) → Assign the client to a manager/user → open the client → Dashboard (AI health/brief/watchdog/recommendations) → work across Analytics, Calendar, Conversations, Compliance, Plan, Reports, Integrations. Admins additionally use Automation, Token Usage, Audit Logs.
 
 ---
 
 ## Module 1 — Authentication
-**Screen:** Login. **Role:** Public. **Frontend notes:** On success, store `access_token` and set the `Authorization: Bearer` header on the shared HTTP client; persist the returned `user` for the role switch / nav gating. On any `401` from a later call, clear the token and route back to Login. Login is the only auth endpoint — there is no signup/refresh/logout API.
+**Screen:** Login. **Role:** Public (login) / Authenticated (logout). **Frontend notes:** On success, store `access_token` and set the `Authorization: Bearer` header on the shared HTTP client; persist the returned `user` for the role switch / nav gating. On any `401` from a later call, clear the token and route back to Login. There is **no signup/refresh** API, but there **is** a server-side `logout` (call it on user-initiated sign-out, then clear the token locally).
 
 ### `POST /api/v1/auth/login`
 - **Auth:** Public.
@@ -164,6 +174,16 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 - **Errors:** `401` invalid credentials (generic — same message for unknown email vs wrong password, no user enumeration); `422` bad email / empty password; `429` rate limited.
 - **Object scoping:** N/A.
 - **Why/when:** The single sign-in entry point; exchanges email + password for a bearer token.
+
+### `POST /api/v1/auth/logout`
+- **Auth:** Authenticated (any role — revokes the caller's own token).
+- **Rate limited:** No.
+- **Request payload:** None (the token to revoke is the one in the `Authorization` header).
+- **Query params:** None.
+- **Success `204 No Content`:** empty body.
+- **Errors:** `401` missing/invalid token.
+- **Object scoping:** N/A — always acts on the caller's own session.
+- **Why/when:** Server-side sign-out. Deletes the `UserSession` behind the bearer token's `jti`, so the token stops authenticating immediately (before its natural expiry). Idempotent: a token with no live session (already logged out, or a legacy stateless token) is a no-op that still returns `204`. After calling, discard the token client-side and route to Login.
 
 ---
 
@@ -249,7 +269,7 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
   - `location` — `str | None`, `≤160`
   - `markets` — `str | None`, `≤2000`
   - `brand` — `BrandIn` — **required**: `brand_voice` (**required**, `1..2000`), `about_brand` (`≤20000`), `brand_extracted` (`≤20000`), `color_guidelines` (`≤20000`), `logo_url` (`≤1024`), `colors` (`list[BrandColorIn]` ≤24; each `hex` matching `#RGB`/`#RGBA`/`#RRGGBB`/`#RRGGBBAA` + optional `label` ≤60), `fonts` (`list[str]` ≤12)
-  - `platforms` — `list[str]` — **required**, `1..32` items (deduped/lowercased; must yield ≥1)
+  - `platforms` — `list[str]` — **required**, `1..32` items (deduped/lowercased; must yield ≥1). **Phase-1 channel ids only** — the accepted set is `meta`, `google-ads`, `google-lsa`, `seo`, `influencer`; any other channel (e.g. `x`/twitter, `pinterest`, `email`) → `422`. *(These onboarding channel slugs are the frontend/integrations ids; they are distinct from the `SocialPlatform` analytics buckets in Appendix A.)*
   - `goals` — `str | None`, `≤20000`
   - `compliance` — `ComplianceIn` (optional): `feed` (`str | None`, `≤20000`)
   - `client_contacts` — `list[ContactIn]` (optional) — **at least one must have an email**; `ContactIn`: `name` (**required**, `1..120`), `role`/`department` (`≤120`), `email` (`EmailStr | None`), `phone` (`≤40`), `description` (`≤2000`)
@@ -272,7 +292,7 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
   - `step` — `int | None`, `1..8` (advances the progress meter monotonically)
   - `basics` — `BasicsUpdate | None` (all sub-fields optional; same bounds as draft)
   - `brand` — `BrandUpdate | None` (all optional; `brand_voice` **not** required here)
-  - `platforms` — `list[str] | None`, `≤32`
+  - `platforms` — `list[str] | None`, `≤32` (same Phase-1 channel-set validation as the atomic request → `422` on any unknown channel)
   - `goals` — `str | None`, `≤20000`
   - `compliance` — `ComplianceIn | None`
   - `client_contacts` — `list[ContactIn] | None`, `≤100`
@@ -294,6 +314,15 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 - **Success `200`:** `ConsistencyReport` = `{ findings: [{ level: ok|warn|error, message, step? }], has_blocking: bool, ai_generated: bool }`.
 - **Errors:** `401`; `403`; `404`.
 - **Why/when:** AI cross-field consistency check — flags contradictions (e.g. "industry: steel" vs brand copy about gardens) before going live.
+
+### `POST /api/v1/clients/{client_id}/onboarding/missing-info`  *(step 8 — Review, AI check)*
+- **Auth:** Admin only. **Rate limited:** No.
+- **Request payload:** None (reasons over the draft client's current profile).
+- **Query params:** None.
+- **Success `200`:** `MissingInfoReport` = `{ items: MissingInfoItem[], ai_generated: bool }`. `MissingInfoItem`: `key`, `label`, `rationale`, `source` (`"checklist"` | `"ai"`). The fixed readiness-checklist gaps are always included (`source="checklist"`); when Claude is configured it adds **industry-specific**, inferred gaps (`source="ai"`). `ai_generated=false` when the AI pass was unavailable and only checklist gaps are returned.
+- **Errors:** `401`; `403`; `404`.
+- **Object scoping:** Admin only.
+- **Why/when:** Surface what still looks missing for this client — beyond the generic checklist, an AI pass names details specific to the client's industry (e.g. a licence number for a contractor). Render on the Review step alongside the consistency check; degrades gracefully to just the checklist gaps.
 
 ### `POST /api/v1/clients/{client_id}/onboarding/complete`  *(step 8 — finalize)*
 - **Auth:** Admin only. **Rate limited:** No.
@@ -318,7 +347,7 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 - **Request payload:** `BrandExtractionRequest` (same as above — `website` and/or `document_upload_id`).
 - **Success `202 Accepted`:** `BrandJobRead` = `{ id (the transaction id to poll), status ("pending"), website?, document_upload_id?, result: null, error: null, created_at, updated_at }`.
 - **Errors:** `401`; `422` (no source); `429`.
-- **Why/when:** For a long scrape/parse (RD's ">25s API" concern) — returns immediately with a transaction id and runs the extraction in the background. Poll the endpoint below (or layer a webhook/socket on top).
+- **Why/when:** For a long scrape/parse (the ">25s API" concern) — returns immediately with a transaction id and runs the extraction in the background. Poll the endpoint below (or layer a webhook/socket on top).
 
 ### `GET /api/v1/clients/onboarding/extract-brand/jobs/{job_id}`  *(poll)*
 - **Auth:** Authenticated (any role). **Rate limited:** No.
@@ -330,22 +359,29 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 ---
 
 ## Module 5 — Client Assignments (Admin)
-**Screen:** Users & Access / the client's "assign" control (agency admin). **Role:** Admin only. **Frontend notes:** This is the mechanism that grants a non-admin access to a client — assigning a client to a user is what makes it appear in that user's client list. Show assign/unassign controls only to admins.
+**Screen:** Users & Access / the client's "assign" control (agency admin). **Role:** Admin only. **Frontend notes:** This is the mechanism that grants a non-admin access to a client — assigning a client to a user is what makes it appear in that user's client list. An assignment also carries a set of **per-project capabilities** (granular RBAC — see §2 "Roles & access model"); the assign drawer can offer capability checkboxes for `user`-role assignees. Show assign/unassign/capability controls only to admins. Capabilities apply to plain `user` assignees; `admin`/`manager` assignees implicitly hold all capabilities regardless of the stored set.
 
 Base path: `/clients/{client_id}/assignments`.
 
 ### `GET /api/v1/clients/{client_id}/assignments`
 - **Auth:** Admin only. **Rate limited:** No.
-- **Success `200`:** `AssignmentListResponse` = `{ items: AssignmentRead[], total }`. `AssignmentRead`: `client_id`, `assigned_by` (`uuid|null`), `created_at`, `user: UserRead`.
+- **Success `200`:** `AssignmentListResponse` = `{ items: AssignmentRead[], total }`. `AssignmentRead`: `client_id`, `assigned_by` (`uuid|null`), `created_at`, `capabilities` (`ClientCapability[]` — the effective set; a legacy `NULL` set is returned as the full list so the UI always sees a concrete set), `user: UserRead`.
 - **Errors:** `401`; `403`; `404` client not found.
-- **Why/when:** List the users a client is assigned to.
+- **Why/when:** List the users a client is assigned to (with their per-project capabilities).
 
 ### `POST /api/v1/clients/{client_id}/assignments`
 - **Auth:** Admin only. **Rate limited:** No.
-- **Request payload:** `AssignmentCreate`: `user_id` — `uuid.UUID` **required**.
-- **Success `201`:** `AssignmentRead` (`assigned_by` = acting admin).
+- **Request payload:** `AssignmentCreate` (**strict**): `user_id` — `uuid.UUID` **required**; `capabilities` — `list[ClientCapability] | None` (optional, `≤` the number of capabilities). **Omitting `capabilities` (or `null`) grants the full set** (backward compatible); a list scopes the grant.
+- **Success `201`:** `AssignmentRead` (`assigned_by` = acting admin; `capabilities` echoes the effective set).
 - **Errors:** `401`; `403`; `404` client or target user; `409` already assigned; `422`.
-- **Why/when:** Grant a non-admin access to a client.
+- **Why/when:** Grant a non-admin access to a client, optionally scoping what they may do on it.
+
+### `PATCH /api/v1/clients/{client_id}/assignments/{user_id}`
+- **Auth:** Admin only. **Rate limited:** No.
+- **Request payload:** `AssignmentUpdate` (**strict**): `capabilities` — `list[ClientCapability]` **required** (`≤` the number of capabilities) — **replaces** the assignment's capability set wholesale (send the full desired set, not a delta; an empty list removes all capabilities).
+- **Success `200`:** `AssignmentRead` (with the new `capabilities`).
+- **Errors:** `401`; `403`; `404` assignment/client not found; `422`.
+- **Why/when:** Change what an already-assigned user may do on this client (per-project RBAC) without re-assigning.
 
 ### `DELETE /api/v1/clients/{client_id}/assignments/{user_id}`
 - **Auth:** Admin only. **Rate limited:** No.
@@ -356,7 +392,7 @@ Base path: `/clients/{client_id}/assignments`.
 ---
 
 ## Module 6 — Client Dashboard (AI)
-**Screen:** Client Dashboard. **Role:** All authenticated (scoped). **Frontend notes:** The dashboard is a **single call** that returns everything (health score, executive brief, watchdog, recommendations). It is **rate limited (30/60s)** and is a paid-AI route — cache the response, don't refetch on every re-render, and show a graceful state if `ai_generated=false` (Claude unconfigured → deterministic fallback). Recommendation cards use the accept/modify/reject decision endpoint; the decisions history endpoint backs an "activity" view.
+**Screen:** Client Dashboard. **Role:** All authenticated (scoped). **Frontend notes:** The dashboard is a **single call** that returns everything (health score, executive brief, watchdog, recommendations). It is **rate limited (30/60s)** and is a paid-AI route — cache the response, don't refetch on every re-render, and show a graceful state if `ai_generated=false` (Claude unconfigured → deterministic fallback). Recommendation cards use the accept/modify/reject decision endpoint (gated by the `review_results` capability); the decisions history endpoint backs an "activity" view. Two sibling reads live here too: `/opportunities` (AI growth ideas with external research — also paid/rate-limited) and `/setup` (the cheap red-dot count of outstanding setup steps, safe to poll).
 
 Base path: `/clients/{client_id}`.
 
@@ -369,16 +405,34 @@ Base path: `/clients/{client_id}`.
   - `watchdog` — `[{ id, kind: alert|opportunity, title, detail, severity: low|medium|high }]`
   - `recommendations` — `[{ id (rec_key), title, category: budget|creative|audience|compliance|growth, severity, summary, reason, confidence: 0–100, expected_impact, projection: { metric, direction: up|down, estimate, basis } | null (expected traffic/CTR/CPL effect — an estimate, may be null), decision: RecommendationDecisionRead|null }]`
   - `ai_generated` — `bool`
+  - `qa_review` — `QAVerdict` = `{ status: ok|concerns|not_reviewed, provider?, model?, notes: str[], summary? }` — an independent second-provider review of the generated brief + recommendations. Defaults to `status="not_reviewed"` when cross-provider QA is disabled/unconfigured (never an error).
 - **Errors:** `401`; `404` client inaccessible; `429`.
 - **Object scoping:** Admin all; non-admin only assigned; inaccessible → `404`.
 - **Why/when:** Render the full client dashboard in one request.
 
-### `POST /api/v1/clients/{client_id}/recommendations/{rec_key}/decision`
+### `GET /api/v1/clients/{client_id}/opportunities`
+- **Auth:** Authenticated (any role). **Rate limited:** **Yes — 20 / 60s** (paid-AI + external research).
+- **Request payload:** None.
+- **Success `200`:** `OpportunityResponse` = `{ items: Opportunity[], researched: bool, ai_generated: bool }`. `Opportunity`: `id` (stable key), `kind` (`market`/`location`/`keyword`/`channel`/`audience`/`other`), `title`, `detail`, `rationale`, `confidence` (0–100), `sources` (`str[]` — research URLs backing it; empty for internal-signal opportunities). `researched=true` when external research (Brave / ScrapingBee) contributed grounding; `ai_generated=false` when Claude was unconfigured and the deterministic fallback ran.
+- **Errors:** `401`; `404` client inaccessible; `429`.
+- **Object scoping:** Admin all; non-admin only assigned; inaccessible → `404`.
+- **Why/when:** AI-suggested **growth opportunities** (new markets/locations/keywords/channels/audiences) grounded in the client's profile plus optional external web research — a paid-AI route, so cache it and don't refetch on every render.
+
+### `GET /api/v1/clients/{client_id}/setup`
 - **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Request payload:** None.
+- **Success `200`:** `SetupStatusResponse` = `{ client_id, complete: bool, count: int, items: SetupItem[] }`. `SetupItem`: `key` (`onboarding_incomplete`/`no_integrations`/`no_intelligence_profile`/`pending_approvals`), `label`, `detail`. `complete=true` when nothing is outstanding (`count == 0`). Reuses the dashboard signals so the indicator never drifts from the dashboard.
+- **Errors:** `401`; `404` client inaccessible.
+- **Object scoping:** Admin all; non-admin only assigned; inaccessible → `404`.
+- **Why/when:** Backs the per-client **red-dot** indicator — the small count of outstanding setup steps still owed on a client (finish onboarding, connect a data source, build the AI profile, clear pending approvals). Cheap/deterministic; safe to poll.
+
+### `POST /api/v1/clients/{client_id}/recommendations/{rec_key}/decision`
+- **Auth:** Authenticated (any role) **with the `review_results` capability** (admins/managers always pass; a plain `user` needs the capability on this client — see §2).
+- **Rate limited:** No.
 - **Request payload:** `RecommendationDecisionRequest`: `decision` — `RecommendationDecision` **required** (`accepted`/`modified`/`rejected`); `reason` — `str | None`, `≤2000`.
 - **Path param:** `rec_key` (`str`, ≤80 — stable recommendation id).
 - **Success `201`:** `RecommendationActionRead` = `{ id, rec_key, decision, reason?, decided_by?, created_at }`.
-- **Errors:** `401`; `404` client inaccessible; `422`.
+- **Errors:** `401`; `403` lacks `review_results` on this client; `404` client inaccessible; `422`.
 - **Why/when:** Record a human accept/modify/reject on a recommendation card.
 
 ### `GET /api/v1/clients/{client_id}/recommendations/decisions`
@@ -473,6 +527,16 @@ Base path: `/clients/{client_id}/assistant`.
 - **Success `201`:** `AssistantAskResponse` = `{ message: AssistantMessageRead (the assistant reply), sources: str[] (retrieved knowledge snippets used to ground it) }`.
 - **Errors:** `401`; `404` client or chat; `422`; `429`.
 - **Why/when:** Ask the project AI a question — persists the user message + assistant reply and returns the reply plus its grounding sources.
+
+### `POST /api/v1/clients/{client_id}/assistant/chats/{chat_id}/messages/stream`
+- **Auth:** Authenticated (any role). **Rate limited:** **Yes — 30 / 60s** (paid-AI).
+- **Request payload:** `AssistantAskRequest` (strict): `content` (`str`, **required**, `1..4000`).
+- **Success `200`:** `text/event-stream` (Server-Sent Events). Consume it with `fetch` + a `ReadableStream` reader (not `EventSource`, which can't send a bearer header / POST body). Each frame is `data: <json>\n\n`, where the JSON `type` is one of:
+  - `sources` — `{ "type": "sources", "sources": str[] }` (sent once, first; the grounding snippets).
+  - `delta` — `{ "type": "delta", "text": "…" }` (many; append `text` to render token-by-token, ChatGPT-style).
+  - `done` — `{ "type": "done", "message_id": "<uuid>", "content": "<full reply>" }` (sent once, last; the reply is now persisted).
+- **Errors:** `401`; `404` client or chat; `422`; `429` — all raised **before** the stream opens (a started stream never 5xxes: on a provider error it falls back to a deterministic reply in the `delta`/`done` frames).
+- **Why/when:** Same as the non-streaming `messages` endpoint, but streams the answer as it is generated so the UI types it out live. Persists the user message + assembled assistant reply exactly like the non-streaming route.
 
 ### `DELETE /api/v1/clients/{client_id}/assistant/chats/{chat_id}`
 - **Auth:** Authenticated (any role). **Rate limited:** No.
@@ -852,7 +916,7 @@ Base path: `/clients/{client_id}/reports`.
 ---
 
 ## Module 18 — Integrations
-**Screen:** Integration (client). **Role:** All authenticated (scoped) — any user who can see the client may manage its connectors. **Frontend notes:** The connector `key` is one of `ga4` / `search_console` / `google_ads` / `google_lsa` / `meta` / `linkedin`. **Meta and Google Ads use the real per-client OAuth2 flow** (meeting decision): call `oauth/start` → redirect the browser to `authorization_url` (keep the returned `state`) → on the provider callback, call `oauth/complete` with `{code, state}`; the token is stored **encrypted** server-side and never returned. Other providers use the placeholder `connect`. `sync` pulls live insights into analytics; `disconnect` resets the connector. Token columns are never exposed in responses.
+**Screen:** Integration (client). **Role:** All authenticated (scoped) — any user who can see the client may view connectors; the placeholder `connect` action additionally requires the `manage_integrations` capability (see §2). **Frontend notes:** The connector `key` is one of `ga4` / `search_console` / `google_ads` / `google_lsa` / `meta` / `linkedin`. **All of these now use the real per-client OAuth2 flow** — **Meta**, the **Google family** (`google_ads`, `ga4`, `search_console`, `google_lsa` — one Google OAuth client, per-key scope), and **`linkedin`** (confirmed via `IntegrationService._REAL_KEYS`). Flow: call `oauth/start` → redirect the browser to `authorization_url` (keep the returned `state`) → on the provider callback, call `oauth/complete` with `{code, state}`; the token(s) are stored **encrypted** server-side and never returned, and are refreshed just-in-time on sync. `sync` pulls live insights into analytics; `disconnect` resets the connector and clears stored tokens. The placeholder `connect` now applies **only to keys not in the real set** — with every current key wired for real OAuth, no built-in connector uses it today; it remains for any future key added before its OAuth client exists (calling a real-OAuth key's `oauth/*`/`sync` when its provider app credentials are unconfigured returns `503`, never a false success). Token columns are never exposed in responses.
 
 Base path: `/clients/{client_id}/integrations`.
 
@@ -871,8 +935,8 @@ Base path: `/clients/{client_id}/integrations`.
 ### `POST /api/v1/clients/{client_id}/integrations/{key}/oauth/start`
 - **Auth:** Authenticated (any role). **Rate limited:** No.
 - **Success `200`:** `OAuthStartResponse` = `{ authorization_url, state }`.
-- **Errors:** `401`; `404`; `422` invalid `key`; `503` provider unconfigured.
-- **Why/when:** Begin real OAuth (Meta / Google Ads) — redirect the browser to `authorization_url`.
+- **Errors:** `401`; `404`; `422` invalid `key`; `400` `key` not in the real-OAuth set; `503` provider app credentials unconfigured.
+- **Why/when:** Begin real OAuth for a real-OAuth `key` (Meta / Google family / LinkedIn) — flips the connector to `pending` and returns the provider `authorization_url` (redirect the browser there).
 
 ### `POST /api/v1/clients/{client_id}/integrations/{key}/oauth/complete`
 - **Auth:** Authenticated (any role). **Rate limited:** No.
@@ -884,15 +948,15 @@ Base path: `/clients/{client_id}/integrations`.
 ### `POST /api/v1/clients/{client_id}/integrations/{key}/sync`
 - **Auth:** Authenticated (any role). **Rate limited:** No.
 - **Success `200`:** `IntegrationRead` (updated `last_sync_at` / `last_error`).
-- **Errors:** `401`; `404`; `409` not connected; `422`; `503` provider fetch failed.
-- **Why/when:** Pull live insights into analytics.
+- **Errors:** `401`; `404` (client inaccessible **or** connector never configured); `400` not connected (run OAuth first) or `key` not in the real-OAuth set; `422` invalid `key`; a provider fetch failure flips the connector to `error` (stores `last_error`) and re-raises.
+- **Why/when:** Pull live insights from the provider into `analytics_daily`. Refreshes a near-expiry OAuth token automatically. Each `key` writes into its own platform bucket — Meta→`facebook`, `google_ads`→`google`, `google_lsa`→`google_lsa`, `ga4`→`ga4`, `search_console`→`seo`, `linkedin`→`linkedin`.
 
 ### `POST /api/v1/clients/{client_id}/integrations/{key}/connect`
-- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Auth:** Authenticated (any role) **with the `manage_integrations` capability** (admins/managers always pass; a plain `user` needs it on this client — see §2). **Rate limited:** No.
 - **Request payload:** `IntegrationConnectRequest` (all optional): `account_label` (`≤200`), `external_account_id` (`≤160`), `scopes` (`≤2000`, comma-separated).
-- **Success `200`:** `IntegrationRead` (status → `connected`).
-- **Errors:** `401`; `404`; `422`.
-- **Why/when:** Placeholder connect for non-real-OAuth providers.
+- **Success `200`:** `IntegrationRead` (status → `connected`; no tokens stored).
+- **Errors:** `401`; `403` lacks `manage_integrations` on this client; `404` client inaccessible; `422`.
+- **Why/when:** Placeholder (status-only, no OAuth token) connect for a `key` **not** in the real-OAuth set. With every current key wired for real OAuth, this is unused by the built-in catalog today and kept for future providers — use `oauth/start` → `oauth/complete` for the real connectors.
 
 ### `POST /api/v1/clients/{client_id}/integrations/{key}/disconnect`
 - **Auth:** Authenticated (any role). **Rate limited:** No.
@@ -993,7 +1057,7 @@ Base path: `/automation`.
 ---
 
 ## Module 22 — AI Usage (Admin)
-**Screen:** Token Usage (agency admin). **Role:** Admin only for platform lists/summary; the per-client summary also allows a non-admin **assigned** to that client. **Frontend notes:** Use `/ai-usage/summary` for the platform token/cost dashboard (breakdowns by feature/model/client/user + daily series); `/ai-usage` for the drill-down event log with filters; `/ai-usage/clients/{id}/summary` for a client-scoped cost view. All figures come from recorded AI calls.
+**Screen:** Token Usage (agency admin). **Role:** Admin only for platform lists/summary/optimization; the per-client summary and per-client optimization also allow a non-admin **assigned** to that client. **Frontend notes:** Use `/ai-usage/summary` for the platform token/cost dashboard (breakdowns by feature/model/client/user + daily series); `/ai-usage` for the drill-down event log with filters; `/ai-usage/clients/{id}/summary` for a client-scoped cost view. The `/optimization` endpoints turn the same recorded usage into **actionable cost-cutting suggestions** (e.g. "route this feature to a cheaper model") with estimated savings. All figures come from recorded AI calls.
 
 Base path: `/ai-usage`.
 
@@ -1011,12 +1075,26 @@ Base path: `/ai-usage`.
 - **Errors:** `401`; `403`; `422`.
 - **Why/when:** Platform token/cost analytics dashboard.
 
+### `GET /api/v1/ai-usage/optimization`
+- **Auth:** Admin only. **Rate limited:** No.
+- **Query params:** `client_id`, `feature`, `model`, `start` (`datetime`), `end` (`datetime`) (no pagination).
+- **Success `200`:** `CostOptimizationReport` = `{ analyzed_requests: int, analyzed_cost: float, currency: str (default "USD"), potential_savings: float, suggestions: CostSuggestion[] }`. `CostSuggestion`: `id` (stable key, e.g. `route-cheaper-model:onboarding.brand_extraction`), `title`, `detail`, `feature?`, `current_model?`, `suggested_model?`, `estimated_savings` (USD over the window), `savings_pct` (0–100), `confidence` (0–100). `potential_savings` is the sum across suggestions (a ceiling, not a guarantee).
+- **Errors:** `401`; `403`; `422`.
+- **Why/when:** Platform-wide AI cost-optimization suggestions — concrete ways to cut spend (cheaper-model routing, etc.) with estimated savings.
+
 ### `GET /api/v1/ai-usage/clients/{client_id}/summary`
 - **Auth:** Admin **or** a non-admin assigned to the client (inaccessible → `404`). **Rate limited:** No.
 - **Query params:** `start`, `end`, `feature` (no pagination).
 - **Success `200`:** `ClientUsageSummary` = `{ client_id, totals: UsageTotals, by_feature, by_model: UsageGroupRow[], daily: DailyUsage[] }`.
 - **Errors:** `401`; `404`; `422`.
 - **Why/when:** One client's AI usage/cost.
+
+### `GET /api/v1/ai-usage/clients/{client_id}/optimization`
+- **Auth:** Admin **or** a non-admin assigned to the client (inaccessible → `404`). **Rate limited:** No.
+- **Query params:** `start` (`datetime`), `end` (`datetime`) (no pagination).
+- **Success `200`:** `CostOptimizationReport` (same shape as the platform endpoint above, scoped to this client).
+- **Errors:** `401`; `404`; `422`.
+- **Why/when:** One client's AI cost-optimization suggestions — the client-scoped view of the same savings analysis.
 
 ---
 
@@ -1034,14 +1112,72 @@ Base path: `/audit`.
 
 ---
 
+## Module 24 — Strategy
+**Screen:** Strategy / adherence (client). **Role:** All authenticated (scoped). **Frontend notes:** A **strategy** is the plan the operator signs off on for a client — stored **versioned** (each `PUT` records a new version; reads return the latest). The **adherence** endpoint then measures — **deterministically, no AI** — how closely the operator actually followed it, blending recommendation decisions and plan-task completion into a 0–100 score. Use `GET /strategy` to render the current plan, `PUT /strategy` on sign-off, and `/strategy/adherence` for the "are we on plan?" widget.
+
+Base path: `/clients/{client_id}/strategy`.
+
+### `PUT /api/v1/clients/{client_id}/strategy`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Request payload:** `StrategyCreate` (**strict**): `title` (`str | None`, `≤200`), `content` (`str`, **required**, `1..20000`).
+- **Success `201`:** `StrategyRead` = `{ id, client_id, version, title?, content, signed_by?, created_at }` (`version` increments per client; `signed_by` = current user).
+- **Errors:** `401`; `404` client inaccessible; `422`.
+- **Object scoping:** Admin all; non-admin only assigned; inaccessible → `404`.
+- **Why/when:** Record/replace the current strategy the operator signs off on (creates a new version, keeping history).
+
+### `GET /api/v1/clients/{client_id}/strategy`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Success `200`:** `StrategyRead` (the current/latest version).
+- **Errors:** `401`; `404` client inaccessible or no strategy recorded yet.
+- **Why/when:** Read the current strategy.
+
+### `GET /api/v1/clients/{client_id}/strategy/adherence`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Success `200`:** `AdherenceSummary` = `{ client_id, has_strategy: bool, current_version?, total_recommendations, accepted, modified, rejected, decision_adherence? ((accepted + 0.5·modified)/total, 0..1), tasks_total, tasks_done, task_completion? (done/total, 0..1), adherence_score? (0..100 blend of the available signals), basis: str[] }`. Ratios/score are `null` when there isn't enough signal; `basis` names which signals fed the score.
+- **Errors:** `401`; `404` client inaccessible.
+- **Why/when:** How closely the operator followed the recorded strategy — deterministic, derived from recommendation decisions + plan-task completion (no AI, no stored score).
+
+---
+
+## Module 25 — My Work (Cross-client)
+**Screen:** App shell — the cross-client "what's on me" view + red-dot badges (global). **Role:** All authenticated; **per-user and access-scoped** (aggregates only over clients the caller can access — all clients for an admin, assigned clients otherwise). **Frontend notes:** One call powers both the top-level badge (grand totals) and the per-client badges. Paginated over the set of clients that have at least one outstanding item.
+
+Base path: `/me`.
+
+### `GET /api/v1/me/pending`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Query params:** `page`, `page_size`.
+- **Success `200`:** `MePendingResponse` = `{ items: MePendingClient[], total, page, page_size, totals: MePendingTotals }`. `MePendingClient`: `client_id`, `client_name`, `client_slug`, `assigned_tasks`, `pending_approvals`, `open_alerts`, `total`. `MePendingTotals` (grand totals across every accessible client): `assigned_tasks`, `pending_approvals`, `open_alerts`, `total`. `total` (top level) = the number of clients with at least one outstanding item (the paginated set).
+- **Errors:** `401`; `422`.
+- **Object scoping:** Admin aggregates over all clients; non-admin only over assigned clients.
+- **Why/when:** The current user's outstanding work across every client they can access — their assigned (non-done) plan tasks, calendar items awaiting approval, and open KPI alerts, grouped and counted per client. Backs the app's red-dot badges.
+
+---
+
+## Module 26 — Global Assistant
+**Screen:** Portfolio-wide "Ask AI" (global, app shell). **Role:** All authenticated. **Frontend notes:** A **stateless** cross-client assistant — it reasons over every client the caller can access (all clients for an admin; only assigned clients otherwise — scoping enforced server-side, so any authenticated user may call it, they just see a smaller portfolio). Not persisted: pass prior turns in `history` for continuity. **Rate-limited (30/60s)**, paid-AI; degrades to a deterministic portfolio summary when Claude is unconfigured (never a 5xx). This is distinct from the per-client Project Assistant (Module 8), which is chat-persisted and grounded in one client's RAG profile.
+
+Base path: `/assistant`.
+
+### `POST /api/v1/assistant/ask`
+- **Auth:** Authenticated (any role). **Rate limited:** **Yes — 30 / 60s** (paid-AI).
+- **Request payload:** `GlobalAssistantAskRequest` (**strict**): `content` (`str`, **required**, `1..4000`); `history` (`list[GlobalAssistantTurn]`, optional, `≤20` turns; each turn: `role` `user`|`assistant`, `content` `1..4000`) — prior turns for continuity (not persisted).
+- **Success `200`:** `GlobalAssistantAskResponse` = `{ answer: str, scope: str ("all clients" for an admin; "N assigned client(s)" otherwise), clients_considered: int, ai_generated: bool (false when the deterministic fallback ran) }`.
+- **Errors:** `401`; `422`; `429`.
+- **Object scoping:** Reasons only over clients the caller can access (admins all; others only assigned).
+- **Why/when:** Ask a cross-client / portfolio-level question ("which clients are under budget this month?") without opening a specific client. Stateless — persist the transcript client-side and replay it via `history`.
+
+---
+
 ## Appendix A — Enum reference
 
 | Enum | Values | Used by |
 | --- | --- | --- |
 | `UserRole` | `admin`, `manager`, `user` | Users, auth |
+| `ClientCapability` | `manage_integrations`, `review_results`, `review_creatives`, `manage_calendar`, `manage_compliance`, `admin` (per-client super-grant — implies all) | Per-project RBAC on a client **assignment** (Module 5). Admins/managers implicitly hold all; a plain `user` holds only what the assignment grants. Gates `recommendations/{rec_key}/decision` (`review_results`) and `integrations/{key}/connect` (`manage_integrations`) today. |
 | `ClientStatus` | `draft`, `active`, `inactive`, `paused`, `onboarding`, `archived` | Clients |
 | `DocumentKind` | `brand`, `compliance`, `goals`, `contract`, `brief`, `creative`, `other` | Onboarding documents |
-| `SocialPlatform` | `instagram`, `facebook`, `youtube`, `tiktok`, `x`, `linkedin`, `pinterest`, `google`, `email`, `other` | Analytics, Calendar |
+| `SocialPlatform` | **active:** `instagram`, `facebook`, `youtube`, `tiktok`, `linkedin`, `google` (Ads bucket), `google_lsa`, `ga4`, `seo` (Search Console bucket), `influencer`, `other`; **deprecated (Phase-1 removed — rejected at onboarding, kept only for existing rows):** `x`, `pinterest`, `email` | Analytics, Calendar, integration-sync buckets |
 | `CampaignStatus` | `draft`, `active`, `paused`, `ended` | Campaigns |
 | `AdObjective` | `awareness`, `traffic`, `engagement`, `leads`, `conversions` | Campaigns, Calendar ads |
 | `AlertStatus` | `open`, `acknowledged`, `resolved` | Alerts |

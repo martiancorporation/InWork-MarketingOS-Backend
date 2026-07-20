@@ -12,10 +12,12 @@ pricing table used to bill the tokens, and are a ceiling, not a guarantee.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 
 from app.ai.features import AiFeature
 from app.ai.pricing import MODEL_PRICING, UsageBreakdown, price
+from app.core.config import get_settings
 from app.schemas.ai_usage import CostOptimizationReport, CostSuggestion
 
 # Features whose calls mostly gather/normalize data (not client-facing prose):
@@ -28,10 +30,17 @@ _DATA_GATHERING_FEATURES = {
     AiFeature.WATCHDOG,
     AiFeature.HEALTH_SCORE,
 }
-# Expensive tier we route DOWN from.
-_EXPENSIVE_MODELS = {"claude-opus-4-8"}
-_CHEAP_MODEL = "claude-haiku-4-5-20251001"  # for data-gathering steps
-_MID_MODEL = "claude-sonnet-5"  # for everything else on the expensive tier
+# Model tiers (expensive → cheap/mid) come from config, not hard-coded here —
+# see AISettings.cheap_model / mid_model / expensive_models.
+
+@dataclass(frozen=True)
+class _ModelTiers:
+    """Configured model tiers the router suggests moving between."""
+
+    cheap: str
+    mid: str
+    expensive: frozenset[str]
+
 
 # Don't bother suggesting for trivial amounts.
 _MIN_SAVINGS = Decimal("0.01")
@@ -45,9 +54,14 @@ def build_report(rows: list[dict]) -> CostOptimizationReport:
     analyzed_requests = sum(int(r.get("requests", 0)) for r in rows)
     analyzed_cost = sum(float(r.get("total_cost", 0.0)) for r in rows)
 
+    ai = get_settings().ai
+    tiers = _ModelTiers(
+        cheap=ai.cheap_model, mid=ai.mid_model, expensive=ai.expensive_model_set
+    )
+
     suggestions: list[CostSuggestion] = []
     for r in rows:
-        suggestions.extend(_row_suggestions(r))
+        suggestions.extend(_row_suggestions(r, tiers))
 
     suggestions.sort(key=lambda s: s.estimated_savings, reverse=True)
     potential = round(sum(s.estimated_savings for s in suggestions), 6)
@@ -59,7 +73,7 @@ def build_report(rows: list[dict]) -> CostOptimizationReport:
     )
 
 
-def _row_suggestions(r: dict) -> list[CostSuggestion]:
+def _row_suggestions(r: dict, tiers: _ModelTiers) -> list[CostSuggestion]:
     feature = str(r.get("feature") or "")
     model = str(r.get("model") or "")
     requests = int(r.get("requests", 0))
@@ -71,8 +85,8 @@ def _row_suggestions(r: dict) -> list[CostSuggestion]:
     out: list[CostSuggestion] = []
 
     # ---- 1. cheaper-model routing off the expensive tier ----
-    if model in _EXPENSIVE_MODELS and cost > 0:
-        target = _CHEAP_MODEL if feature in _DATA_GATHERING_FEATURES else _MID_MODEL
+    if model in tiers.expensive and cost > 0:
+        target = tiers.cheap if feature in _DATA_GATHERING_FEATURES else tiers.mid
         if target in MODEL_PRICING:
             projected = price(
                 target,

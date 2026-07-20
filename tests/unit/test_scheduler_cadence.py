@@ -25,7 +25,7 @@ def test_custom_intervals_are_honored():
         digest_interval_minutes=720,
     )
     jobs = {j.name: j for j in build_jobs(s)}
-    assert jobs[WATCHDOG_JOB].interval_seconds == 30 * 60  # RD's 30-min loop
+    assert jobs[WATCHDOG_JOB].interval_seconds == 30 * 60  # 30-min loop
     assert jobs[INTEGRATION_SYNC_JOB].interval_seconds == 120 * 60
     assert jobs[DIGEST_JOB].interval_seconds == 720 * 60
 

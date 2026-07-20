@@ -17,6 +17,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import CurrentUser, DbSession, Pagination
 from app.core.rate_limit import RateLimit
@@ -91,6 +92,31 @@ async def ask(
 ) -> AssistantAskResponse:
     ClientService(db).get_client(user, client_id)
     return await AssistantService(db).ask(client_id, chat_id, user.id, data.content)
+
+
+@router.post(
+    "/chats/{chat_id}/messages/stream",
+    summary="Ask the project AI — streamed token-by-token (SSE, ChatGPT-style)",
+    dependencies=[Depends(RateLimit("assistant_ask", times=30, seconds=60))],
+)
+async def ask_stream(
+    client_id: uuid.UUID,
+    chat_id: uuid.UUID,
+    data: AssistantAskRequest,
+    user: CurrentUser,
+    db: DbSession,
+) -> StreamingResponse:
+    """Server-Sent Events: a ``sources`` frame, a ``delta`` frame per token chunk,
+    then a ``done`` frame with the persisted message id + full text. Access +
+    chat-existence are checked (404) before the stream opens."""
+    ClientService(db).get_client(user, client_id)
+    service = AssistantService(db)
+    ctx = service.begin_stream(client_id, chat_id, user.id, data.content)
+    return StreamingResponse(
+        service.stream_events(ctx),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.delete("/chats/{chat_id}", response_model=MessageResponse, summary="Delete a chat")

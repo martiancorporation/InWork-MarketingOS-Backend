@@ -25,7 +25,7 @@ class SchedulerSettings(BaseSettings):
     # How often the loop wakes to check whether any job is due.
     tick_seconds: int = 30  # SCHEDULER_TICK_SECONDS
 
-    # KPI watchdog — re-evaluate alerts from the latest data. RD's 30–60 min loop.
+    # KPI watchdog — re-evaluate alerts from the latest data on a 30–60 min loop.
     watchdog_interval_minutes: int = 60  # SCHEDULER_WATCHDOG_INTERVAL_MINUTES
 
     # Pull fresh insights from connected ad-platform integrations.

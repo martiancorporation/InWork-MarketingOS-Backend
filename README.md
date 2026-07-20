@@ -207,19 +207,22 @@ Each response also carries an `X-Request-ID` header for log correlation.
 
 | Router | Base path | Highlights |
 | --- | --- | --- |
-| **auth** | `/auth` | `POST /login` (rate-limited). No sign-up — admins provision users. |
+| **auth** | `/auth` | `POST /login` (rate-limited) + `POST /logout` (server-side token revocation). No sign-up — admins provision users. |
 | **users** | `/users` | Admin user management. |
-| **clients** | `/clients` | List (paginated), atomic + progressive onboarding wizard, AI brand extraction, detail, admin update. |
-| **assignments** | `/clients/{id}/assignments` | Assign users to clients (drives non-admin access). |
+| **clients** | `/clients` | List (paginated), atomic + progressive onboarding wizard, AI brand extraction, AI missing-info, detail, admin update. |
+| **assignments** | `/clients/{id}/assignments` | Assign users to clients (drives non-admin access); per-project capabilities (RBAC). |
 | **calendar** | `/clients/{id}/calendar/events` | Events (paginated) + client-approval workflow. |
 | **conversations** | `/clients/{id}/conversations` | Shared inbox: threads/messages, folders, stars (paginated). |
 | **compliance** | `/clients/{id}/compliance` | Additive compliance register (paginated); changes trigger a rebuild. |
 | **analytics** | `/clients/{id}/analytics` | Daily-facts ingest, raw series (paginated), aggregated summary. |
 | **reports** | `/clients/{id}/reports` | Report registry/history (paginated). |
-| **ai** (dashboard) | `/clients/{id}/dashboard` | Health/brief/watchdog/recommendations (rate-limited); rec decisions. |
+| **ai** (dashboard) | `/clients/{id}/dashboard` | Health/brief/watchdog/recommendations (rate-limited); rec decisions; growth `opportunities`; `setup` red-dot status. |
+| **assistant** | `/clients/{id}/assistant`, `/assistant` | Per-client Project AI chats (rate-limited) + platform-wide `POST /assistant/ask` (cross-client Ask AI). |
+| **strategy** | `/clients/{id}/strategy` | Versioned sign-off strategy + deterministic adherence score. |
 | **intelligence** | `/clients/{id}` | Profile/build status, directives, RAG context (admin-only debug). |
 | **uploads** | `/uploads` | Global S3-backed file upload / presigned download / delete. |
-| **ai_usage** | `/ai-usage` | Token/cost usage events (observability). |
+| **me** | `/me` | Cross-client pending work + per-client counts (red-dot badges). |
+| **ai_usage** | `/ai-usage` | Token/cost usage events (observability) + cost-optimization suggestions. |
 | **audit** | `/audit` | Audit-log read API. |
 | **health** | `/health` | Liveness check (unversioned). |
 

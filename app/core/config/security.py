@@ -25,8 +25,7 @@ class SecuritySettings(BaseSettings):
 
     secret_key: str = DEV_SECRET_PLACEHOLDER  # SECRET_KEY
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
-    refresh_token_expire_days: int = 7
+    access_token_expire_minutes: int = 420  # 7 hours
     # Comma-separated list in the env; exposed as a parsed list below.
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
 
