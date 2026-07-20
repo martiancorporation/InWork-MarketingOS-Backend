@@ -43,6 +43,17 @@ class IntegrationsSettings(BaseSettings):
     linkedin_client_id: str | None = None
     linkedin_client_secret: str | None = None
     linkedin_redirect_uri: str | None = None
+    # LinkedIn Marketing API version (monthly, YYYYMM) + ads OAuth scopes.
+    linkedin_api_version: str = "202401"
+    linkedin_scopes: str = "r_ads,r_ads_reporting"
+
+    @property
+    def linkedin_configured(self) -> bool:
+        return bool(
+            self.linkedin_client_id
+            and self.linkedin_client_secret
+            and self.linkedin_redirect_uri
+        )
 
     # Scraping / research providers (used by brand extraction). Optional — the
     # extractor falls back to a headless render / httpx scrape when unset.

@@ -17,6 +17,32 @@ from app.schemas.intelligence import IntelligenceStatus
 
 HEX_PATTERN = r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
 
+# BE-02 Phase-1 channel set — the ONLY marketing channels onboarding accepts.
+# RD narrowed the wizard to these; Twitter/X, Pinterest, Snapchat, Reddit and
+# email/CRM are intentionally rejected. These are the frontend channel ids (the
+# integrations catalog uses the same hyphenated slugs).
+ALLOWED_PLATFORMS: frozenset[str] = frozenset(
+    {"meta", "google-ads", "google-lsa", "seo", "influencer"}
+)
+
+
+def _normalize_platforms(value: list[str]) -> list[str]:
+    """Lowercase, trim, dedupe (order-preserving) and validate against the
+    Phase-1 channel set. Raises ``ValueError`` (→ 422) on any unknown channel."""
+    seen: list[str] = []
+    for raw in value:
+        channel = raw.strip().lower()
+        if channel and channel not in seen:
+            seen.append(channel)
+    invalid = [c for c in seen if c not in ALLOWED_PLATFORMS]
+    if invalid:
+        allowed = ", ".join(sorted(ALLOWED_PLATFORMS))
+        raise ValueError(
+            f"Unsupported marketing channel(s): {', '.join(invalid)}. "
+            f"Phase-1 allows only: {allowed}."
+        )
+    return seen
+
 
 class BrandColorIn(StrictModel):
     hex: str = Field(pattern=HEX_PATTERN)
@@ -89,11 +115,7 @@ class OnboardingRequest(StrictModel):
     @field_validator("platforms")
     @classmethod
     def _dedupe_platforms(cls, value: list[str]) -> list[str]:
-        seen: list[str] = []
-        for raw in value:
-            channel = raw.strip().lower()
-            if channel and channel not in seen:
-                seen.append(channel)
+        seen = _normalize_platforms(value)
         if not seen:
             raise ValueError("Select at least one marketing platform.")
         return seen
@@ -175,12 +197,7 @@ class OnboardingStepUpdate(StrictModel):
     def _dedupe_platforms(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
-        seen: list[str] = []
-        for raw in value:
-            channel = raw.strip().lower()
-            if channel and channel not in seen:
-                seen.append(channel)
-        return seen
+        return _normalize_platforms(value)
 
 
 class DocumentsRequest(StrictModel):
