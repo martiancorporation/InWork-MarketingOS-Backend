@@ -10,7 +10,17 @@ import uuid
 from datetime import date
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Date, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import GUID, Base, CreatedAtMixin, UUIDPrimaryKeyMixin, pg_enum
@@ -40,6 +50,9 @@ class AnalyticsDaily(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     leads: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     spend: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     revenue: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    # Provenance, deliberately OUTSIDE the natural key so a real connector sync
+    # overwrites a synthetic cell in place instead of creating a second row.
+    source: Mapped[str | None] = mapped_column(String(20))
 
     client: Mapped[Client] = relationship(back_populates="analytics")
 

@@ -138,6 +138,11 @@ class CampaignListItem(_CampaignMetrics):
     status: CampaignStatus
     start_date: date | None = None
     end_date: date | None = None
+    # Targets ship with the list so a caller can show attainment (actual vs
+    # agreed KPI) without fetching every campaign's detail.
+    target_cpl: float | None = None
+    target_ctr: float | None = None
+    target_conversion_rate: float | None = None
 
 
 class CampaignListResponse(BaseModel):

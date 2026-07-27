@@ -11,7 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -19,8 +19,9 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BadRequestError
 from app.core.pagination import PaginationParams
 from app.models.analytics import AnalyticsDaily
-from app.models.enums import SocialPlatform
+from app.models.enums import AnalyticsSource, SocialPlatform
 from app.repositories.analytics_repository import AnalyticsRepository
+from app.repositories.integration_repository import IntegrationRepository
 from app.schemas.analytics import (
     AnalyticsCsvImportResponse,
     AnalyticsDailyIn,
@@ -34,14 +35,28 @@ from app.schemas.analytics import (
 
 _METRICS = ("impressions", "clicks", "conversions", "leads", "spend", "revenue")
 _CSV_MAX_ROWS = 5000
+_STALE_AFTER_HOURS = 36
 
 
 class AnalyticsService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.analytics = AnalyticsRepository(db)
+        self.integrations = IntegrationRepository(db)
 
-    def ingest(self, client_id: uuid.UUID, rows: list[AnalyticsDailyIn]) -> int:
+    def ingest(
+        self,
+        client_id: uuid.UUID,
+        rows: list[AnalyticsDailyIn],
+        *,
+        source: AnalyticsSource = AnalyticsSource.connector,
+    ) -> int:
+        """Upsert daily facts on (client, date, platform), stamping provenance.
+
+        ``source`` is set on update as well as insert, so the first real sync
+        clears the ``synthetic`` tag off a seeded cell rather than leaving stale
+        provenance behind.
+        """
         for row in rows:
             existing = self.analytics.get_cell(client_id, row.date, row.platform)
             if existing is None:
@@ -56,11 +71,13 @@ class AnalyticsService:
                         leads=row.leads,
                         spend=row.spend,
                         revenue=row.revenue,
+                        source=source.value,
                     )
                 )
             else:
                 for m in _METRICS:
                     setattr(existing, m, getattr(row, m))
+                existing.source = source.value
         self.db.commit()
         return len(rows)
 
@@ -93,7 +110,7 @@ class AnalyticsService:
             except ValidationError as exc:
                 first = exc.errors()[0]
                 errors.append(f"Row {i}: {first.get('loc', ['?'])[0]} — {first.get('msg')}")
-        upserted = self.ingest(client_id, rows) if rows else 0
+        upserted = self.ingest(client_id, rows, source=AnalyticsSource.csv) if rows else 0
         return AnalyticsCsvImportResponse(
             upserted=upserted, skipped=len(errors), errors=errors[:50]
         )
@@ -138,6 +155,7 @@ class AnalyticsService:
                 platform=r["platform"],
                 impressions=int(r["impressions"]),
                 clicks=int(r["clicks"]),
+                conversions=int(r["conversions"]),
                 leads=int(r["leads"]),
                 spend=float(r["spend"]),
                 revenue=float(r["revenue"]),
@@ -155,7 +173,37 @@ class AnalyticsService:
             )
             for r in self.analytics.daily_series(client_id, start=start, end=end, platform=platform)
         ]
-        return AnalyticsSummary(totals=totals, by_platform=by_platform, daily=daily)
+        data_as_of = self._as_utc(self.integrations.latest_sync_at(client_id))
+        return AnalyticsSummary(
+            totals=totals,
+            by_platform=by_platform,
+            daily=daily,
+            data_as_of=data_as_of,
+            stale=self._is_stale(data_as_of),
+            sources=self.analytics.distinct_sources(
+                client_id, start=start, end=end, platform=platform
+            ),
+        )
+
+    @staticmethod
+    def _as_utc(value: datetime | None) -> datetime | None:
+        """Re-attach UTC to a naive timestamp.
+
+        Stored timestamps are always UTC, but SQLite has no timezone-aware type
+        and hands them back naive (Postgres does not). Normalizing here keeps the
+        staleness comparison from blowing up and stops an ambiguous, zone-less
+        timestamp reaching the client.
+        """
+        if value is None or value.tzinfo is not None:
+            return value
+        return value.replace(tzinfo=UTC)
+
+    @staticmethod
+    def _is_stale(data_as_of: datetime | None) -> bool:
+        """The refresh runs nightly; 36h allows for one missed run before flagging."""
+        if data_as_of is None:
+            return True
+        return datetime.now(UTC) - data_as_of > timedelta(hours=_STALE_AFTER_HOURS)
 
     @staticmethod
     def _totals(raw: dict) -> AnalyticsTotals:

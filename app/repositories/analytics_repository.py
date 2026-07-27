@@ -106,6 +106,7 @@ class AnalyticsRepository(BaseRepository[AnalyticsDaily]):
                     AnalyticsDaily.platform.label("platform"),
                     func.coalesce(func.sum(AnalyticsDaily.impressions), 0).label("impressions"),
                     func.coalesce(func.sum(AnalyticsDaily.clicks), 0).label("clicks"),
+                    func.coalesce(func.sum(AnalyticsDaily.conversions), 0).label("conversions"),
                     func.coalesce(func.sum(AnalyticsDaily.leads), 0).label("leads"),
                     func.coalesce(func.sum(AnalyticsDaily.spend), 0).label("spend"),
                     func.coalesce(func.sum(AnalyticsDaily.revenue), 0).label("revenue"),
@@ -119,6 +120,24 @@ class AnalyticsRepository(BaseRepository[AnalyticsDaily]):
             .order_by(func.sum(AnalyticsDaily.spend).desc())
         )
         return [dict(r._mapping) for r in self.db.execute(stmt).all()]
+
+    def distinct_sources(
+        self,
+        client_id: uuid.UUID,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        platform: SocialPlatform | None = None,
+    ) -> list[str]:
+        """Provenance values present in the window, so the UI can label seeded data."""
+        stmt = self._scope(
+            select(AnalyticsDaily.source).distinct(),
+            client_id,
+            start=start,
+            end=end,
+            platform=platform,
+        )
+        return sorted(s for s in self.db.scalars(stmt).all() if s)
 
     def daily_series(
         self,

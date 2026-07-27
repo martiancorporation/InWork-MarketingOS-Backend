@@ -7,7 +7,7 @@ dashboard KPIs and the analytics charts.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -49,6 +49,7 @@ class AnalyticsDailyRead(ORMModel):
     leads: int
     spend: float
     revenue: float
+    source: str | None = None  # connector | csv | synthetic (server-set provenance)
 
 
 class AnalyticsDailyListResponse(BaseModel):
@@ -75,6 +76,7 @@ class PlatformBreakdownRow(BaseModel):
     platform: SocialPlatform
     impressions: int
     clicks: int
+    conversions: int
     leads: int
     spend: float
     revenue: float
@@ -93,3 +95,11 @@ class AnalyticsSummary(BaseModel):
     totals: AnalyticsTotals
     by_platform: list[PlatformBreakdownRow] = []
     daily: list[DailySeriesRow] = []
+    # ---- freshness (the UI renders "Data as of …" from these) ----
+    # Newest sync across connected connectors; None when nothing is connected.
+    data_as_of: datetime | None = None
+    # True when the nightly refresh looks overdue (or has never run).
+    stale: bool = False
+    # Provenance present in the window: connector | csv | synthetic. Lets the UI
+    # label seeded numbers instead of passing them off as live.
+    sources: list[str] = []

@@ -326,6 +326,18 @@ class CampaignStatus(str, enum.Enum):
     ended = "ended"
 
 
+class AnalyticsSource(str, enum.Enum):
+    """Where a daily analytics fact came from.
+
+    Server-determined provenance, never accepted from a request body — a caller
+    must not be able to pass synthetic numbers off as connector data.
+    """
+
+    connector = "connector"  # a real ad-platform sync
+    csv = "csv"  # an operator CSV import
+    synthetic = "synthetic"  # seeded demo data, overwritten by the first real sync
+
+
 class AlertKind(str, enum.Enum):
     """A watchdog signal: a problem to fix, or an opportunity to seize.
 
