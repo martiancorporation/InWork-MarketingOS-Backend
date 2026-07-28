@@ -14,9 +14,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.analytics import AnalyticsDaily
+from app.models.client import Client
 from app.models.enums import AnalyticsSource, SocialPlatform
 from app.schemas.analytics import AnalyticsDailyIn
 from app.services.analytics_service import AnalyticsService
+from app.services.demo_data_service import DemoDataService
 from tests.conftest import API
 from tests.helpers import onboarding_payload
 
@@ -126,36 +128,22 @@ def test_seeder_never_overwrites_real_data(
     Guards the live-database hazard: re-seeding a client that already has real
     analytics would otherwise clobber it and re-tag it ``synthetic``.
     """
-    import importlib.util
-    import sys
-    from pathlib import Path
-
-    spec = importlib.util.spec_from_file_location(
-        "seed_synthetic_analytics",
-        Path(__file__).resolve().parents[2] / "scripts" / "seed_synthetic_analytics.py",
-    )
-    assert spec and spec.loader
-    seeder = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = seeder
-    spec.loader.exec_module(seeder)
-
     cid = uuid.UUID(_client_id(client, admin_headers))
     service = AnalyticsService(db_session)
     # A real connector row lands first.
     service.ingest(cid, [_row(impressions=7777)], source=AnalyticsSource.connector)
 
-    protected = seeder._protected_cells(db_session, cid)
+    demo = DemoDataService(db_session)
+    protected = demo._protected_cells(cid)
     assert (date.fromisoformat(DAY), SocialPlatform.google.value) in protected
 
-    # A synthetic row for the *same* cell must be filtered out before ingest.
-    candidate = _row(impressions=1)
-    kept = [r for r in [candidate] if (r.date, r.platform.value) not in protected]
-    assert kept == [], "the seeder must not write over a connector cell"
+    # Now seed for real: the connector cell must come through untouched.
+    demo.seed_client(db_session.get(Client, cid))
+    db_session.commit()
 
-    rows = _stored(db_session, cid)
-    assert len(rows) == 1
-    assert rows[0].impressions == 7777, "real measured value must survive"
-    assert rows[0].source == "connector"
+    stored = {(r.date, r.platform, r.source): r for r in _stored(db_session, cid)}
+    real = stored[(date.fromisoformat(DAY), SocialPlatform.google, "connector")]
+    assert real.impressions == 7777, "real measured value must survive a seed"
 
 
 def test_source_is_not_settable_from_the_request_body(client: TestClient, admin_headers: dict):

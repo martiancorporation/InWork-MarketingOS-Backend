@@ -37,6 +37,11 @@ os.environ["AI_USAGE_ENABLED"] = "false"
 # runs hermetically (no Voyage key, no network). Agents fall back to their
 # deterministic path because ANTHROPIC_API_KEY is empty (above).
 os.environ["INTEL_EMBEDDING_PROVIDER"] = "fake"
+# Demo seeding fires on client creation, so leaving it on would give every test
+# that onboards a client a synthetic history — tests asserting "a new client has
+# no analytics / no alerts / N tasks" would all be measuring the seed instead.
+# tests/integration/test_demo_seed.py opts back in via the `demo_seeding` fixture.
+os.environ["DEMO_SEED_ON_CREATE"] = "false"
 
 from collections.abc import Callable, Generator  # noqa: E402
 

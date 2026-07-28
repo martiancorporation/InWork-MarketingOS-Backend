@@ -21,6 +21,7 @@ from app.ai.brand_extraction import BrandExtractionService
 from app.ai.features import AiFeature
 from app.ai.usage import AiUsageContext
 from app.api.deps import AdminUser, CurrentUser, DbSession, Pagination, StorageDep
+from app.core.config import get_settings
 from app.core.rate_limit import RateLimit
 from app.models.client import Client
 from app.models.enums import ClientStatus
@@ -40,6 +41,7 @@ from app.schemas.onboarding import (
 )
 from app.services.brand_job_service import BrandJobService
 from app.services.client_service import ClientService
+from app.services.demo_data_service import DemoDataService
 from app.services.intelligence.intelligence_service import IntelligenceService
 from app.services.onboarding_service import OnboardingService
 from app.services.readiness_service import ReadinessService
@@ -69,14 +71,30 @@ def list_clients(
     return ClientService(db).list_clients(user, pagination=pagination, search=search, status=status)
 
 
+def _queue_demo_seed(tasks: BackgroundTasks, client_id: uuid.UUID, actor_id: uuid.UUID) -> None:
+    """Give a newly created client a synthetic history, after the response is sent.
+
+    Demo scaffolding until connectors land (``DEMO_SEED_ON_CREATE``). It runs in the
+    background because seeding costs a dozen database round trips — seconds on a
+    distant database — and the operator should not wait for sample data. By the time
+    they finish the remaining wizard steps it has long landed.
+    """
+    if not get_settings().demo.seed_on_create:
+        return
+    tasks.add_task(DemoDataService.seed_detached, client_id, actor_id)
+
+
 @router.post(
     "/onboarding",
     response_model=OnboardingResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Onboard a new client (admin only)",
 )
-def onboard_client(data: OnboardingRequest, admin: AdminUser, db: DbSession) -> OnboardingResponse:
+def onboard_client(
+    data: OnboardingRequest, admin: AdminUser, db: DbSession, tasks: BackgroundTasks
+) -> OnboardingResponse:
     client = OnboardingService(db).onboard(admin, data)
+    _queue_demo_seed(tasks, client.id, admin.id)
     readiness = ReadinessService().report(client)
     return OnboardingResponse(
         client=ClientRead.model_validate(client),
@@ -92,9 +110,10 @@ def onboard_client(data: OnboardingRequest, admin: AdminUser, db: DbSession) -> 
     summary="Start onboarding — create the draft client (step 1, admin only)",
 )
 def start_onboarding(
-    data: OnboardingDraftRequest, admin: AdminUser, db: DbSession
+    data: OnboardingDraftRequest, admin: AdminUser, db: DbSession, tasks: BackgroundTasks
 ) -> OnboardingStepResponse:
     client = OnboardingService(db).create_draft(admin, data)
+    _queue_demo_seed(tasks, client.id, admin.id)
     return _step_response(client, db)
 
 

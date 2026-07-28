@@ -19,7 +19,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import CurrentUser, DbSession, Pagination
+from app.api.deps import CurrentUser, DbSession, Pagination, StorageDep
 from app.core.rate_limit import RateLimit
 from app.schemas.assistant import (
     AssistantAskRequest,
@@ -70,10 +70,14 @@ def create_chat(
     summary="Get a chat with its messages",
 )
 def get_chat(
-    client_id: uuid.UUID, chat_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    chat_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    storage: StorageDep,
 ) -> AssistantChatDetail:
     ClientService(db).get_client(user, client_id)
-    return AssistantService(db).get_chat_detail(client_id, chat_id)
+    return AssistantService(db).get_chat_detail(client_id, chat_id, storage=storage)
 
 
 @router.post(
@@ -89,9 +93,17 @@ async def ask(
     data: AssistantAskRequest,
     user: CurrentUser,
     db: DbSession,
+    storage: StorageDep,
 ) -> AssistantAskResponse:
     ClientService(db).get_client(user, client_id)
-    return await AssistantService(db).ask(client_id, chat_id, user.id, data.content)
+    return await AssistantService(db).ask(
+        client_id,
+        chat_id,
+        user,
+        data.content,
+        attachment_upload_ids=data.attachment_upload_ids,
+        storage=storage,
+    )
 
 
 @router.post(
@@ -111,7 +123,13 @@ async def ask_stream(
     chat-existence are checked (404) before the stream opens."""
     ClientService(db).get_client(user, client_id)
     service = AssistantService(db)
-    ctx = service.begin_stream(client_id, chat_id, user.id, data.content)
+    ctx = service.begin_stream(
+        client_id,
+        chat_id,
+        user.id,
+        data.content,
+        attachment_upload_ids=data.attachment_upload_ids,
+    )
     return StreamingResponse(
         service.stream_events(ctx),
         media_type="text/event-stream",

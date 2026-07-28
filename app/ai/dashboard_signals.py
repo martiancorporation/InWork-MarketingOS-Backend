@@ -49,6 +49,10 @@ class DashboardSignals:
     # ---- goal-relative signals (cross-channel campaign targets vs actuals) ----
     active_campaigns: int = 0
     goal_metrics: list[GoalMetric] = field(default_factory=list)
+    #: Best / worst campaign by cost per lead, when any campaign has leads.
+    #: ``(name, cpl)`` — the brief names them so its cards aren't blank.
+    best_campaign: tuple[str, float] | None = None
+    worst_campaign: tuple[str, float] | None = None
 
     def _fmt(self, value: float, unit: str) -> str:
         if unit == "$":

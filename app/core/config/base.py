@@ -16,6 +16,7 @@ from pydantic_settings import BaseSettings
 from app.core.config.ai import AISettings
 from app.core.config.app_settings import AppSettings
 from app.core.config.database import DatabaseSettings
+from app.core.config.demo import DemoSettings
 from app.core.config.integrations import IntegrationsSettings
 from app.core.config.intelligence import IntelligenceSettings
 from app.core.config.qa import OpenAISettings, QASettings
@@ -35,6 +36,7 @@ class Settings(BaseSettings):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     intelligence: IntelligenceSettings = Field(default_factory=IntelligenceSettings)
     scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
+    demo: DemoSettings = Field(default_factory=DemoSettings)
 
     @model_validator(mode="after")
     def _forbid_placeholder_secret_in_prod(self) -> Settings:

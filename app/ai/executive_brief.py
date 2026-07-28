@@ -86,14 +86,22 @@ class ExecutiveBriefAgent:
                 "headline": headline,
                 "metrics": metrics,
                 "budget": budget,
-                "top_campaign": {
-                    "name": "Not enough data yet",
-                    "note": "Connect analytics/ad platforms to rank campaigns.",
-                },
-                "worst_campaign": {
-                    "name": "Not enough data yet",
-                    "note": "Campaign-level performance appears once integrations sync.",
-                },
+                "top_campaign": (
+                    {"name": s.best_campaign[0], "note": f"${s.best_campaign[1]:,.2f} per lead"}
+                    if s.best_campaign
+                    else {
+                        "name": "Not enough data yet",
+                        "note": "Connect analytics/ad platforms to rank campaigns.",
+                    }
+                ),
+                "worst_campaign": (
+                    {"name": s.worst_campaign[0], "note": f"${s.worst_campaign[1]:,.2f} per lead"}
+                    if s.worst_campaign
+                    else {
+                        "name": "Not enough data yet",
+                        "note": "Campaign-level performance appears once integrations sync.",
+                    }
+                ),
                 "pending_actions": pending,
             }
         )

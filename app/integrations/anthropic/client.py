@@ -1,9 +1,13 @@
 """Thin async wrapper around the Anthropic (Claude) Messages API.
 
-Three entry points:
+Entry points:
 - ``complete`` — a plain single-shot completion.
-- ``complete_with_image`` — single-shot completion with an image (vision);
-  brand extraction uses it to show Claude a screenshot of the client's site.
+- ``complete_with_image`` / ``complete_with_images`` — single-shot completion where
+  Claude also *sees* one or more images (vision); brand extraction shows it a
+  screenshot of the client's site, and Ask AI passes chat attachments.
+- ``stream`` — token-by-token completion. **Text only** — it has no image support,
+  which is why the assistant rejects attachments on its streaming route rather
+  than accepting them and dropping the files.
 - ``analyze_url`` — an agentic call that gives Claude the server-side
   ``web_fetch`` tool so it visits the URL itself, reads the page, and answers.
 
@@ -123,31 +127,58 @@ class AnthropicClient:
         context: AiUsageContext | None = None,
     ) -> str:
         """Single-shot completion where Claude also *sees* an image (vision)."""
+        return await self.complete_with_images(
+            system=system,
+            prompt=prompt,
+            images=[(image, media_type)],
+            max_tokens=max_tokens,
+            context=context,
+            operation="complete_with_image",
+        )
+
+    async def complete_with_images(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        images: list[tuple[bytes, str]],
+        max_tokens: int | None = None,
+        context: AiUsageContext | None = None,
+        operation: str = "complete_with_images",
+    ) -> str:
+        """Vision completion over one *or more* images.
+
+        Claude takes any number of image blocks in a single user turn, so chat
+        attachments don't need one round trip per file. Images come first and the
+        question last, which is what the docs recommend when several images are in
+        play — the text can then refer to them in order.
+
+        ``operation`` is only the usage-log label, so the single-image caller keeps
+        its historical name in ``ai_usage_events`` rather than silently changing.
+        """
         import base64
+
+        blocks: list[dict] = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": base64.b64encode(data).decode("ascii"),
+                },
+            }
+            for data, media_type in images
+        ]
+        blocks.append({"type": "text", "text": prompt})
 
         message = await self._invoke(
             {
                 "model": self._settings.model,
                 "max_tokens": max_tokens or self._settings.max_tokens,
                 "system": system,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": base64.b64encode(image).decode("ascii"),
-                                },
-                            },
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ],
+                "messages": [{"role": "user", "content": blocks}],
             },
-            operation="complete_with_image",
+            operation=operation,
             context=context,
         )
         return _text_of(message)

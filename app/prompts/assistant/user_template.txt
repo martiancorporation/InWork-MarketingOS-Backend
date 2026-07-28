@@ -7,4 +7,7 @@ Relevant project knowledge (retrieved for this question):
 Recent conversation:
 {history}
 
+Attached files:
+{attachments}
+
 Answer the question for this client, grounded in the context above.

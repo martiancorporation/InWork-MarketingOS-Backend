@@ -32,6 +32,7 @@ from app.schemas.analytics import (
     DailySeriesRow,
     PlatformBreakdownRow,
 )
+from app.services.client_rollup import refresh_client_rollups
 
 _METRICS = ("impressions", "clicks", "conversions", "leads", "spend", "revenue")
 _CSV_MAX_ROWS = 5000
@@ -78,6 +79,9 @@ class AnalyticsService:
                 for m in _METRICS:
                     setattr(existing, m, getattr(row, m))
                 existing.source = source.value
+        # The client's lifetime rollups are read by the client list, the executive
+        # brief and the cross-client assistant; keep them in step with the facts.
+        refresh_client_rollups(self.db, client_id)
         self.db.commit()
         return len(rows)
 

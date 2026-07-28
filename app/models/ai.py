@@ -17,6 +17,7 @@ from app.models.base import (
     GUID,
     Base,
     CreatedAtMixin,
+    JSONColumn,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
     pg_enum,
@@ -63,6 +64,11 @@ class AiChatMessage(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     role: Mapped[AiRole] = mapped_column(pg_enum(AiRole, "ai_chat_role"), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tokens: Mapped[int | None] = mapped_column(Integer)
+    # Per-message sidecar data. Today: the files attached to a user turn, as
+    # ``{"attachments": [{upload_id, filename, content_type, size_bytes, storage_key}]}``.
+    # Only the *key* is stored — a presigned URL would expire and leave the chat
+    # showing dead links, so the download URL is signed fresh on every read.
+    meta: Mapped[dict | None] = mapped_column(JSONColumn)
 
     chat: Mapped[AiChat] = relationship(back_populates="messages")
 

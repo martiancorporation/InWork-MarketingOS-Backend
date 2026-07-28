@@ -244,7 +244,25 @@ class DashboardService:
             brand_voice=client.brand_voice,
             active_campaigns=sum(1 for c in campaigns if c.status == "active"),
             goal_metrics=_goal_metrics(campaigns),
+            best_campaign=_rank_by_cpl(campaigns, best=True),
+            worst_campaign=_rank_by_cpl(campaigns, best=False),
         )
+
+
+def _rank_by_cpl(campaigns: list, *, best: bool) -> tuple[str, float] | None:
+    """Cheapest (or dearest) campaign per lead.
+
+    Campaigns without leads are skipped rather than treated as CPL 0 — a campaign
+    that has spent money and produced nothing would otherwise rank as the best.
+    """
+    scored = [
+        (c.name, float(c.spend) / c.leads)
+        for c in campaigns
+        if c.leads and float(c.spend or 0) > 0
+    ]
+    if not scored:
+        return None
+    return min(scored, key=lambda x: x[1]) if best else max(scored, key=lambda x: x[1])
 
 
 def _avg(values: list[float]) -> float | None:

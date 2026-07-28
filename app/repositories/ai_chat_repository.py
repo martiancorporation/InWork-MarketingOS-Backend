@@ -71,10 +71,12 @@ class AiChatRepository(BaseRepository[AiChat]):
         content: str,
         *,
         tokens: int | None = None,
+        meta: dict | None = None,
     ) -> AiChatMessage:
         message = AiChatMessage(
             chat_id=chat_id,
             role=role,
+            meta=meta,
             content=content,
             tokens=tokens,
             created_at=datetime.now(UTC),

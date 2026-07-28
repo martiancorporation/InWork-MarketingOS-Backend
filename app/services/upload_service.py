@@ -128,6 +128,20 @@ class UploadService:
         data = self.storage.download(upload.storage_key)
         return data, upload.content_type, upload.original_filename
 
+    def read_with_key(
+        self, user: User, upload_id: uuid.UUID
+    ) -> tuple[bytes, str | None, str, str]:
+        """Like :meth:`read_bytes`, plus the storage key.
+
+        Callers that *record* an attachment need the key so they can re-sign a
+        download URL later. Same single owner-scoped load, so it costs no extra
+        query — and returning the key (never a presigned URL) is what keeps stored
+        references from expiring.
+        """
+        upload = self._load_owned(user, upload_id)
+        data = self.storage.download(upload.storage_key)
+        return data, upload.content_type, upload.original_filename, upload.storage_key
+
     def delete(self, user: User, upload_id: uuid.UUID) -> None:
         upload = self._load_owned(user, upload_id)
         self._safe_delete(upload.storage_key)  # best-effort; still drop the row

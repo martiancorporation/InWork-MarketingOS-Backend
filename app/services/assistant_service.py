@@ -16,26 +16,33 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from anyio import to_thread
 from sqlalchemy.orm import Session
 
 from app.ai.assistant import AssistantStreamPrep, ProjectAssistantAgent
+from app.ai.attachments import MAX_ATTACHMENTS, AttachmentBundle, build_bundle
 from app.ai.features import AiFeature
 from app.ai.usage import AiUsageContext
-from app.core.exceptions import NotFoundError
+from app.core.config import get_settings
+from app.core.exceptions import BadRequestError, NotFoundError, ServiceUnavailableError
 from app.core.pagination import PaginationParams
 from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.embeddings import get_embedder
-from app.models.ai import AiChat
+from app.integrations.storage import Storage
+from app.models.ai import AiChat, AiChatMessage
 from app.models.enums import AiRole
+from app.models.user import User
 from app.repositories.ai_chat_repository import AiChatRepository
 from app.schemas.assistant import (
     AssistantAskResponse,
+    AssistantAttachmentRead,
     AssistantChatCreate,
     AssistantChatDetail,
     AssistantChatListResponse,
     AssistantChatRead,
     AssistantMessageRead,
 )
+from app.services.upload_service import UploadService
 
 logger = logging.getLogger("app.services.assistant")
 
@@ -94,7 +101,9 @@ class AssistantService:
         self.db.refresh(chat)
         return chat
 
-    def get_chat_detail(self, client_id: uuid.UUID, chat_id: uuid.UUID) -> AssistantChatDetail:
+    def get_chat_detail(
+        self, client_id: uuid.UUID, chat_id: uuid.UUID, *, storage: Storage | None = None
+    ) -> AssistantChatDetail:
         chat = self._require_chat(client_id, chat_id)
         messages = self.chats.list_messages(chat_id)
         return AssistantChatDetail(
@@ -104,8 +113,43 @@ class AssistantService:
             context_key=chat.context_key,
             created_at=chat.created_at,
             updated_at=chat.updated_at,
-            messages=[AssistantMessageRead.model_validate(m) for m in messages],
+            messages=[self._message_read(m, storage) for m in messages],
         )
+
+    @staticmethod
+    def _message_read(message: AiChatMessage, storage: Storage | None) -> AssistantMessageRead:
+        """Serialise a message, signing a fresh download URL per attachment.
+
+        The stored record holds only the storage key. Presigned URLs expire in 15
+        minutes, so signing them here — on every read — is what stops a reloaded
+        chat from showing dead links.
+        """
+        read = AssistantMessageRead.model_validate(message)
+        records = (message.meta or {}).get("attachments") or []
+        if not records:
+            return read
+
+        expiry = get_settings().storage.presign_expiry_seconds
+        for record in records:
+            content_type = record.get("content_type") or ""
+            url: str | None = None
+            key = record.get("storage_key")
+            if storage is not None and key:
+                try:
+                    url = storage.generate_download_url(key, expiry)
+                except Exception:  # storage down / unconfigured — chip still renders
+                    logger.warning("Could not sign attachment %s", key, exc_info=True)
+            read.attachments.append(
+                AssistantAttachmentRead(
+                    upload_id=record["upload_id"],
+                    filename=record.get("filename") or "attachment",
+                    content_type=content_type or None,
+                    size_bytes=record.get("size_bytes"),
+                    kind="image" if content_type.startswith("image/") else "file",
+                    download_url=url,
+                )
+            )
+        return read
 
     def delete_chat(self, client_id: uuid.UUID, chat_id: uuid.UUID) -> None:
         chat = self._require_chat(client_id, chat_id)
@@ -116,22 +160,27 @@ class AssistantService:
         self,
         client_id: uuid.UUID,
         chat_id: uuid.UUID,
-        user_id: uuid.UUID,
+        user: User,
         content: str,
+        *,
+        attachment_upload_ids: list[uuid.UUID] | None = None,
+        storage: Storage | None = None,
     ) -> AssistantAskResponse:
         chat = self._require_chat(client_id, chat_id)
         history = [(m.role.value, m.content) for m in self.chats.list_messages(chat_id)]
-        self.chats.add_message(chat_id, AiRole.user, content)
+
+        bundle, meta = await self._resolve_attachments(user, attachment_upload_ids, storage)
+        self.chats.add_message(chat_id, AiRole.user, content, meta=meta)
 
         agent = ProjectAssistantAgent(
             self.db,
             client_id,
             embedder=get_embedder(),
             ai_client=AnthropicClient(
-                AiUsageContext(feature=AiFeature.PROJECT_AI, client_id=client_id, user_id=user_id)
+                AiUsageContext(feature=AiFeature.PROJECT_AI, client_id=client_id, user_id=user.id)
             ),
         )
-        answer, sources = await agent.answer(content, history=history)
+        answer, sources = await agent.answer(content, history=history, attachments=bundle)
 
         assistant_msg = self.chats.add_message(chat_id, AiRole.assistant, answer)
         chat.updated_at = datetime.now(UTC)  # bump so recent chats sort first
@@ -141,16 +190,66 @@ class AssistantService:
             message=AssistantMessageRead.model_validate(assistant_msg), sources=sources
         )
 
+    async def _resolve_attachments(
+        self,
+        user: User,
+        upload_ids: list[uuid.UUID] | None,
+        storage: Storage | None,
+    ) -> tuple[AttachmentBundle | None, dict | None]:
+        """Fetch the attached uploads and resolve them into model input + stored meta.
+
+        ``UploadService.read_bytes`` is owner-scoped — someone else's upload id (or a
+        made-up one) raises ``NotFoundError`` → 404, so an id can't be used to probe
+        another user's files. It is also *blocking* S3 I/O inside an async handler, so
+        each read is offloaded to a thread (same as the brand-extraction route).
+
+        Only the storage key is recorded, never the presigned URL: those last 15
+        minutes, and persisting one would leave the chat full of dead links.
+        """
+        if not upload_ids:
+            return None, None
+        if storage is None:  # pragma: no cover - router always supplies it
+            raise ServiceUnavailableError("File storage is not available.")
+
+        service = UploadService(self.db, storage)
+        items: list[tuple[bytes, str | None, str]] = []
+        records: list[dict] = []
+        for upload_id in upload_ids[:MAX_ATTACHMENTS]:
+            data, content_type, filename, storage_key = await to_thread.run_sync(
+                service.read_with_key, user, upload_id
+            )
+            items.append((data, content_type, filename))
+            records.append(
+                {
+                    "upload_id": str(upload_id),
+                    "filename": filename,
+                    "content_type": content_type,
+                    "size_bytes": len(data),
+                    "storage_key": storage_key,
+                }
+            )
+        return build_bundle(items), {"attachments": records}
+
     def begin_stream(
         self,
         client_id: uuid.UUID,
         chat_id: uuid.UUID,
         user_id: uuid.UUID,
         content: str,
+        *,
+        attachment_upload_ids: list[uuid.UUID] | None = None,
     ) -> StreamContext:
         """Validate + persist the user turn and pre-compute the answer prompt while
         the request session is open. Raises ``NotFoundError`` (404) before any
         streaming starts. Call this, then feed the result to ``stream_events``."""
+        if attachment_upload_ids:
+            # `AnthropicClient.stream` is text-only, so an attachment here would be
+            # accepted and then silently dropped. Fail loudly and point at the route
+            # that does support files.
+            raise BadRequestError(
+                "Attachments are not supported on the streaming endpoint — "
+                "POST to /messages instead."
+            )
         self._require_chat(client_id, chat_id)
         history = [(m.role.value, m.content) for m in self.chats.list_messages(chat_id)]
         self.chats.add_message(chat_id, AiRole.user, content)
