@@ -7,8 +7,9 @@ clients — the same tenant-isolation stance the rest of the repositories take.
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 from app.models.enums import TaskCategory, TaskStatus
 from app.models.plan import PlanTask
@@ -34,10 +35,23 @@ class PlanTaskRepository(BaseRepository[PlanTask]):
         status: TaskStatus | None = None,
         category: TaskCategory | None = None,
         assignee_id: uuid.UUID | None = None,
+        start: date | None = None,
+        end: date | None = None,
+        include_undated: bool = False,
         offset: int = 0,
         limit: int | None = None,
     ) -> tuple[list[PlanTask], int]:
-        """Return a page of tasks plus the total matching count (DB-side)."""
+        """Return a page of tasks plus the total matching count (DB-side).
+
+        ``start``/``end`` select tasks whose span *overlaps* that window, which is
+        what a calendar needs: a campaign running 1–31 July must appear when
+        viewing a week in the middle of it, not only when its edges fall inside
+        the window.
+
+        A windowed query drops undated tasks, since a calendar has nowhere to draw
+        them. ``include_undated`` adds them back for the board, which shows the
+        same window plus an "unscheduled" pile.
+        """
         conditions = [PlanTask.client_id == client_id]
         if status is not None:
             conditions.append(PlanTask.status == status)
@@ -46,12 +60,40 @@ class PlanTaskRepository(BaseRepository[PlanTask]):
         if assignee_id is not None:
             conditions.append(PlanTask.assignee_id == assignee_id)
 
+        windowed = start is not None or end is not None
+        if windowed:
+            # A one-sided task (only start_date or only due_date) is a single-day
+            # item, so coalesce collapses the span to that one day.
+            span_start = func.coalesce(PlanTask.start_date, PlanTask.due_date)
+            span_end = func.coalesce(PlanTask.due_date, PlanTask.start_date)
+            overlaps = [PlanTask.start_date.isnot(None) | PlanTask.due_date.isnot(None)]
+            if end is not None:
+                overlaps.append(span_start <= end)
+            if start is not None:
+                overlaps.append(span_end >= start)
+            in_window = and_(*overlaps)
+            if include_undated:
+                # The board needs its "unscheduled" pile alongside the window; a
+                # calendar does not (and would have nowhere to draw them).
+                conditions.append(
+                    or_(
+                        in_window,
+                        and_(PlanTask.start_date.is_(None), PlanTask.due_date.is_(None)),
+                    )
+                )
+            else:
+                conditions.append(in_window)
+
         total = self.db.scalar(select(func.count()).select_from(PlanTask).where(*conditions))
-        # ``due_date asc nulls last`` is tricky cross-DB; newest-first by creation
-        # is simple and portable, and matches the board's "recently added" default.
-        stmt = (
-            select(PlanTask).where(*conditions).order_by(PlanTask.created_at.desc()).offset(offset)
-        )
+        if windowed:
+            # Chronological for a calendar; ``coalesce`` keeps one-sided tasks in
+            # place and sidesteps the cross-DB "nulls last" problem below.
+            order = (func.coalesce(PlanTask.start_date, PlanTask.due_date).asc(), PlanTask.id.asc())
+        else:
+            # ``due_date asc nulls last`` is tricky cross-DB; newest-first by creation
+            # is simple and portable, and matches the board's "recently added" default.
+            order = (PlanTask.created_at.desc(),)
+        stmt = select(PlanTask).where(*conditions).order_by(*order).offset(offset)
         if limit is not None:
             stmt = stmt.limit(limit)
         return list(self.db.scalars(stmt).all()), int(total or 0)

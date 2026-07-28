@@ -13,17 +13,34 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, model_validato
 
 from app.models.enums import DocumentKind
 from app.schemas.client import ClientRead
-from app.schemas.common import MAX_LONG_LINE, MAX_TEXT, StrictModel
+from app.schemas.common import MAX_LONG_LINE, MAX_TEXT, StrictModel, validate_timezone
 from app.schemas.intelligence import IntelligenceStatus
 
 HEX_PATTERN = r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+
+
 
 # BE-02 Phase-1 channel set — the ONLY marketing channels onboarding accepts.
 # RD narrowed the wizard to these; Twitter/X, Pinterest, Snapchat, Reddit and
 # email/CRM are intentionally rejected. These are the frontend channel ids (the
 # integrations catalog uses the same hyphenated slugs).
+#
+# ``google-analytics`` and ``google-search-console`` are measurement sources
+# rather than ad channels, but the wizard offers them and we have integration
+# code for both — leaving them out meant the UI silently discarded the operator's
+# selection. ``seo`` and ``influencer`` are deliberately NOT here: they are not
+# offered in the wizard either, so the two sides stay in step.
+#
+# No migration is needed to change this set: ``ClientPlatform.channel`` is a
+# deliberately open ``String(40)``, not a database enum.
 ALLOWED_PLATFORMS: frozenset[str] = frozenset(
-    {"meta", "google-ads", "google-lsa", "seo", "influencer"}
+    {
+        "meta",
+        "google-ads",
+        "google-lsa",
+        "google-analytics",
+        "google-search-console",
+    }
 )
 
 
@@ -92,6 +109,7 @@ class OnboardingRequest(StrictModel):
     website: str | None = Field(default=None, max_length=255)
     language: str | None = Field(default=None, max_length=60)
     location: str | None = Field(default=None, max_length=160)
+    timezone: str | None = Field(default=None, max_length=60)  # IANA, e.g. America/New_York
     markets: str | None = Field(default=None, max_length=MAX_LONG_LINE)
 
     # Step 2 — brand
@@ -112,6 +130,11 @@ class OnboardingRequest(StrictModel):
 
     # Step 7 — documents (already uploaded; optional)
     documents: list[DocumentRef] = Field(default_factory=list)
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_timezone(cls, value: str | None) -> str | None:
+        return validate_timezone(value)
 
     @field_validator("platforms")
     @classmethod
@@ -147,7 +170,13 @@ class BasicsUpdate(StrictModel):
     website: str | None = Field(default=None, max_length=255)
     language: str | None = Field(default=None, max_length=60)
     location: str | None = Field(default=None, max_length=160)
+    timezone: str | None = Field(default=None, max_length=60)  # IANA, e.g. America/New_York
     markets: str | None = Field(default=None, max_length=MAX_LONG_LINE)
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_timezone(cls, value: str | None) -> str | None:
+        return validate_timezone(value)
 
 
 class BrandUpdate(StrictModel):
@@ -173,7 +202,13 @@ class OnboardingDraftRequest(StrictModel):
     website: str | None = Field(default=None, max_length=255)
     language: str | None = Field(default=None, max_length=60)
     location: str | None = Field(default=None, max_length=160)
+    timezone: str | None = Field(default=None, max_length=60)  # IANA, e.g. America/New_York
     markets: str | None = Field(default=None, max_length=MAX_LONG_LINE)
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_timezone(cls, value: str | None) -> str | None:
+        return validate_timezone(value)
 
 
 class OnboardingStepUpdate(StrictModel):

@@ -22,7 +22,7 @@ def onboarding_payload(name: str = "Acme Co.", **overrides: Any) -> dict[str, An
             "fonts": ["Inter", "Source Sans Pro"],
             "logo_url": "https://acme.com/logo.svg",
         },
-        "platforms": ["meta", "google-ads", "google-lsa", "seo"],
+        "platforms": ["meta", "google-ads", "google-lsa", "google-analytics"],
         "goals": "Q1 brand presence; Q2 lead-gen; Q3 e-commerce. Build momentum steadily.",
         "compliance": {"feed": "Never say 'cheap' or 'guaranteed'. Always include 'Made in USA'."},
         "client_contacts": [{"name": "Jane Cooper", "role": "CMO", "email": "jane@acme.com"}],

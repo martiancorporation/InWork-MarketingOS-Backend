@@ -19,7 +19,7 @@ from app.models.base import (
     UUIDPrimaryKeyMixin,
     pg_enum,
 )
-from app.models.enums import ClientPipelineStage, ClientStatus
+from app.models.enums import ClientPipelineStage, ClientStatus, ComplianceKind
 
 if TYPE_CHECKING:
     from app.models.ai import AiChat, AiSource
@@ -149,6 +149,21 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     strategies: Mapped[list[Strategy]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
+
+    @property
+    def compliance_feed(self) -> str | None:
+        """Text of the onboarding compliance note, if one exists.
+
+        Onboarding stores its free-text compliance rules as the single
+        ``kind=note`` entry in the register. Exposing it here lets ``ClientRead``
+        return it, which is what allows the wizard to repopulate the field when
+        resuming a draft. Without it the wizard reopened that step blank and
+        saved an empty feed over the real rules.
+        """
+        for entry in self.compliance_entries:
+            if entry.kind == ComplianceKind.note:
+                return entry.text
+        return None
 
 
 class ClientBrandColor(UUIDPrimaryKeyMixin, Base):

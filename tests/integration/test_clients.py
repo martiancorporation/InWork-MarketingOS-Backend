@@ -24,7 +24,12 @@ def test_admin_onboards_client(client: TestClient, admin_headers: dict):
     assert c["pipeline_stage"] == "onboarding"
     assert len(c["brand_colors"]) == 2
     assert len(c["platforms"]) == 4
-    assert {p["channel"] for p in c["platforms"]} == {"meta", "google-ads", "google-lsa", "seo"}
+    assert {p["channel"] for p in c["platforms"]} == {
+        "meta",
+        "google-ads",
+        "google-lsa",
+        "google-analytics",
+    }
     assert len(c["contacts"]) == 2
     assert any(x["is_primary"] and x["side"] == "client" for x in c["contacts"])
     # readiness is computed and returned

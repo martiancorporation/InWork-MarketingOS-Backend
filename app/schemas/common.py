@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from zoneinfo import available_timezones
+
 from pydantic import BaseModel, ConfigDict
 
 # Upper bound for free-text blobs (message bodies, notes, rules, brand copy).
@@ -31,3 +33,21 @@ class StrictModel(BaseModel):
 
 class MessageResponse(BaseModel):
     detail: str
+
+
+def validate_timezone(value: str | None) -> str | None:
+    """Accept only a real IANA zone name (e.g. ``America/New_York``).
+
+    Shared by onboarding and the admin client edit. Reporting is bucketed by the
+    client's *local* day, so a typo here would silently shift every figure we
+    show them — validate against the system tz database rather than a
+    hand-maintained list, and treat blank as "not set".
+    """
+    if value is None:
+        return None
+    tz = value.strip()
+    if not tz:
+        return None
+    if tz not in available_timezones():
+        raise ValueError(f"Unknown timezone '{tz}'. Use an IANA name such as 'America/New_York'.")
+    return tz

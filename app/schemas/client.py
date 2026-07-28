@@ -5,10 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 from app.models.enums import ClientPipelineStage, ClientStatus, ContactSide
-from app.schemas.common import ORMModel
+from app.schemas.common import ORMModel, validate_timezone
 
 # Total wizard steps — mirrors ``OnboardingService.FINAL_STEP``. Kept here so the
 # schema layer doesn't import a service (respecting the dependency direction).
@@ -65,7 +65,17 @@ class ClientUpdate(BaseModel):
     industry: str | None = None
     website: str | None = None
     location: str | None = None
+    language: str | None = None
+    #: IANA zone (e.g. ``America/New_York``). Reporting is bucketed by the
+    #: client's local day, so this is editable after onboarding too.
+    timezone: str | None = None
+    markets: str | None = None
     status: ClientStatus | None = None
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_timezone(cls, value: str | None) -> str | None:
+        return validate_timezone(value)
 
 
 # ---- Detailed read (nested) ----
@@ -114,6 +124,9 @@ class ClientRead(ORMModel):
     color_guidelines: str | None = None
     logo_url: str | None = None
     goals: str | None = None
+    #: The onboarding compliance note, so the wizard can repopulate that step on
+    #: resume instead of reopening it blank and saving an empty feed over it.
+    compliance_feed: str | None = None
     status: ClientStatus
     pipeline_stage: ClientPipelineStage
     onboarding_step: int = 1

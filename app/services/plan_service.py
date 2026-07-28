@@ -11,10 +11,11 @@ service owns the commit.
 from __future__ import annotations
 
 import uuid
+from datetime import date, time
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import BadRequestError, NotFoundError
 from app.core.pagination import PaginationParams
 from app.core.request_context import set_audit_changes
 from app.models.enums import TaskCategory, TaskStatus
@@ -26,7 +27,33 @@ from app.schemas.plan import (
     PlanTaskRead,
     PlanTaskUpdate,
 )
-from app.services.audit_service import created_changes, deleted_changes
+from app.services.audit_service import created_changes, deleted_changes, field_changes
+
+#: Fields a PATCH may move, and which the audit diff tracks.
+_MUTABLE = (
+    "title",
+    "description",
+    "category",
+    "status",
+    "assignee_id",
+    "start_date",
+    "due_date",
+    "start_time",
+    "end_time",
+)
+
+
+def _audit_value(value: object) -> object:
+    """JSON-safe scalar for an audit diff.
+
+    ``field_changes`` compares values as-is and its callers are responsible for
+    passing JSON-safe scalars — a raw ``date``/``time`` would fail the JSONB
+    insert, and the audit middleware swallows that failure, so the row would
+    disappear silently rather than loudly.
+    """
+    if isinstance(value, date | time):
+        return value.isoformat()
+    return getattr(value, "value", value)
 
 
 class PlanService:
@@ -44,12 +71,20 @@ class PlanService:
         status: TaskStatus | None = None,
         category: TaskCategory | None = None,
         assignee_id: uuid.UUID | None = None,
+        start: date | None = None,
+        end: date | None = None,
+        include_undated: bool = False,
     ) -> PlanTaskListResponse:
+        if start is not None and end is not None and start > end:
+            raise BadRequestError("start must be on or before end")
         rows, total = self.tasks.list_for_client(
             client_id,
             status=status,
             category=category,
             assignee_id=assignee_id,
+            start=start,
+            end=end,
+            include_undated=include_undated,
             offset=pagination.offset,
             limit=pagination.limit,
         )
@@ -79,13 +114,26 @@ class PlanService:
             category=data.category,
             status=data.status,
             assignee_id=data.assignee_id,
+            start_date=data.start_date,
             due_date=data.due_date,
+            start_time=data.start_time,
+            end_time=data.end_time,
             created_by=created_by,
         )
         self.tasks.add(task)
         self.tasks.flush()  # assign the id before returning
         set_audit_changes(
-            created_changes({"title": task.title, "category": task.category, "status": task.status})
+            created_changes(
+                {
+                    "title": task.title,
+                    "category": task.category,
+                    "status": task.status,
+                    # Coerced: ``created_changes`` only unwraps enums, so a raw
+                    # date would break the JSONB insert.
+                    "start_date": _audit_value(task.start_date),
+                    "due_date": _audit_value(task.due_date),
+                }
+            )
         )
         self.db.commit()
         return self.get_task(client_id, task.id)
@@ -95,16 +143,25 @@ class PlanService:
     ) -> PlanTask:
         task = self.get_task(client_id, task_id)
         fields = data.model_fields_set
-        for attr in (
-            "title",
-            "description",
-            "category",
-            "status",
-            "assignee_id",
-            "due_date",
-        ):
-            if attr in fields:
-                setattr(task, attr, getattr(data, attr))
+        touched = [a for a in _MUTABLE if a in fields]
+
+        # A partial patch can invert a range by moving only one edge, which the
+        # request schema cannot catch on its own — it only sees what was sent. So
+        # validate the *merged* result, and do it before touching the ORM object:
+        # mutating first would leave the session dirty on the failure path.
+        def merged(attr: str) -> object:
+            return getattr(data, attr) if attr in fields else getattr(task, attr)
+
+        if (s := merged("start_date")) and (e := merged("due_date")) and s > e:  # type: ignore[operator]
+            raise BadRequestError("start_date must be on or before due_date")
+        if (t0 := merged("start_time")) and (t1 := merged("end_time")) and t0 > t1:  # type: ignore[operator]
+            raise BadRequestError("start_time must be on or before end_time")
+
+        before = {a: _audit_value(getattr(task, a)) for a in touched}
+        for attr in touched:
+            setattr(task, attr, getattr(data, attr))
+        after = {a: _audit_value(getattr(task, a)) for a in touched}
+        set_audit_changes(field_changes(before, after))
         self.db.commit()
         return self.get_task(client_id, task.id)
 

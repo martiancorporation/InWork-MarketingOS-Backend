@@ -104,7 +104,17 @@ class ClientService:
         if client is None:
             raise NotFoundError("Client not found.")
         fields = data.model_fields_set
-        tracked = ("name", "business_type", "industry", "website", "location", "status")
+        tracked = (
+            "name",
+            "business_type",
+            "industry",
+            "website",
+            "location",
+            "language",
+            "timezone",
+            "markets",
+            "status",
+        )
         before = {f: _audit_value(getattr(client, f)) for f in tracked}
         for attr in tracked:
             if attr in fields:

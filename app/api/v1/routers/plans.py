@@ -1,6 +1,6 @@
 """Plan / task-board API (v1) — the internal kanban (todo / in-progress / blocked / done).
 
-- ``GET    /clients/{id}/plan/tasks``            — list (board columns / filters)
+- ``GET    /clients/{id}/plan/tasks``            — list (board columns / filters / date window)
 - ``POST   /clients/{id}/plan/tasks``            — create a task
 - ``GET    /clients/{id}/plan/tasks/{task_id}``  — task detail
 - ``PATCH  /clients/{id}/plan/tasks/{task_id}``  — partial edit (move status / reassign)
@@ -14,6 +14,7 @@ existence. Any user who can see the client may manage its task board.
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Query, status
 
@@ -41,6 +42,11 @@ def list_tasks(
     status: TaskStatus | None = Query(None, description="todo / in_progress / blocked / done"),
     category: TaskCategory | None = Query(None),
     assignee_id: uuid.UUID | None = Query(None),
+    start: date | None = Query(None, description="Window start (inclusive), YYYY-MM-DD"),
+    end: date | None = Query(None, description="Window end (inclusive), YYYY-MM-DD"),
+    include_undated: bool = Query(
+        False, description="With a window, also return tasks that have no dates at all"
+    ),
 ) -> PlanTaskListResponse:
     ClientService(db).get_client(user, client_id)  # 404 if not accessible
     return PlanService(db).list_tasks(
@@ -49,6 +55,9 @@ def list_tasks(
         status=status,
         category=category,
         assignee_id=assignee_id,
+        start=start,
+        end=end,
+        include_undated=include_undated,
     )
 
 

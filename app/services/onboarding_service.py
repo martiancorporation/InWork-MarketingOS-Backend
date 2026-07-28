@@ -55,7 +55,16 @@ from app.services.readiness_service import ReadinessService
 from app.utils.slug import slugify, unique_slug
 
 FINAL_STEP = 8
-_BASIC_FIELDS = ("name", "business_type", "industry", "website", "language", "location", "markets")
+_BASIC_FIELDS = (
+    "name",
+    "business_type",
+    "industry",
+    "website",
+    "language",
+    "location",
+    "timezone",
+    "markets",
+)
 _BRAND_SCALARS = ("about_brand", "brand_voice", "brand_extracted", "color_guidelines", "logo_url")
 
 
@@ -78,6 +87,7 @@ class OnboardingService:
             website=data.website,
             language=data.language,
             location=data.location,
+            timezone=data.timezone,
             markets=data.markets,
             about_brand=data.brand.about_brand,
             brand_voice=data.brand.brand_voice,
@@ -174,6 +184,7 @@ class OnboardingService:
             website=data.website,
             language=data.language,
             location=data.location,
+            timezone=data.timezone,
             markets=data.markets,
             status=ClientStatus.draft,  # still being set up in the wizard
             pipeline_stage=ClientPipelineStage.onboarding,
