@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from app.api.deps import get_storage
 from app.integrations.anthropic.client import AnthropicClient
 from app.main import app
+from app.utils.download_link import upload_permalink
 from tests.conftest import API
 from tests.helpers import onboarding_payload
 
@@ -274,13 +275,16 @@ def test_unreadable_file_degrades_instead_of_500(
     assert "broken.pdf" in captured["prompt"], "the model is told the file could not be read"
 
 
-def test_attachments_survive_a_chat_reload_with_a_fresh_url(
+def test_attachments_survive_a_chat_reload_with_a_permanent_url(
     client: TestClient, admin_headers: dict, storage, captured
 ):
-    """The load-bearing bit: history must re-render the chips.
+    """The load-bearing bit: history must re-render the chips, forever.
 
-    Only the storage key is persisted, so the URL is signed per read — persisting a
-    presigned URL is what left seven client logos as broken images.
+    Only the upload id is persisted; ``download_url`` is a permanent, signed
+    redirect link built purely from that id (see ``app/utils/download_link.py``)
+    — no S3 presign at read time, so nothing here can go stale on its own. That's
+    the fix for the bug that left seven client logos as broken images: a
+    persisted *presigned* URL is what expires, a persisted *upload id* never does.
     """
     cid = _client_id(client, admin_headers)
     chat = _chat_id(client, admin_headers, cid)
@@ -300,11 +304,16 @@ def test_attachments_survive_a_chat_reload_with_a_fresh_url(
     assert by_name["july.csv"]["kind"] == "file", "documents render as chips"
     assert by_name["chart.png"]["size_bytes"] == len(PNG)
     for att in by_name.values():
-        assert att["download_url"].startswith("https://s3.example.test/")
-        assert "signed=1" in att["download_url"]
+        assert att["download_url"] == upload_permalink(att["upload_id"])
 
-    # No presigned URL was stored — the key was, and signing happened on read.
-    assert storage.signed, "the read path signed the attachments"
+    # No S3 round trip happened building the read — nothing was signed.
+    assert storage.signed == []
+
+    # Reloading again returns the identical link, byte for byte.
+    again = client.get(f"{API}/clients/{cid}/assistant/chats/{chat}", headers=admin_headers)
+    by_name_again = {a["filename"]: a for a in again.json()["messages"][0]["attachments"]}
+    for name, att in by_name.items():
+        assert by_name_again[name]["download_url"] == att["download_url"]
 
     # The assistant's own reply carries no attachments.
     reply = next(m for m in detail.json()["messages"] if m["role"] == "assistant")

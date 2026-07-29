@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, computed_field, field_validator
 
 from app.models.enums import ClientPipelineStage, ClientStatus, ContactSide
 from app.schemas.common import ORMModel, validate_timezone
+from app.utils.download_link import key_permalink, upload_permalink
 
 # Total wizard steps — mirrors ``OnboardingService.FINAL_STEP``. Kept here so the
 # schema layer doesn't import a service (respecting the dependency direction).
@@ -18,6 +19,26 @@ _ONBOARDING_TOTAL_STEPS = 8
 def _percent(step: int) -> int:
     """Wizard completion as a whole-number percent (1→13 … 8→100)."""
     return int(step / _ONBOARDING_TOTAL_STEPS * 100 + 0.5)
+
+
+def resolve_logo_url(value: str | None) -> str | None:
+    """Resolve the stored ``Client.logo_url`` into something safe to render.
+
+    The column is dual-purpose: the onboarding wizard writes an uploaded logo's
+    *upload id*, or an admin pastes an external image URL directly into the same
+    field. Never a raw presigned S3 URL by design — those expire in 15 minutes,
+    which is exactly the bug that left 7 client logos permanently dead. A bare
+    (non-UUID) value is a pre-repair legacy storage key.
+    """
+    if not value:
+        return None
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    try:
+        upload_id = uuid.UUID(value)
+    except ValueError:
+        return key_permalink(value)
+    return upload_permalink(upload_id)
 
 
 class ClientListItem(BaseModel):
@@ -136,6 +157,11 @@ class ClientRead(ORMModel):
     brand_fonts: list[BrandFontRead] = []
     platforms: list[PlatformRead] = []
     contacts: list[ContactRead] = []
+
+    @field_validator("logo_url")
+    @classmethod
+    def _resolve_logo_url(cls, value: str | None) -> str | None:
+        return resolve_logo_url(value)
 
     @computed_field
     @property

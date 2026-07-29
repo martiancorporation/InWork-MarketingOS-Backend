@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Literal
 
 from app.ai.attachments import AttachmentBundle
 from app.ai.features import AiFeature
@@ -31,11 +32,14 @@ class AssistantStreamPrep:
     """Everything a streamed answer needs, computed while the DB session is open.
 
     ``system``/``prompt`` are None when Claude is unconfigured — the caller then
-    streams ``fallback`` instead of calling the provider.
+    streams ``fallback`` instead of calling the provider. ``error_fallback`` is
+    the distinct copy for when the provider *was* configured but the call
+    actually failed mid-stream — see ``_fallback``'s ``reason`` parameter.
     """
 
     snippets: list[str]
     fallback: str
+    error_fallback: str
     system: str | None
     prompt: str | None
 
@@ -58,7 +62,7 @@ class ProjectAssistantAgent(ClientAgent):
         """
         snippets = self.retrieve(question, top_k=_MAX_SNIPPETS)
         if not self.ai.is_configured:
-            return self._fallback(snippets, attachments), snippets
+            return self._fallback(snippets, attachments, reason="unconfigured"), snippets
 
         context_block = (
             "\n".join(f"- {s}" for s in snippets)
@@ -90,8 +94,8 @@ class ProjectAssistantAgent(ClientAgent):
                 self.client_id,
                 exc_info=True,
             )
-            return self._fallback(snippets, attachments), snippets
-        return (raw.strip() or self._fallback(snippets, attachments)), snippets
+            return self._fallback(snippets, attachments, reason="error"), snippets
+        return (raw.strip() or self._fallback(snippets, attachments, reason="error")), snippets
 
     def prepare_stream(
         self, question: str, *, history: list[tuple[str, str]] | None = None
@@ -100,9 +104,10 @@ class ProjectAssistantAgent(ClientAgent):
         step touches only the AI provider — call this while the request's DB
         session is still open, then stream from ``AnthropicClient.stream``."""
         snippets = self.retrieve(question, top_k=_MAX_SNIPPETS)
-        fallback = self._fallback(snippets)
+        fallback = self._fallback(snippets, reason="unconfigured")
+        error_fallback = self._fallback(snippets, reason="error")
         if not self.ai.is_configured:
-            return AssistantStreamPrep(snippets, fallback, None, None)
+            return AssistantStreamPrep(snippets, fallback, error_fallback, None, None)
 
         context_block = (
             "\n".join(f"- {s}" for s in snippets)
@@ -120,18 +125,44 @@ class ProjectAssistantAgent(ClientAgent):
                 "attachments": "(none)",
             },
         )
-        return AssistantStreamPrep(snippets, fallback, system, prompt)
+        return AssistantStreamPrep(snippets, fallback, error_fallback, system, prompt)
 
     def _fallback(
-        self, snippets: list[str], attachments: AttachmentBundle | None = None
+        self,
+        snippets: list[str],
+        attachments: AttachmentBundle | None = None,
+        *,
+        reason: Literal["unconfigured", "error"] = "unconfigured",
     ) -> str:
+        """Deterministic, RAG-grounded reply used whenever we don't have a real
+        model answer. ``reason`` distinguishes two very different situations that
+        used to share one copy: "unconfigured" (no API key at all — a genuinely
+        permanent state) vs. "error" (the provider was called and it failed —
+        e.g. a billing/credit issue — which reads to a user as "this is broken
+        forever" when it may already be resolved). Never leaks exception detail.
+        """
         # Say the files arrived even though nothing could read them — otherwise an
-        # operator who attached a report gets a generic "not configured" reply and
-        # reasonably assumes the upload itself failed.
+        # operator who attached a report gets a generic reply and reasonably
+        # assumes the upload itself failed.
         note = ""
         if attachments and attachments.parts:
             names = ", ".join(p.filename for p in attachments.parts)
             note = f"\n\nI did receive your attachment(s): {names}."
+
+        if reason == "error":
+            lead = (
+                "Something went wrong generating a response just now — that's an "
+                "issue on our end this time, not a sign that AI answers aren't "
+                "available here. Please try again in a moment."
+            )
+            if snippets:
+                joined = "\n".join(f"- {s}" for s in snippets[:3])
+                return (
+                    f"{lead} In the meantime, here is the most relevant project "
+                    f"knowledge I found for your question:\n\n{joined}{note}"
+                )
+            return f"{lead}{note}"
+
         if snippets:
             joined = "\n".join(f"- {s}" for s in snippets[:3])
             return (

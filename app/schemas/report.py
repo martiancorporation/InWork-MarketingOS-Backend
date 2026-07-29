@@ -1,8 +1,9 @@
 """Report schemas — a registry of generated client reports.
 
 Mirrors the web report generator (date range, scope preset, channels, sections,
-output format, Outlook-draft delivery). A report row records *what was generated*
-(config + optional file pointer), not the rendered bytes themselves.
+output format, Outlook-draft delivery). Creating a report generates a real file
+server-side (see ``app/services/reports/``) and records the result — config +
+the resulting permanent download link, not the rendered bytes themselves.
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ class ReportCreate(BaseModel):
     channels: list[str] | None = None
     sections: list[str] | None = None
     save_to_outlook_draft: bool = False
+    # Ignored on create — the service always generates a real file and sets
+    # this itself. Kept only so an old client sending it doesn't 422; use
+    # ReportUpdate to attach/replace a file manually after the fact.
     file_url: str | None = None
 
     @model_validator(mode="after")
@@ -36,7 +40,7 @@ class ReportCreate(BaseModel):
 
 
 class ReportUpdate(BaseModel):
-    """Attach the rendered file / tweak delivery after generation. Partial."""
+    """Manually attach/replace the file, or tweak delivery, after the fact. Partial."""
 
     title: str | None = Field(None, min_length=1, max_length=200)
     file_url: str | None = None

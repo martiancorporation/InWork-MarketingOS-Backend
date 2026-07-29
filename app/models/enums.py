@@ -288,10 +288,11 @@ class ReportKind(str, enum.Enum):
 
 
 class ReportFormat(str, enum.Enum):
-    """The three real output formats. "Save to Outlook draft" is a delivery
+    """The four real output formats. "Save to Outlook draft" is a delivery
     option layered on top of any format, not a format itself — see
     ``Report.save_to_outlook_draft``."""
 
+    csv = "csv"
     pdf = "pdf"
     excel = "excel"
     visual = "visual"

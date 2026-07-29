@@ -74,10 +74,9 @@ def get_chat(
     chat_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
-    storage: StorageDep,
 ) -> AssistantChatDetail:
     ClientService(db).get_client(user, client_id)
-    return AssistantService(db).get_chat_detail(client_id, chat_id, storage=storage)
+    return AssistantService(db).get_chat_detail(client_id, chat_id)
 
 
 @router.post(

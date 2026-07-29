@@ -50,7 +50,35 @@ def test_ask_fallback_when_ai_unconfigured(client: TestClient, admin_headers: di
     body = resp.json()
     assert body["message"]["role"] == "assistant"
     assert body["message"]["content"]  # non-empty deterministic fallback
+    assert "aren't configured" in body["message"]["content"]
     assert "sources" in body
+
+
+def test_ask_fallback_when_ai_configured_but_call_fails(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
+    """A real provider failure (e.g. billing/credits) must read differently from
+    "unconfigured" — otherwise a temporary outage looks like a permanent
+    misconfiguration to whoever's chatting."""
+
+    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
+        raise RuntimeError("credit balance too low")
+
+    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(AnthropicClient, "complete", fake_complete)
+
+    cid = _client_id(client, admin_headers, name="Error Path Co.")
+    chat = _new_chat(client, admin_headers, cid)
+    resp = client.post(
+        f"{API}/clients/{cid}/assistant/chats/{chat['id']}/messages",
+        headers=admin_headers,
+        json={"content": "What is this client's brand voice?"},
+    )
+    assert resp.status_code == 201, resp.text
+    content = resp.json()["message"]["content"]
+    assert "went wrong" in content
+    assert "aren't configured" not in content
+    assert "credit balance" not in content  # never leak the raw exception
 
 
 def test_ask_uses_ai_when_configured(client: TestClient, admin_headers: dict, monkeypatch):

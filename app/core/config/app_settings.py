@@ -29,6 +29,13 @@ class AppSettings(BaseSettings):
     # per-process — with multiple workers, use a shared store (Redis) for exact
     # global limits; this is a per-worker first line of defense.
     rate_limit_enabled: bool = True
+    # Absolute base URL (scheme + host + api prefix) this backend is publicly
+    # reachable at, e.g. "https://backendai.startwithmartian.com/api/v1". Used to
+    # build permanent, signed upload-download links (see app/utils/download_link.py)
+    # that stay stable regardless of proxy/Host-header quirks. Not derived from
+    # `request.base_url` on purpose. None only in local/dev where such links aren't
+    # exercised end-to-end.
+    public_api_base_url: str | None = None  # PUBLIC_API_BASE_URL
 
     @property
     def is_production(self) -> bool:

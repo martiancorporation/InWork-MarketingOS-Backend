@@ -1,24 +1,35 @@
 """Report registry use-cases: record, list, fetch, update, and delete reports.
 
-The report row captures the *definition* of a generated report (config + optional
-file pointer); rendering the actual PDF/Excel bytes stays a separate concern (the
-web exports client-side today, and a rendered file can be attached later via
-``file_url``). Client-access scoping is enforced at the router. Repositories
-flush; this service owns the commit.
+Creating a report actually generates and uploads a real file (CSV/Excel/PDF/JPEG
+— see ``app/services/reports/generator.py``) *before* the registry row is
+constructed, mirroring ``UploadService.store_bytes``'s "push before commit"
+ordering: if generation fails, nothing is persisted and the caller gets a real
+error, never a row with an empty ``file_url``. ``update_report`` stays a plain
+manual-override endpoint (``file_url`` is settable directly, unvalidated) — an
+intentional escape hatch for attaching/replacing a file out of band. Client-
+access scoping is enforced at the router. Repositories flush; this service owns
+the commit.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ServiceUnavailableError
 from app.core.pagination import PaginationParams
+from app.integrations.storage import Storage
+from app.models.client import Client
 from app.models.enums import ReportKind
 from app.models.report import Report
+from app.models.user import User
 from app.repositories.report_repository import ReportRepository
 from app.schemas.report import ReportCreate, ReportListResponse, ReportRead, ReportUpdate
+from app.services.reports.generator import generate_report_file
+
+logger = logging.getLogger("app.services.reports")
 
 
 class ReportService:
@@ -50,11 +61,30 @@ class ReportService:
             raise NotFoundError("Report not found.")
         return report
 
-    def create_report(
-        self, client_id: uuid.UUID, data: ReportCreate, *, created_by: uuid.UUID
+    async def create_report(
+        self,
+        client: Client,
+        data: ReportCreate,
+        *,
+        user: User,
+        storage: Storage,
     ) -> Report:
+        try:
+            upload = await generate_report_file(self.db, storage, user, client, data)
+        except Exception:  # generation genuinely failed — say so, don't fake success
+            logger.warning(
+                "Report generation failed for client %s (%s/%s)",
+                client.id,
+                data.kind,
+                data.format,
+                exc_info=True,
+            )
+            raise ServiceUnavailableError(
+                "Could not generate the report file. Please try again."
+            ) from None
+
         report = Report(
-            client_id=client_id,
+            client_id=client.id,
             kind=data.kind,
             format=data.format,
             title=data.title,
@@ -64,8 +94,8 @@ class ReportService:
             channels=data.channels,
             sections=data.sections,
             save_to_outlook_draft=data.save_to_outlook_draft,
-            file_url=data.file_url,
-            created_by=created_by,
+            file_url=upload.download_url,
+            created_by=user.id,
         )
         self.reports.add(report)
         self.db.commit()

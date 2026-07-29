@@ -23,7 +23,6 @@ from app.ai.assistant import AssistantStreamPrep, ProjectAssistantAgent
 from app.ai.attachments import MAX_ATTACHMENTS, AttachmentBundle, build_bundle
 from app.ai.features import AiFeature
 from app.ai.usage import AiUsageContext
-from app.core.config import get_settings
 from app.core.exceptions import BadRequestError, NotFoundError, ServiceUnavailableError
 from app.core.pagination import PaginationParams
 from app.integrations.anthropic.client import AnthropicClient
@@ -43,6 +42,7 @@ from app.schemas.assistant import (
     AssistantMessageRead,
 )
 from app.services.upload_service import UploadService
+from app.utils.download_link import upload_permalink
 
 logger = logging.getLogger("app.services.assistant")
 
@@ -101,9 +101,7 @@ class AssistantService:
         self.db.refresh(chat)
         return chat
 
-    def get_chat_detail(
-        self, client_id: uuid.UUID, chat_id: uuid.UUID, *, storage: Storage | None = None
-    ) -> AssistantChatDetail:
+    def get_chat_detail(self, client_id: uuid.UUID, chat_id: uuid.UUID) -> AssistantChatDetail:
         chat = self._require_chat(client_id, chat_id)
         messages = self.chats.list_messages(chat_id)
         return AssistantChatDetail(
@@ -113,32 +111,21 @@ class AssistantService:
             context_key=chat.context_key,
             created_at=chat.created_at,
             updated_at=chat.updated_at,
-            messages=[self._message_read(m, storage) for m in messages],
+            messages=[self._message_read(m) for m in messages],
         )
 
     @staticmethod
-    def _message_read(message: AiChatMessage, storage: Storage | None) -> AssistantMessageRead:
-        """Serialise a message, signing a fresh download URL per attachment.
+    def _message_read(message: AiChatMessage) -> AssistantMessageRead:
+        """Serialise a message, building a permanent download link per attachment.
 
-        The stored record holds only the storage key. Presigned URLs expire in 15
-        minutes, so signing them here — on every read — is what stops a reloaded
-        chat from showing dead links.
+        The link is pure string construction (no S3 call) — it never expires
+        itself, it always redirects to a freshly presigned URL when followed. See
+        ``app/utils/download_link.py``.
         """
         read = AssistantMessageRead.model_validate(message)
         records = (message.meta or {}).get("attachments") or []
-        if not records:
-            return read
-
-        expiry = get_settings().storage.presign_expiry_seconds
         for record in records:
             content_type = record.get("content_type") or ""
-            url: str | None = None
-            key = record.get("storage_key")
-            if storage is not None and key:
-                try:
-                    url = storage.generate_download_url(key, expiry)
-                except Exception:  # storage down / unconfigured — chip still renders
-                    logger.warning("Could not sign attachment %s", key, exc_info=True)
             read.attachments.append(
                 AssistantAttachmentRead(
                     upload_id=record["upload_id"],
@@ -146,7 +133,7 @@ class AssistantService:
                     content_type=content_type or None,
                     size_bytes=record.get("size_bytes"),
                     kind="image" if content_type.startswith("image/") else "file",
-                    download_url=url,
+                    download_url=upload_permalink(record["upload_id"]),
                 )
             )
         return read
@@ -289,10 +276,10 @@ class AssistantService:
                     "Project assistant stream failed for client %s", ctx.client_id, exc_info=True
                 )
                 if not parts:
-                    parts.append(prep.fallback)
-                    yield _sse({"type": "delta", "text": prep.fallback})
+                    parts.append(prep.error_fallback)
+                    yield _sse({"type": "delta", "text": prep.error_fallback})
 
-        answer = "".join(parts).strip() or prep.fallback
+        answer = "".join(parts).strip() or prep.error_fallback
         message_id = self._finalize(ctx.client_id, ctx.chat_id, answer)
         yield _sse({"type": "done", "message_id": str(message_id), "content": answer})
 

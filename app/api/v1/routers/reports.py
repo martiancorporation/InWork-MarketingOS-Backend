@@ -1,9 +1,9 @@
 """Reports API (v1) — a registry/history of generated client reports.
 
 - ``GET    /clients/{id}/reports``              — list (optional kind filter)
-- ``POST   /clients/{id}/reports``              — record a generated report
+- ``POST   /clients/{id}/reports``              — generate a report file + record it
 - ``GET    /clients/{id}/reports/{report_id}``  — one report
-- ``PATCH  /clients/{id}/reports/{report_id}``  — attach file / tweak delivery
+- ``PATCH  /clients/{id}/reports/{report_id}``  — manually attach file / tweak delivery
 - ``DELETE /clients/{id}/reports/{report_id}``  — delete
 
 Client-access-scoped via ``ClientService.get_client`` (admin or assigned user);
@@ -16,7 +16,7 @@ import uuid
 
 from fastapi import APIRouter, Query, status
 
-from app.api.deps import CurrentUser, DbSession, Pagination
+from app.api.deps import CurrentUser, DbSession, Pagination, StorageDep
 from app.models.enums import ReportKind
 from app.schemas.common import MessageResponse
 from app.schemas.report import (
@@ -47,13 +47,13 @@ def list_reports(
     "",
     response_model=ReportRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Record a generated report",
+    summary="Generate a report file and record it",
 )
-def create_report(
-    client_id: uuid.UUID, data: ReportCreate, user: CurrentUser, db: DbSession
+async def create_report(
+    client_id: uuid.UUID, data: ReportCreate, user: CurrentUser, db: DbSession, storage: StorageDep
 ) -> ReportRead:
-    ClientService(db).get_client(user, client_id)
-    report = ReportService(db).create_report(client_id, data, created_by=user.id)
+    client = ClientService(db).get_client(user, client_id)
+    report = await ReportService(db).create_report(client, data, user=user, storage=storage)
     return ReportRead.model_validate(report)
 
 

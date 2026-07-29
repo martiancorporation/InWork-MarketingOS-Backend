@@ -34,6 +34,7 @@ from app.models.upload import Upload
 from app.models.user import User
 from app.repositories.upload_repository import UploadRepository
 from app.schemas.upload import UploadRead
+from app.utils.download_link import upload_permalink
 
 _FILENAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
 
@@ -159,12 +160,9 @@ class UploadService:
 
     def _to_read(self, upload: Upload) -> UploadRead:
         read = UploadRead.model_validate(upload)
-        try:
-            read.download_url = self.storage.generate_download_url(
-                upload.storage_key, self.settings.presign_expiry_seconds
-            )
-        except AppError:
-            read.download_url = None
+        # Permanent, signed link — pure string construction, no S3 call. It never
+        # expires itself; following it always redirects to a freshly presigned URL.
+        read.download_url = upload_permalink(upload.id)
         return read
 
     def _safe_delete(self, key: str) -> None:

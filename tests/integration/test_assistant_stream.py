@@ -91,6 +91,36 @@ def test_stream_emits_tokens_when_ai_configured(
     assert events[-1]["content"] == "Your brand voice is confident."
 
 
+def test_stream_fallback_when_ai_configured_but_call_fails(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
+    """Same distinction as the non-streaming path: a real mid-stream provider
+    failure must not read as "AI responses aren't configured"."""
+
+    async def fake_stream(self, *, system, prompt, max_tokens=None, context=None):
+        raise RuntimeError("credit balance too low")
+        yield  # pragma: no cover - unreachable, makes this an async generator
+
+    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(AnthropicClient, "stream", fake_stream)
+
+    cid = _client_id(client, admin_headers, name="Stream Error Co.")
+    chat = _chat_id(client, admin_headers, cid)
+    resp = client.post(
+        f"{API}/clients/{cid}/assistant/chats/{chat}/messages/stream",
+        headers=admin_headers,
+        json={"content": "brand voice?"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    events = _events(resp.text)
+    done = events[-1]
+    assert done["type"] == "done"
+    assert "went wrong" in done["content"]
+    assert "aren't configured" not in done["content"]
+    assert "credit balance" not in done["content"]
+
+
 def test_stream_unassigned_user_gets_404(
     client: TestClient, admin_headers: dict, make_user
 ):

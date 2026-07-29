@@ -8,6 +8,7 @@ override, so nothing touches AWS. One test uses the real (unconfigured)
 from __future__ import annotations
 
 from collections.abc import Generator
+from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +17,7 @@ from app.api.deps import get_storage
 from app.core.config.storage import StorageSettings
 from app.integrations.aws import S3Storage
 from app.main import app
+from app.utils.download_link import key_permalink, upload_permalink
 
 API = "/api/v1"
 
@@ -49,6 +51,13 @@ def storage() -> Generator[FakeStorage, None, None]:
     app.dependency_overrides.pop(get_storage, None)
 
 
+def _path_and_query(url: str) -> str:
+    """A permalink is absolute (``PUBLIC_API_BASE_URL``); TestClient only talks to
+    the app under test, so strip it down to what `client.get` needs."""
+    parsed = urlparse(url)
+    return f"{parsed.path}?{parsed.query}" if parsed.query else parsed.path
+
+
 def _upload(
     client, headers, *, name="notes.pdf", data=b"hello world", ctype="application/pdf", feature=None
 ):
@@ -74,7 +83,8 @@ def test_upload(client: TestClient, admin_headers, storage) -> None:
     assert body["storage_key"].startswith("uploads/")
     assert body["storage_key"].endswith("/brief_final.pdf")
     assert body["storage_key"] in storage.objects
-    assert body["download_url"].startswith("https://")
+    # The permanent permalink, not a raw presigned URL — never expires itself.
+    assert body["download_url"] == upload_permalink(body["id"])
 
 
 def test_upload_rejects_disallowed_type(client: TestClient, admin_headers, storage) -> None:
@@ -97,7 +107,7 @@ def test_get_upload(client: TestClient, admin_headers, storage) -> None:
     got = client.get(f"{API}/uploads/{upload_id}", headers=admin_headers)
     assert got.status_code == 200, got.text
     assert got.json()["id"] == upload_id
-    assert got.json()["download_url"].startswith("https://")
+    assert got.json()["download_url"] == upload_permalink(upload_id)
 
 
 def test_get_missing_returns_404(client: TestClient, admin_headers, storage) -> None:
@@ -149,3 +159,78 @@ def test_upload_503_when_storage_unconfigured(client: TestClient, admin_headers)
         assert resp.json()["error"]["code"] == "service_unavailable"
     finally:
         app.dependency_overrides.pop(get_storage, None)
+
+
+# ---- permanent, signed download redirect ----
+
+
+def test_download_upload_redirects(client: TestClient, admin_headers, storage) -> None:
+    created = _upload(client, admin_headers, name="logo.png", ctype="image/png")
+    body = created.json()
+
+    resp = client.get(_path_and_query(body["download_url"]), follow_redirects=False)
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == f"https://s3.example.test/{body['storage_key']}?signed=1"
+
+
+def test_download_upload_needs_no_bearer_auth(client: TestClient, admin_headers, storage) -> None:
+    """Deliberate: browsers can't attach Authorization to <img src>/<a href>, so
+    possession of a validly-signed link is the whole authorization here."""
+    created = _upload(client, admin_headers, name="logo.png", ctype="image/png")
+    body = created.json()
+
+    resp = client.get(_path_and_query(body["download_url"]), follow_redirects=False)
+
+    assert resp.status_code == 302
+
+
+def test_download_upload_tampered_signature_is_404(
+    client: TestClient, admin_headers, storage
+) -> None:
+    created = _upload(client, admin_headers)
+    upload_id = created.json()["id"]
+
+    resp = client.get(f"{API}/uploads/{upload_id}/download?sig=" + "0" * 64, follow_redirects=False)
+
+    assert resp.status_code == 404
+
+
+def test_download_upload_after_delete_is_404(client: TestClient, admin_headers, storage) -> None:
+    created = _upload(client, admin_headers)
+    body = created.json()
+    client.delete(f"{API}/uploads/{body['id']}", headers=admin_headers)
+
+    resp = client.get(_path_and_query(body["download_url"]), follow_redirects=False)
+
+    assert resp.status_code == 404
+
+
+def test_download_survives_past_the_old_presign_ttl_conceptually(
+    client: TestClient, admin_headers, storage
+) -> None:
+    """The permalink itself carries no expiry — repeated hits keep 302ing, unlike
+    the old direct presigned URL which died after 900s."""
+    created = _upload(client, admin_headers, name="logo.png", ctype="image/png")
+    body = created.json()
+    path = _path_and_query(body["download_url"])
+
+    first = client.get(path, follow_redirects=False)
+    second = client.get(path, follow_redirects=False)
+
+    assert first.status_code == second.status_code == 302
+
+
+def test_download_by_key_redirects(client: TestClient, storage) -> None:
+    key = "uploads/legacy-no-upload-row/logo.png"
+    storage.objects[key] = {"size": 1, "content_type": "image/png"}
+
+    resp = client.get(_path_and_query(key_permalink(key)), follow_redirects=False)
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == f"https://s3.example.test/{key}?signed=1"
+
+
+def test_download_by_key_tampered_signature_is_404(client: TestClient, storage) -> None:
+    resp = client.get(f"{API}/uploads/by-key/download?key=whatever&sig=" + "0" * 64)
+    assert resp.status_code == 404
