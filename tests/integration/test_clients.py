@@ -68,6 +68,16 @@ def test_onboarding_requires_brand_voice(client: TestClient, admin_headers: dict
     assert _onboard(client, admin_headers, brand={"about_brand": "x"}).status_code == 422
 
 
+def test_list_includes_logo_url(client: TestClient, admin_headers: dict):
+    """``GET /clients`` (the list view) must carry `logo_url` too — it was
+    missing from `ClientListItem` entirely, so every client grid/card silently
+    fell back to the initial-letter placeholder even when a real logo was set."""
+    _onboard(client, admin_headers)  # tests/helpers.onboarding_payload sets an external logo_url
+    resp = client.get(f"{API}/clients", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["items"][0]["logo_url"] == "https://acme.com/logo.svg"
+
+
 def test_get_client_by_id(client: TestClient, admin_headers: dict):
     cid = _onboard(client, admin_headers).json()["client"]["id"]
     resp = client.get(f"{API}/clients/{cid}", headers=admin_headers)
@@ -77,6 +87,116 @@ def test_get_client_by_id(client: TestClient, admin_headers: dict):
 
 def test_get_unknown_client_404(client: TestClient, admin_headers: dict):
     resp = client.get(f"{API}/clients/00000000-0000-0000-0000-000000000000", headers=admin_headers)
+    assert resp.status_code == 404
+
+
+def test_list_documents(client: TestClient, admin_headers: dict):
+    """``GET /clients/{id}/documents`` — there was no read side for documents at
+    all (only the write-side attach endpoint), so uploaded files never showed up
+    anywhere afterward."""
+    cid = _onboard(client, admin_headers).json()["client"]["id"]
+    attach = client.post(
+        f"{API}/clients/{cid}/documents",
+        headers=admin_headers,
+        json={
+            "documents": [
+                {
+                    "name": "brand-guide.pdf",
+                    "kind": "brand",
+                    "size_bytes": 1024,
+                    "mime_type": "application/pdf",
+                    "storage_url": "uploads/11111111-1111-1111-1111-111111111111/brand-guide.pdf",
+                }
+            ]
+        },
+    )
+    assert attach.status_code == 201, attach.text
+
+    resp = client.get(f"{API}/clients/{cid}/documents", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 1
+    doc = body["items"][0]
+    assert doc["name"] == "brand-guide.pdf"
+    assert doc["kind"] == "brand"
+    # storage_url is really a bare storage key — resolved into a real, permanent
+    # download link, same convention as the client logo fix.
+    assert doc["storage_url"].startswith("http")
+    assert "/uploads/by-key/download?key=" in doc["storage_url"]
+
+
+def test_list_documents_unknown_client_404(client: TestClient, admin_headers: dict):
+    resp = client.get(
+        f"{API}/clients/00000000-0000-0000-0000-000000000000/documents", headers=admin_headers
+    )
+    assert resp.status_code == 404
+
+
+def test_remove_document(client: TestClient, admin_headers: dict):
+    """``DELETE /clients/{id}/documents/{document_id}`` — the Settings page needs
+    to let a user remove an uploaded file, not just add one."""
+    cid = _onboard(client, admin_headers).json()["client"]["id"]
+    attach = client.post(
+        f"{API}/clients/{cid}/documents",
+        headers=admin_headers,
+        json={
+            "documents": [
+                {
+                    "name": "goals.pdf",
+                    "kind": "goals",
+                    "size_bytes": 512,
+                    "mime_type": "application/pdf",
+                    "storage_url": "uploads/22222222-2222-2222-2222-222222222222/goals.pdf",
+                }
+            ]
+        },
+    )
+    assert attach.status_code == 201, attach.text
+    doc_id = client.get(f"{API}/clients/{cid}/documents", headers=admin_headers).json()["items"][
+        0
+    ]["id"]
+
+    resp = client.delete(f"{API}/clients/{cid}/documents/{doc_id}", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+
+    listed = client.get(f"{API}/clients/{cid}/documents", headers=admin_headers).json()
+    assert listed["total"] == 0
+
+
+def test_remove_document_unknown_document_404(client: TestClient, admin_headers: dict):
+    cid = _onboard(client, admin_headers).json()["client"]["id"]
+    resp = client.delete(
+        f"{API}/clients/{cid}/documents/00000000-0000-0000-0000-000000000000",
+        headers=admin_headers,
+    )
+    assert resp.status_code == 404
+
+
+def test_remove_document_wrong_client_404(client: TestClient, admin_headers: dict):
+    """A document scoped to client A must not be deletable via client B's id."""
+    cid_a = _onboard(client, admin_headers).json()["client"]["id"]
+    cid_b = _onboard(client, admin_headers).json()["client"]["id"]
+    attach = client.post(
+        f"{API}/clients/{cid_a}/documents",
+        headers=admin_headers,
+        json={
+            "documents": [
+                {
+                    "name": "brand.pdf",
+                    "kind": "brand",
+                    "size_bytes": 256,
+                    "mime_type": "application/pdf",
+                    "storage_url": "uploads/33333333-3333-3333-3333-333333333333/brand.pdf",
+                }
+            ]
+        },
+    )
+    assert attach.status_code == 201, attach.text
+    doc_id = client.get(f"{API}/clients/{cid_a}/documents", headers=admin_headers).json()[
+        "items"
+    ][0]["id"]
+
+    resp = client.delete(f"{API}/clients/{cid_b}/documents/{doc_id}", headers=admin_headers)
     assert resp.status_code == 404
 
 

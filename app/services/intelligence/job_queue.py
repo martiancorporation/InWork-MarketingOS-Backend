@@ -8,6 +8,11 @@ its changed-source set merged, so a burst of edits becomes one build.
 ``claim_next`` is used by the worker with ``FOR UPDATE SKIP LOCKED`` (Postgres)
 to pull work; it never hands out a second job for a client that already has one
 running, avoiding profile-version races.
+
+A job whose worker dies mid-run (crash, restart, deploy) is never flipped out of
+``running`` by anything else — ``claim_next`` reclaims it (see
+``_STALE_RUNNING_TIMEOUT_SECONDS``) before looking for new work, so a dead
+worker can't permanently wedge a client's whole queue.
 """
 
 from __future__ import annotations
@@ -23,11 +28,47 @@ from app.models.enums import IntelJobStatus, IntelJobType
 from app.models.intel_job import IntelJob
 from app.repositories.intel_job_repository import IntelJobRepository
 
+# A real build (document extraction + chunking + embedding + summary/directive
+# generation) normally finishes in well under this; past it, the worker that
+# claimed the job is presumed dead (crashed, killed, redeployed).
+_STALE_RUNNING_TIMEOUT_SECONDS = 1800  # 30 min
+
 
 class JobQueue:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.jobs = IntelJobRepository(db)
+
+    def reclaim_stale(self) -> int:
+        """Requeue (or dead-letter) jobs whose claiming worker never finished.
+
+        The attempt was already counted at claim time (``claim_next`` increments
+        ``attempts`` before handing the job out), so this mirrors ``fail()``'s
+        backoff/dead-letter rule without incrementing again. Returns how many
+        were reclaimed.
+        """
+        cutoff = datetime.now(UTC) - timedelta(seconds=_STALE_RUNNING_TIMEOUT_SECONDS)
+        stale = self.db.scalars(
+            select(IntelJob).where(
+                IntelJob.status == IntelJobStatus.running.value,
+                IntelJob.locked_at.is_not(None),
+                IntelJob.locked_at < cutoff,
+            )
+        ).all()
+        for job in stale:
+            job.status = (
+                IntelJobStatus.dead.value
+                if job.attempts >= job.max_attempts
+                else IntelJobStatus.queued.value
+            )
+            if job.status == IntelJobStatus.queued.value:
+                job.run_after = datetime.now(UTC)
+            job.last_error = "Reclaimed: worker did not finish within the stale-job timeout."
+            job.locked_by = None
+            job.locked_at = None
+        if stale:
+            self.db.commit()
+        return len(stale)
 
     def enqueue(
         self,
@@ -69,6 +110,7 @@ class JobQueue:
 
     def claim_next(self, worker_id: str) -> IntelJob | None:
         """Claim the next runnable job. Commits the claim before returning."""
+        self.reclaim_stale()
         now = datetime.now(UTC)
         is_postgres = self.db.bind is not None and self.db.bind.dialect.name == "postgresql"
         stmt = (

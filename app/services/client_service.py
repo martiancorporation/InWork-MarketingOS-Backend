@@ -16,11 +16,13 @@ from app.core.pagination import PaginationParams
 from app.core.request_context import set_audit_changes
 from app.models.assignment import ClientAssignment
 from app.models.client import Client
-from app.models.enums import ClientCapability, ClientStatus, UserRole
+from app.models.enums import ClientCapability, ClientStatus, DocumentKind, UserRole
 from app.models.user import User
 from app.repositories.assignment_repository import AssignmentRepository
 from app.repositories.client_repository import ClientRepository
+from app.repositories.document_repository import DocumentRepository
 from app.schemas.client import ClientListItem, ClientListResponse, ClientUpdate
+from app.schemas.document import DocumentListResponse, DocumentRead
 from app.services.audit_service import field_changes
 
 
@@ -96,6 +98,25 @@ class ClientService:
             # 404 (not 403) so non-admins can't probe which clients exist.
             raise NotFoundError("Client not found.")
         return client
+
+    def list_documents(
+        self,
+        user: User,
+        client_id: uuid.UUID,
+        *,
+        pagination: PaginationParams,
+        kind: DocumentKind | None = None,
+    ) -> DocumentListResponse:
+        self.get_client(user, client_id)  # 404 if not accessible
+        rows, total = DocumentRepository(self.db).list_for_client(
+            client_id, kind=kind, offset=pagination.offset, limit=pagination.limit
+        )
+        return DocumentListResponse(
+            items=[DocumentRead.model_validate(d) for d in rows],
+            total=total,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
 
     def update_client(self, client_id: uuid.UUID, data: ClientUpdate) -> Client:
         """Admin edit of status / basic profile fields (partial). Scoping is
@@ -178,6 +199,7 @@ class ClientService:
             industry=c.industry,
             website=c.website,
             location=c.location,
+            logo_url=c.logo_url,
             status=c.status,
             onboarding_step=c.onboarding_step,
             spend=float(c.spend_total),

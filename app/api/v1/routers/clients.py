@@ -24,10 +24,11 @@ from app.api.deps import AdminUser, CurrentUser, DbSession, Pagination, StorageD
 from app.core.config import get_settings
 from app.core.rate_limit import RateLimit
 from app.models.client import Client
-from app.models.enums import ClientStatus
+from app.models.enums import ClientStatus, DocumentKind
 from app.schemas.brand_job import BrandJobRead
 from app.schemas.client import ClientListResponse, ClientRead, ClientUpdate
 from app.schemas.consistency import ConsistencyReport
+from app.schemas.document import DocumentListResponse
 from app.schemas.onboarding import (
     BrandExtraction,
     BrandExtractionRequest,
@@ -149,6 +150,38 @@ def attach_documents(
     service = OnboardingService(db)
     client = service.get(client_id)
     client = service.add_documents(admin, client, data.documents)
+    return _step_response(client, db)
+
+
+@router.get(
+    "/{client_id}/documents",
+    response_model=DocumentListResponse,
+    summary="List a client's uploaded documents",
+)
+def list_documents(
+    client_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    pagination: Pagination,
+    kind: DocumentKind | None = Query(None, description="Filter by document kind"),
+) -> DocumentListResponse:
+    return ClientService(db).list_documents(user, client_id, pagination=pagination, kind=kind)
+
+
+@router.delete(
+    "/{client_id}/documents/{document_id}",
+    response_model=OnboardingStepResponse,
+    summary="Remove an uploaded document from a client (admin only)",
+)
+def remove_document(
+    client_id: uuid.UUID,
+    document_id: uuid.UUID,
+    admin: AdminUser,
+    db: DbSession,
+) -> OnboardingStepResponse:
+    service = OnboardingService(db)
+    client = service.get(client_id)
+    client = service.remove_document(client, document_id)
     return _step_response(client, db)
 
 

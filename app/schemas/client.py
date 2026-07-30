@@ -49,12 +49,18 @@ class ClientListItem(BaseModel):
     industry: str | None = None
     website: str | None = None
     location: str | None = None
+    logo_url: str | None = None
     status: ClientStatus
     onboarding_step: int = 1
     spend: float
     leads: int
     cpl: float
     created_at: datetime
+
+    @field_validator("logo_url")
+    @classmethod
+    def _resolve_logo_url(cls, value: str | None) -> str | None:
+        return resolve_logo_url(value)
 
     @computed_field
     @property

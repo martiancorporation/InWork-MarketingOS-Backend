@@ -37,6 +37,7 @@ from app.models.enums import (
 )
 from app.models.user import User
 from app.repositories.client_repository import ClientRepository
+from app.repositories.document_repository import DocumentRepository
 from app.schemas.consistency import ConsistencyFinding, ConsistencyReport
 from app.schemas.onboarding import (
     BasicsUpdate,
@@ -249,6 +250,22 @@ class OnboardingService:
             debounce_seconds=5,
         )
         self._commit("Could not attach documents — please retry.")
+        self.db.refresh(client)
+        return client
+
+    def remove_document(self, client: Client, document_id: uuid.UUID) -> Client:
+        """Detach a single uploaded document reference (Settings page)."""
+        document = DocumentRepository(self.db).get_for_client(client.id, document_id)
+        if document is None:
+            raise NotFoundError("Document not found.")
+        self.db.delete(document)
+        self._enqueue_build(
+            client.id,
+            IntelJobType.incremental.value,
+            changed_keys=["documents"],
+            debounce_seconds=5,
+        )
+        self._commit("Could not remove the document — please retry.")
         self.db.refresh(client)
         return client
 
