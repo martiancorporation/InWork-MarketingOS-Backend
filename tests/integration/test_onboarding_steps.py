@@ -283,7 +283,7 @@ def test_channels_not_offered_by_the_wizard_are_rejected(
 
 
 def test_timezone_round_trips_through_the_draft(client: TestClient, admin_headers: dict):
-    """RD's US-reporting requirement: reporting is bucketed by the client's own
+    """The US-reporting requirement: reporting is bucketed by the client's own
     local day, so the zone has to be captured and stored."""
     cid = _draft_id(client, admin_headers, timezone="America/New_York")
     assert client.get(f"{API}/clients/{cid}", headers=admin_headers).json()["timezone"] == (

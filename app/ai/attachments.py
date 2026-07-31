@@ -1,7 +1,7 @@
 """Turn chat attachments into something the model can actually read.
 
-The Ask AI composer lets an operator attach files — RD's example was "I can share
-last week's report and say, why is it not matching?". Two shapes reach the model:
+The Ask AI composer lets an operator attach files — e.g. "I can share last week's
+report and say, why is it not matching?". Two shapes reach the model:
 
 * **Images** go through Claude vision as image blocks.
 * **Everything else** is parsed to plain text by the shared document extractor

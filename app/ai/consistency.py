@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
 from app.integrations.anthropic.client import AnthropicClient
@@ -59,7 +60,11 @@ class ConsistencyAgent:
                 {"client_name": client.name or "the client", "corpus": corpus},
             )
             raw = await self._client.complete(
-                system=system, prompt=prompt, max_tokens=2000, context=context
+                system=system,
+                prompt=prompt,
+                max_tokens=2000,
+                model=model_for(context.feature if context else None),
+                context=context,
             )
         except Exception:
             logger.warning("Consistency agent failed for client %s", client.id, exc_info=True)

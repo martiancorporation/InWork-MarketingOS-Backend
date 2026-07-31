@@ -29,6 +29,7 @@ from app.models.conversation import (
     MessageAttachment,
     MessageRecipient,
 )
+from app.models.dashboard_snapshot import DashboardSnapshot
 from app.models.document import Document
 from app.models.event import (
     EventActivity,
@@ -70,6 +71,7 @@ __all__ = [
     "ComplianceDoc",
     "ComplianceEntry",
     "Conversation",
+    "DashboardSnapshot",
     "Document",
     "EventActivity",
     "EventAd",

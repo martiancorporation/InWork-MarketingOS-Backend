@@ -21,7 +21,7 @@ class FakeAI:
     def is_configured(self) -> bool:
         return True
 
-    async def complete(self, *, system, prompt, max_tokens=None, context=None) -> str:
+    async def complete(self, *, system, prompt, max_tokens=None, model=None, context=None) -> str:
         return self._raw
 
 

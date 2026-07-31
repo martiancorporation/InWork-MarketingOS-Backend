@@ -161,7 +161,7 @@ def test_multiple_images_go_in_one_call(
 def test_document_text_lands_in_the_prompt(
     client: TestClient, admin_headers: dict, storage, captured
 ):
-    """A CSV/report is extracted to text — this is RD's "why doesn't it match?" case."""
+    """A CSV/report is extracted to text — the "why doesn't it match?" case."""
     cid = _client_id(client, admin_headers)
     chat = _chat_id(client, admin_headers, cid)
     upload_id = _upload(client, admin_headers, "july.csv", CSV, "text/csv")

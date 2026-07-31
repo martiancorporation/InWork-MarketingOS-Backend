@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 
 from app.ai.features import AiFeature
+from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
 from app.integrations.anthropic.client import AnthropicClient
@@ -67,7 +68,11 @@ class MissingInfoAgent:
                 },
             )
             raw = await self._client.complete(
-                system=system, prompt=prompt, max_tokens=1500, context=usage
+                system=system,
+                prompt=prompt,
+                max_tokens=1500,
+                model=model_for(self.feature),
+                context=usage,
             )
         except Exception:
             logger.warning("Missing-info AI failed for client %s", client.id, exc_info=True)

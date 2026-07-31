@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
 from app.integrations.anthropic.client import AnthropicClient
@@ -102,7 +103,11 @@ class DirectivesAgent:
                 {"client_name": client.name or "the client", "corpus": corpus},
             )
             raw = await self._client.complete(
-                system=system, prompt=prompt, max_tokens=8000, context=context
+                system=system,
+                prompt=prompt,
+                max_tokens=8000,
+                model=model_for(context.feature if context else None),
+                context=context,
             )
         except Exception:
             logger.warning("Directives agent failed for %s", client.id, exc_info=True)

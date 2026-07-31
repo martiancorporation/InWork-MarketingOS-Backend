@@ -12,7 +12,11 @@ before any method here runs. Repositories flush; this service owns the commit.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import uuid
+from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -31,6 +35,7 @@ from app.models.client import Client
 from app.models.enums import ApprovalStatus, ComplianceKind, IntegrationStatus
 from app.models.event import MarketingEvent
 from app.models.recommendation import RecommendationAction
+from app.repositories.dashboard_snapshot_repository import DashboardSnapshotRepository
 from app.repositories.recommendation_repository import RecommendationRepository
 from app.schemas.ai import (
     DashboardResponse,
@@ -47,15 +52,41 @@ from app.schemas.ai import (
 )
 from app.services.intelligence.context_service import ContextService
 
+# The bundle is cached (see ``build``'s ``force_refresh``/hash check below); this
+# is a backstop so a client with genuinely nothing new still gets a fresh AI
+# pass at least this often. Same style as AnalyticsService's _STALE_AFTER_HOURS.
+_SNAPSHOT_MAX_AGE_HOURS = 24
+
 
 class DashboardService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.recommendations = RecommendationRepository(db)
+        self.snapshots = DashboardSnapshotRepository(db)
 
-    async def build(self, client: Client, *, user_id: uuid.UUID | None = None) -> DashboardResponse:
+    async def build(
+        self,
+        client: Client,
+        *,
+        user_id: uuid.UUID | None = None,
+        force_refresh: bool = False,
+    ) -> DashboardResponse:
         signals = self._signals(client)
         context = ContextService(self.db).build(client.id)
+        inputs_hash = _hash_inputs(signals, context.version)
+
+        if not force_refresh:
+            cached = self.snapshots.get_for_client(client.id)
+            if (
+                cached is not None
+                and cached.inputs_hash == inputs_hash
+                and not self._snapshot_stale(cached.computed_at)
+            ):
+                response = DashboardResponse.model_validate(cached.payload)
+                # Decisions are a cheap DB read, not an AI call — always fresh,
+                # even when the AI-generated content itself is served from cache.
+                self._merge_decisions(client.id, response.recommendations)
+                return response
 
         def usage(feature: str) -> AiUsageContext:
             return AiUsageContext(feature=feature, client_id=client.id, user_id=user_id)
@@ -73,7 +104,7 @@ class DashboardService:
 
         self._merge_decisions(client.id, recs)
         qa_review = await self._qa_review(brief, recs, context.preamble, signals, usage)
-        return DashboardResponse(
+        response = DashboardResponse(
             health_score=health,
             executive_brief=brief,
             watchdog=watchdog,
@@ -81,6 +112,21 @@ class DashboardService:
             ai_generated=AnthropicClient().is_configured,
             qa_review=qa_review,
         )
+        self.snapshots.upsert(
+            client.id,
+            payload=response.model_dump(mode="json"),
+            inputs_hash=inputs_hash,
+            computed_at=datetime.now(UTC),
+        )
+        self.db.commit()
+        return response
+
+    @staticmethod
+    def _snapshot_stale(computed_at: datetime) -> bool:
+        """SQLite hands back naive timestamps (Postgres doesn't) — re-attach UTC
+        before comparing, same treatment as AnalyticsService._as_utc."""
+        computed = computed_at if computed_at.tzinfo is not None else computed_at.replace(tzinfo=UTC)
+        return datetime.now(UTC) - computed > timedelta(hours=_SNAPSHOT_MAX_AGE_HOURS)
 
     async def _qa_review(
         self,
@@ -247,6 +293,20 @@ class DashboardService:
             best_campaign=_rank_by_cpl(campaigns, best=True),
             worst_campaign=_rank_by_cpl(campaigns, best=False),
         )
+
+
+def _hash_inputs(signals: DashboardSignals, profile_version: int | None) -> str:
+    """Stable fingerprint of everything the dashboard AI engines read.
+
+    If this is unchanged since the last build, there is nothing new for the AI
+    to react to, regardless of which underlying row changed — cheap to compute
+    since ``signals`` is already assembled from denormalized columns before any
+    AI call runs.
+    """
+    blob = json.dumps(
+        {**asdict(signals), "profile_version": profile_version}, sort_keys=True, default=str
+    )
+    return hashlib.sha256(blob.encode()).hexdigest()
 
 
 def _rank_by_cpl(campaigns: list, *, best: bool) -> tuple[str, float] | None:

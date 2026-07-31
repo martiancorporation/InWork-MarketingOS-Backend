@@ -102,11 +102,12 @@ class AnthropicClient:
         system: str,
         prompt: str,
         max_tokens: int | None = None,
+        model: str | None = None,
         context: AiUsageContext | None = None,
     ) -> str:
         message = await self._invoke(
             {
-                "model": self._settings.model,
+                "model": model or self._settings.model,
                 "max_tokens": max_tokens or self._settings.max_tokens,
                 "system": system,
                 "messages": [{"role": "user", "content": prompt}],
@@ -124,6 +125,7 @@ class AnthropicClient:
         image: bytes,
         media_type: str = "image/jpeg",
         max_tokens: int | None = None,
+        model: str | None = None,
         context: AiUsageContext | None = None,
     ) -> str:
         """Single-shot completion where Claude also *sees* an image (vision)."""
@@ -132,6 +134,7 @@ class AnthropicClient:
             prompt=prompt,
             images=[(image, media_type)],
             max_tokens=max_tokens,
+            model=model,
             context=context,
             operation="complete_with_image",
         )
@@ -143,6 +146,7 @@ class AnthropicClient:
         prompt: str,
         images: list[tuple[bytes, str]],
         max_tokens: int | None = None,
+        model: str | None = None,
         context: AiUsageContext | None = None,
         operation: str = "complete_with_images",
     ) -> str:
@@ -173,7 +177,7 @@ class AnthropicClient:
 
         message = await self._invoke(
             {
-                "model": self._settings.model,
+                "model": model or self._settings.model,
                 "max_tokens": max_tokens or self._settings.max_tokens,
                 "system": system,
                 "messages": [{"role": "user", "content": blocks}],
@@ -189,6 +193,7 @@ class AnthropicClient:
         system: str,
         prompt: str,
         max_tokens: int | None = None,
+        model: str | None = None,
         context: AiUsageContext | None = None,
     ):
         """Yield text deltas from a streaming completion (ChatGPT-style typing).
@@ -199,7 +204,7 @@ class AnthropicClient:
         """
         client = self._new_client()
         ctx = context or self._context
-        model = self._settings.model
+        model = model or self._settings.model
         started = time.perf_counter()
         final = None
         try:
@@ -242,6 +247,7 @@ class AnthropicClient:
         prompt: str,
         url: str,
         max_tokens: int | None = None,
+        model: str | None = None,
         context: AiUsageContext | None = None,
     ) -> str:
         """Let Claude fetch ``url`` (via the web_fetch tool) and analyze it.
@@ -262,7 +268,7 @@ class AnthropicClient:
         for _ in range(_MAX_PAUSE_CONTINUATIONS):
             message = await self._invoke(
                 {
-                    "model": self._settings.model,
+                    "model": model or self._settings.model,
                     "max_tokens": max_tokens or self._settings.max_tokens,
                     "system": system,
                     "tools": [tool],

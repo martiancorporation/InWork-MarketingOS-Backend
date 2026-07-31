@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 
 from app.ai.features import AiFeature
+from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.models.compliance import ComplianceEntry
 from app.models.enums import ComplianceKind, SocialPlatform
@@ -95,6 +96,7 @@ class ContentReviewAgent(ClientAgent):
             raw = await self.ai.complete(
                 system=self.system_prompt(load_prompt("content_review/system.txt")),
                 prompt=prompt,
+                model=model_for(self.feature),
                 context=None,
             )
         except Exception:

@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
 from app.integrations.anthropic.client import AnthropicClient
@@ -59,8 +60,9 @@ class SummaryAgent:
                 load_prompt("client_summary/user_template.txt"),
                 {"client_name": client.name or "the client", "corpus": corpus},
             )
+            model = model_for(context.feature if context else None)
             raw = await self._client.complete(
-                system=system, prompt=prompt, max_tokens=8000, context=context
+                system=system, prompt=prompt, max_tokens=8000, model=model, context=context
             )
         except Exception:
             logger.warning("Summary agent failed for client %s", client.id, exc_info=True)
@@ -73,7 +75,7 @@ class SummaryAgent:
         return SummaryResult(
             profile=profile,
             summary_md=str(payload.get("summary_md") or "").strip() or _render_md(client, profile),
-            model=self._client._settings.model,  # noqa: SLF001 - model id only
+            model=model or self._client._settings.model,  # noqa: SLF001 - model id only
             ai_generated=True,
         )
 

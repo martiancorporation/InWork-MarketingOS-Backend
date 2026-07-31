@@ -39,6 +39,7 @@ from urllib.parse import urlparse
 
 from anyio import to_thread
 
+from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
 from app.integrations.anthropic.client import AnthropicClient
@@ -261,16 +262,20 @@ class BrandExtractionService:
 
         for attempt in range(_MODEL_ATTEMPTS):
             try:
+                model = model_for(context.feature if context else None)
                 if screenshot is not None:
                     raw = await self._client.complete_with_image(
                         system=system,
                         prompt=prompt,
                         image=screenshot,
                         media_type=media_type,
+                        model=model,
                         context=context,
                     )
                 else:
-                    raw = await self._client.complete(system=system, prompt=prompt, context=context)
+                    raw = await self._client.complete(
+                        system=system, prompt=prompt, model=model, context=context
+                    )
             except Exception:  # transient API error — retry once, then degrade
                 logger.warning(
                     "Brand analysis attempt %d failed for %s",

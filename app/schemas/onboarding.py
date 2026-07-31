@@ -21,7 +21,7 @@ HEX_PATTERN = r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
 
 
 # BE-02 Phase-1 channel set — the ONLY marketing channels onboarding accepts.
-# RD narrowed the wizard to these; Twitter/X, Pinterest, Snapchat, Reddit and
+# The wizard is narrowed to these; Twitter/X, Pinterest, Snapchat, Reddit and
 # email/CRM are intentionally rejected. These are the frontend channel ids (the
 # integrations catalog uses the same hyphenated slugs).
 #

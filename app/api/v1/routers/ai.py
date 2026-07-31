@@ -1,6 +1,10 @@
 """Dashboard AI API (v1) — health score, executive brief, watchdog, recommendations.
 
 - ``GET  /clients/{id}/dashboard``                          — the full AI dashboard bundle
+  (cached — see ``DashboardService.build``'s inputs-hash check; skips the AI calls entirely
+  when nothing the engines read has changed since the last build)
+- ``POST /clients/{id}/dashboard/refresh``                  — force-regenerate, bypassing
+  the cache (admin only)
 - ``POST /clients/{id}/recommendations/{rec_key}/decision`` — accept/modify/reject a rec
 - ``GET  /clients/{id}/recommendations/decisions``          — decision history (audit trail)
 
@@ -17,7 +21,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, status
 
-from app.api.deps import CurrentUser, DbSession, require_capability
+from app.api.deps import AdminUser, CurrentUser, DbSession, require_capability
 from app.core.rate_limit import RateLimit
 from app.models.client import Client
 from app.models.enums import ClientCapability
@@ -46,6 +50,19 @@ async def get_dashboard(
 ) -> DashboardResponse:
     client = ClientService(db).get_client(user, client_id)
     return await DashboardService(db).build(client, user_id=user.id)
+
+
+@router.post(
+    "/dashboard/refresh",
+    response_model=DashboardResponse,
+    summary="Force-regenerate the AI dashboard bundle, bypassing the cache (admin)",
+    dependencies=[Depends(RateLimit("ai_dashboard", times=30, seconds=60))],
+)
+async def refresh_dashboard(
+    client_id: uuid.UUID, admin: AdminUser, db: DbSession
+) -> DashboardResponse:
+    client = ClientService(db).get_client(admin, client_id)
+    return await DashboardService(db).build(client, user_id=admin.id, force_refresh=True)
 
 
 @router.get(

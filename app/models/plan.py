@@ -45,9 +45,9 @@ class PlanTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     # A task spans ``start_date``..``due_date``. Either may be null: a single-day
-    # item carries one of them, and an open-ended organic item may carry neither
-    # (RD: "If I am doing an organic post it will be forever"). Campaigns are the
-    # time-bound case and set both, so the calendar can render a spanning bar.
+    # item carries one of them, and an open-ended organic post — one with no
+    # planned end — may carry neither. Campaigns are the time-bound case and
+    # set both, so the calendar can render a spanning bar.
     start_date: Mapped[date | None] = mapped_column(Date, index=True)
     due_date: Mapped[date | None] = mapped_column(Date, index=True)
     # Daily clock window, local to the client's timezone. Plain ``Time`` (not

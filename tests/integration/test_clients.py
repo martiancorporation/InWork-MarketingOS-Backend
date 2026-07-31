@@ -265,7 +265,15 @@ def test_brand_extraction_render_plus_vision(client: TestClient, admin_headers: 
     from app.utils.render import RenderedPage
 
     async def fake_complete_with_image(
-        self, *, system, prompt, image, media_type="image/jpeg", max_tokens=None, context=None
+        self,
+        *,
+        system,
+        prompt,
+        image,
+        media_type="image/jpeg",
+        max_tokens=None,
+        model=None,
+        context=None,
     ):
         assert image == b"jpg"  # the screenshot reached the model
         assert "site text" in prompt  # so did the rendered text
@@ -300,7 +308,7 @@ def test_brand_extraction_scrape_fallback_when_render_unavailable(
     from app.integrations.anthropic.client import AnthropicClient
     from app.utils.web import PageContent
 
-    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
+    async def fake_complete(self, *, system, prompt, max_tokens=None, model=None, context=None):
         assert "site text" in prompt  # scraped text was passed as reference
         return '{"summary":"From scraped text","colors":[],"fonts":[],"tone":"plain","imagery":"minimal"}'
 
@@ -424,7 +432,7 @@ def test_brand_extraction_from_document_text(client: TestClient, admin_headers: 
         ),
     )
 
-    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
+    async def fake_complete(self, *, system, prompt, max_tokens=None, model=None, context=None):
         assert "Acme brand guide" in prompt  # the document text reached the model
         return '{"summary":"Bold and confident.","colors":["#001F5B"],"fonts":["Poppins"]}'
 
@@ -459,7 +467,9 @@ def test_brand_extraction_from_image_uses_vision(
     )
     seen: dict = {}
 
-    async def fake_vision(self, *, system, prompt, image, media_type="image/jpeg", context=None):
+    async def fake_vision(
+        self, *, system, prompt, image, media_type="image/jpeg", model=None, context=None
+    ):
         seen["media_type"] = media_type
         return '{"summary":"Logo-derived theme.","colors":["#FF5722"],"fonts":[]}'
 

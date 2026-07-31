@@ -2,8 +2,8 @@
 
 Controls how often the standalone scheduler process (``python -m app.scheduler``)
 fires each platform-wide sweep — the KPI watchdog (the "refresh from recent data"
-loop RD asked for), the integration sync, and the daily digest build. All are
-configurable so the cadence can be tuned per environment without a code change.
+loop), the integration sync, and the daily digest build. All are configurable so
+the cadence can be tuned per environment without a code change.
 """
 
 from __future__ import annotations

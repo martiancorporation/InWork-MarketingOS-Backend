@@ -77,7 +77,7 @@ def test_review_seo_flags_short_no_cta_no_hashtags(client: TestClient, admin_hea
 def test_review_uses_ai_when_configured(client: TestClient, admin_headers: dict, monkeypatch):
     from app.integrations.anthropic.client import AnthropicClient
 
-    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
+    async def fake_complete(self, *, system, prompt, max_tokens=None, model=None, context=None):
         return '{"brand_voice_aligned": false, "issues": ["Tone is too casual"], "suggestions": ["Match the confident brand voice"]}'
 
     monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))

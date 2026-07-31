@@ -12,6 +12,7 @@ import logging
 
 from app.ai.dashboard_signals import DashboardSignals
 from app.ai.features import AiFeature
+from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
 from app.integrations.anthropic.client import AnthropicClient
@@ -59,7 +60,11 @@ class HealthScoreAgent:
                 },
             )
             raw = await self._client.complete(
-                system=system, prompt=prompt, max_tokens=1500, context=usage
+                system=system,
+                prompt=prompt,
+                max_tokens=1500,
+                model=model_for(self.feature),
+                context=usage,
             )
             payload = parse_json_object(raw)
             result = HealthScore.model_validate(payload)

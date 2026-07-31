@@ -15,21 +15,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app.ai.features import AiFeature
+from app.ai.model_router import CHEAP_TIER_FEATURES as _DATA_GATHERING_FEATURES
 from app.ai.pricing import MODEL_PRICING, UsageBreakdown, price
 from app.core.config import get_settings
 from app.schemas.ai_usage import CostOptimizationReport, CostSuggestion
 
 # Features whose calls mostly gather/normalize data (not client-facing prose):
-# safe to run on the cheapest capable model.
-_DATA_GATHERING_FEATURES = {
-    AiFeature.BRAND_EXTRACTION,
-    AiFeature.CONSISTENCY_CHECK,
-    AiFeature.MISSING_INFO,
-    AiFeature.CLIENT_SUMMARY,
-    AiFeature.WATCHDOG,
-    AiFeature.HEALTH_SCORE,
-}
+# safe to run on the cheapest capable model. Shared with app/ai/model_router.py
+# (the module that actually routes live calls) so the advisory report here and
+# live routing can never drift apart.
 # Model tiers (expensive → cheap/mid) come from config, not hard-coded here —
 # see AISettings.cheap_model / mid_model / expensive_models.
 
