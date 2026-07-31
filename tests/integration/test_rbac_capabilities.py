@@ -189,3 +189,163 @@ def test_recommendation_decision_allowed_with_review_results(client, admin_heade
         json={"decision": "accepted"},
     )
     assert r.status_code == 201, r.text
+
+
+def test_alert_resolve_requires_review_results(client, admin_headers, make_user, db_session):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    _assign(client, admin_headers, cid, user["id"], caps=["manage_integrations"])
+    alert_id = _make_alert(db_session, cid)
+    r = client.post(f"{API}/clients/{cid}/alerts/{alert_id}/resolve", headers=uh)
+    assert r.status_code == 403
+
+
+def test_alert_resolve_allowed_with_review_results(client, admin_headers, make_user, db_session):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    _assign(client, admin_headers, cid, user["id"], caps=["review_results"])
+    alert_id = _make_alert(db_session, cid)
+    r = client.post(f"{API}/clients/{cid}/alerts/{alert_id}/resolve", headers=uh)
+    assert r.status_code == 200, r.text
+
+
+# ---- enforcement: campaigns write = manage_campaigns ---- #
+
+_CAMPAIGN_BODY = {"name": "Q4 launch", "objective": "leads"}
+
+
+def test_campaign_create_requires_manage_campaigns(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    _assign(client, admin_headers, cid, user["id"], caps=["review_results"])
+    r = client.post(f"{API}/clients/{cid}/campaigns", headers=uh, json=_CAMPAIGN_BODY)
+    assert r.status_code == 403
+
+
+def test_campaign_create_allowed_with_manage_campaigns(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    _assign(client, admin_headers, cid, user["id"], caps=["manage_campaigns"])
+    r = client.post(f"{API}/clients/{cid}/campaigns", headers=uh, json=_CAMPAIGN_BODY)
+    assert r.status_code == 201, r.text
+
+
+def test_campaign_delete_requires_manage_campaigns(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    created = client.post(
+        f"{API}/clients/{cid}/campaigns", headers=admin_headers, json=_CAMPAIGN_BODY
+    )
+    camp_id = created.json()["id"]
+    _assign(client, admin_headers, cid, user["id"], caps=["review_results"])
+    r = client.delete(f"{API}/clients/{cid}/campaigns/{camp_id}", headers=uh)
+    assert r.status_code == 403
+
+
+# ---- enforcement: calendar writes = manage_calendar / review_creatives ---- #
+
+_EVENT_BODY = {
+    "title": "Winter drop",
+    "type": "campaign",
+    "platform": "instagram",
+    "event_date": "2026-07-15",
+    "event_time": "09:00:00",
+    "stage": "scheduled",
+}
+
+
+def test_calendar_event_create_requires_manage_calendar(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    _assign(client, admin_headers, cid, user["id"], caps=["review_creatives"])
+    r = client.post(f"{API}/clients/{cid}/calendar/events", headers=uh, json=_EVENT_BODY)
+    assert r.status_code == 403
+
+
+def test_calendar_event_create_allowed_with_manage_calendar(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    _assign(client, admin_headers, cid, user["id"], caps=["manage_calendar"])
+    r = client.post(f"{API}/clients/{cid}/calendar/events", headers=uh, json=_EVENT_BODY)
+    assert r.status_code == 201, r.text
+
+
+def test_calendar_approval_requires_review_creatives(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    created = client.post(
+        f"{API}/clients/{cid}/calendar/events", headers=admin_headers, json=_EVENT_BODY
+    )
+    event_id = created.json()["id"]
+    _assign(client, admin_headers, cid, user["id"], caps=["manage_calendar"])
+    r = client.post(
+        f"{API}/clients/{cid}/calendar/events/{event_id}/approval",
+        headers=uh,
+        json={"status": "approved"},
+    )
+    assert r.status_code == 403
+
+
+def test_calendar_approval_allowed_with_review_creatives(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    created = client.post(
+        f"{API}/clients/{cid}/calendar/events", headers=admin_headers, json=_EVENT_BODY
+    )
+    event_id = created.json()["id"]
+    _assign(client, admin_headers, cid, user["id"], caps=["review_creatives"])
+    r = client.post(
+        f"{API}/clients/{cid}/calendar/events/{event_id}/approval",
+        headers=uh,
+        json={"status": "approved"},
+    )
+    assert r.status_code == 200, r.text
+
+
+# ---- enforcement: compliance writes = manage_compliance ---- #
+
+
+def test_compliance_create_requires_manage_compliance(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    _assign(client, admin_headers, cid, user["id"], caps=["manage_calendar"])
+    r = client.post(
+        f"{API}/clients/{cid}/compliance",
+        headers=uh,
+        json={"kind": "banned", "text": "no medical claims"},
+    )
+    assert r.status_code == 403
+
+
+def test_compliance_create_allowed_with_manage_compliance(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    _assign(client, admin_headers, cid, user["id"], caps=["manage_compliance"])
+    r = client.post(
+        f"{API}/clients/{cid}/compliance",
+        headers=uh,
+        json={"kind": "banned", "text": "no medical claims"},
+    )
+    assert r.status_code == 201, r.text
+
+
+# ---- enforcement: integrations disconnect = manage_integrations ---- #
+# (the connect/disconnect asymmetry: connect was already gated, disconnect was not)
+
+
+def test_disconnect_requires_manage_integrations(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    _connect(client, admin_headers, cid)  # admin connects it first
+    _assign(client, admin_headers, cid, user["id"], caps=["review_results"])
+    r = client.post(f"{API}/clients/{cid}/integrations/ga4/disconnect", headers=uh)
+    assert r.status_code == 403
+
+
+def test_disconnect_allowed_with_manage_integrations(client, admin_headers, make_user):
+    user, uh = make_user()
+    cid = _cid(client, admin_headers)
+    _connect(client, admin_headers, cid)
+    _assign(client, admin_headers, cid, user["id"], caps=["manage_integrations"])
+    r = client.post(f"{API}/clients/{cid}/integrations/ga4/disconnect", headers=uh)
+    assert r.status_code == 200, r.text

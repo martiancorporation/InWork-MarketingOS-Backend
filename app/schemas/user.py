@@ -8,7 +8,7 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.models.enums import UserRole
-from app.schemas.common import ORMModel
+from app.schemas.common import ORMModel, StrictModel
 from app.schemas.validators import validate_password_strength
 
 
@@ -21,7 +21,7 @@ class UserRead(ORMModel):
     created_at: datetime
 
 
-class UserCreate(BaseModel):
+class UserCreate(StrictModel):
     """Admin creates a managed user."""
 
     name: str = Field(min_length=1, max_length=120)
@@ -35,7 +35,7 @@ class UserCreate(BaseModel):
         return validate_password_strength(value)
 
 
-class UserUpdate(BaseModel):
+class UserUpdate(StrictModel):
     """Admin updates a user's role and/or active state (all fields optional)."""
 
     name: str | None = Field(default=None, min_length=1, max_length=120)

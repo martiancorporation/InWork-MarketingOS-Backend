@@ -56,6 +56,9 @@ class AssistantChatRead(ORMModel):
 
 class AssistantChatDetail(AssistantChatRead):
     messages: list[AssistantMessageRead] = []
+    messages_total: int = 0
+    messages_page: int = 1
+    messages_page_size: int = 20
 
 
 class AssistantChatListResponse(BaseModel):
@@ -74,9 +77,7 @@ class AssistantAskRequest(StrictModel):
     """
 
     content: str = Field(default="", max_length=_MAX_QUESTION)
-    attachment_upload_ids: list[uuid.UUID] = Field(
-        default_factory=list, max_length=MAX_ATTACHMENTS
-    )
+    attachment_upload_ids: list[uuid.UUID] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
 
     @model_validator(mode="after")
     def _require_something_to_answer(self) -> Self:

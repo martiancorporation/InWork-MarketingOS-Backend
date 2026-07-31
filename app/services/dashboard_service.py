@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import json
 import uuid
+from collections import defaultdict
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
@@ -30,6 +31,7 @@ from app.ai.qa import QAReviewer
 from app.ai.recommendations import RecommendationsAgent
 from app.ai.usage import AiUsageContext
 from app.ai.watchdog import WatchdogAgent
+from app.core.pagination import PaginationParams
 from app.integrations.anthropic.client import AnthropicClient
 from app.models.client import Client
 from app.models.enums import ApprovalStatus, ComplianceKind, IntegrationStatus
@@ -50,12 +52,22 @@ from app.schemas.ai import (
     SetupItem,
     SetupStatusResponse,
 )
-from app.services.intelligence.context_service import ContextService
+from app.services.intelligence.context_service import ClientContext, ContextService
 
 # The bundle is cached (see ``build``'s ``force_refresh``/hash check below); this
 # is a backstop so a client with genuinely nothing new still gets a fresh AI
 # pass at least this often. Same style as AnalyticsService's _STALE_AFTER_HOURS.
 _SNAPSHOT_MAX_AGE_HOURS = 24
+
+# Per-client build lock: two concurrent requests hitting an expired/cold cache
+# for the same client (e.g. two browser tabs) would otherwise both pay for the
+# 4-6 AI calls. Serializing on this lock lets the loser recheck the cache the
+# winner just filled instead of redoing the work. Per-process only (like the
+# rate limiter) — with multiple workers, each still runs the pipeline once;
+# this closes the common single-worker/single-tab-refresh case cheaply. One
+# Lock object persists per client ever built for the life of the process
+# (unbounded but tiny — same trade-off as the rate limiter's per-key dict).
+_build_locks: dict[uuid.UUID, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 class DashboardService:
@@ -75,18 +87,45 @@ class DashboardService:
         context = ContextService(self.db).build(client.id)
         inputs_hash = _hash_inputs(signals, context.version)
 
-        if not force_refresh:
-            cached = self.snapshots.get_for_client(client.id)
-            if (
-                cached is not None
-                and cached.inputs_hash == inputs_hash
-                and not self._snapshot_stale(cached.computed_at)
-            ):
-                response = DashboardResponse.model_validate(cached.payload)
-                # Decisions are a cheap DB read, not an AI call — always fresh,
-                # even when the AI-generated content itself is served from cache.
-                self._merge_decisions(client.id, response.recommendations)
-                return response
+        if force_refresh:
+            return await self._generate(client, context, signals, inputs_hash, user_id=user_id)
+
+        cached = self._fresh_cache(client.id, inputs_hash)
+        if cached is not None:
+            return cached
+
+        async with _build_locks[client.id]:
+            # Re-check: another request may have filled the cache while we
+            # waited for the lock (the common "two tabs, one cold cache" race).
+            cached = self._fresh_cache(client.id, inputs_hash)
+            if cached is not None:
+                return cached
+            return await self._generate(client, context, signals, inputs_hash, user_id=user_id)
+
+    def _fresh_cache(self, client_id: uuid.UUID, inputs_hash: str) -> DashboardResponse | None:
+        cached = self.snapshots.get_for_client(client_id)
+        if (
+            cached is None
+            or cached.inputs_hash != inputs_hash
+            or self._snapshot_stale(cached.computed_at)
+        ):
+            return None
+        response = DashboardResponse.model_validate(cached.payload)
+        # Decisions are a cheap DB read, not an AI call — always fresh, even
+        # when the AI-generated content itself is served from cache.
+        self._merge_decisions(client_id, response.recommendations)
+        return response
+
+    async def _generate(
+        self,
+        client: Client,
+        context: ClientContext,
+        signals: DashboardSignals,
+        inputs_hash: str,
+        *,
+        user_id: uuid.UUID | None,
+    ) -> DashboardResponse:
+        """Run the 4-6 AI engines and atomically cache the result."""
 
         def usage(feature: str) -> AiUsageContext:
             return AiUsageContext(feature=feature, client_id=client.id, user_id=user_id)
@@ -121,6 +160,10 @@ class DashboardService:
             ai_generated=AnthropicClient().is_configured,
             qa_review=qa_review,
         )
+        # One atomic upsert — see DashboardSnapshotRepository.upsert. Two
+        # concurrent force-refreshes (or a race the per-process lock above
+        # can't see, e.g. across separate workers) can no longer crash on the
+        # unique constraint; the later write just wins.
         self.snapshots.upsert(
             client.id,
             payload=response.model_dump(mode="json"),
@@ -134,7 +177,9 @@ class DashboardService:
     def _snapshot_stale(computed_at: datetime) -> bool:
         """SQLite hands back naive timestamps (Postgres doesn't) — re-attach UTC
         before comparing, same treatment as AnalyticsService._as_utc."""
-        computed = computed_at if computed_at.tzinfo is not None else computed_at.replace(tzinfo=UTC)
+        computed = (
+            computed_at if computed_at.tzinfo is not None else computed_at.replace(tzinfo=UTC)
+        )
         return datetime.now(UTC) - computed > timedelta(hours=_SNAPSHOT_MAX_AGE_HOURS)
 
     async def _qa_review(
@@ -193,10 +238,16 @@ class DashboardService:
         self.db.refresh(action)
         return action
 
-    def list_decisions(self, client_id: uuid.UUID) -> RecommendationActionListResponse:
-        rows = self.recommendations.list_for_client(client_id)
+    def list_decisions(
+        self, client_id: uuid.UUID, *, pagination: PaginationParams
+    ) -> RecommendationActionListResponse:
+        rows, total = self.recommendations.list_for_client_page(
+            client_id, offset=pagination.offset, limit=pagination.limit
+        )
         items = [RecommendationActionRead.model_validate(r) for r in rows]
-        return RecommendationActionListResponse(items=items, total=len(items))
+        return RecommendationActionListResponse(
+            items=items, total=total, page=pagination.page, page_size=pagination.page_size
+        )
 
     # ---- outstanding-setup indicator (BE-05) ---- #
 
@@ -325,9 +376,7 @@ def _rank_by_cpl(campaigns: list, *, best: bool) -> tuple[str, float] | None:
     that has spent money and produced nothing would otherwise rank as the best.
     """
     scored = [
-        (c.name, float(c.spend) / c.leads)
-        for c in campaigns
-        if c.leads and float(c.spend or 0) > 0
+        (c.name, float(c.spend) / c.leads) for c in campaigns if c.leads and float(c.spend or 0) > 0
     ]
     if not scored:
         return None

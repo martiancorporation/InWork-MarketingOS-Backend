@@ -21,16 +21,24 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff mypy
+          pip install ruff mypy pip-audit
 
       - name: Lint (ruff)
         run: ruff check .
 
-      - name: Format check (ruff, advisory)
-        # Advisory until the existing codebase is reformatted in a dedicated pass.
-        run: ruff format --check . || true
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Dependency vulnerability scan (pip-audit)
+        run: pip-audit -r requirements.txt
 
       - name: Type check (mypy, advisory)
+        # Advisory by design (see pyproject.toml's [tool.mypy] comment): the
+        # codebase has ~50 pre-existing type errors from before mypy was wired
+        # into CI at all. Flipping this to blocking is a real, separate
+        # cleanup project, not something to do silently as a side effect of a
+        # CI-hardening pass — track it explicitly rather than let it block
+        # every future PR on unrelated pre-existing debt.
         run: mypy app || true
 
       - name: Test
@@ -69,3 +77,13 @@ jobs:
           SECRET_KEY: ci-secret-key-not-used-in-prod-0123456789abcdef
           DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/inwork
         run: alembic upgrade head
+
+      - name: Check for model/migration drift
+        env:
+          APP_ENV: development
+          SECRET_KEY: ci-secret-key-not-used-in-prod-0123456789abcdef
+          DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/inwork
+        # Fails if the models declare a change that isn't reflected in a
+        # migration yet (e.g. someone edited a model and forgot to generate
+        # one) — catches drift the "apply migrations" step above can't.
+        run: alembic check

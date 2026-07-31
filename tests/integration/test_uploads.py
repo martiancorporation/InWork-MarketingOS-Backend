@@ -221,6 +221,45 @@ def test_download_survives_past_the_old_presign_ttl_conceptually(
     assert first.status_code == second.status_code == 302
 
 
+# ---- link revocation (regenerate-link) ----
+
+
+def test_regenerate_link_invalidates_the_old_link(
+    client: TestClient, admin_headers, storage
+) -> None:
+    created = _upload(client, admin_headers, name="logo.png", ctype="image/png")
+    body = created.json()
+    old_path = _path_and_query(body["download_url"])
+
+    regenerated = client.post(f"{API}/uploads/{body['id']}/regenerate-link", headers=admin_headers)
+    assert regenerated.status_code == 200, regenerated.text
+    new_path = _path_and_query(regenerated.json()["download_url"])
+
+    assert new_path != old_path
+    # The leaked/old link no longer works...
+    stale = client.get(old_path, follow_redirects=False)
+    assert stale.status_code == 404
+    # ...but the freshly regenerated one does, and the file is untouched.
+    fresh = client.get(new_path, follow_redirects=False)
+    assert fresh.status_code == 302
+
+
+def test_regenerate_link_requires_auth(client: TestClient, admin_headers, storage) -> None:
+    created = _upload(client, admin_headers)
+    resp = client.post(f"{API}/uploads/{created.json()['id']}/regenerate-link")
+    assert resp.status_code == 401
+
+
+def test_regenerate_link_owner_scoped_404(client: TestClient, storage, make_user) -> None:
+    owner, owner_headers = make_user(email="owner@test.com")
+    other, other_headers = make_user(email="other@test.com")
+    created = _upload(client, owner_headers)
+    resp = client.post(
+        f"{API}/uploads/{created.json()['id']}/regenerate-link", headers=other_headers
+    )
+    assert resp.status_code == 404
+
+
 def test_download_by_key_redirects(client: TestClient, storage) -> None:
     key = "uploads/legacy-no-upload-row/logo.png"
     storage.objects[key] = {"size": 1, "content_type": "image/png"}

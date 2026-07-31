@@ -17,7 +17,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import CurrentUser, DbSession, Pagination, require_capability
+from app.api.deps import CurrentUser, DbSession, Pagination, RequireClient, require_capability
 from app.models.client import Client
 from app.models.enums import (
     AlertKind,
@@ -27,7 +27,6 @@ from app.models.enums import (
 )
 from app.schemas.alert import AlertEvaluateResult, AlertListResponse, AlertRead
 from app.services.alert_service import AlertService
-from app.services.client_service import ClientService
 
 router = APIRouter(prefix="/clients/{client_id}/alerts", tags=["alerts"])
 
@@ -35,14 +34,13 @@ router = APIRouter(prefix="/clients/{client_id}/alerts", tags=["alerts"])
 @router.get("", response_model=AlertListResponse, summary="List KPI alerts")
 def list_alerts(
     client_id: uuid.UUID,
-    user: CurrentUser,
     db: DbSession,
     pagination: Pagination,
+    _client: RequireClient,
     status_filter: AlertStatus | None = Query(None, alias="status"),
     severity: AlertSeverity | None = Query(None),
     kind: AlertKind | None = Query(None),
 ) -> AlertListResponse:
-    ClientService(db).get_client(user, client_id)
     return AlertService(db).list_alerts(
         client_id,
         pagination=pagination,
@@ -57,16 +55,16 @@ def list_alerts(
     response_model=AlertEvaluateResult,
     summary="Run the KPI watchdog over the client's campaigns",
 )
-def evaluate_alerts(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> AlertEvaluateResult:
-    ClientService(db).get_client(user, client_id)
+def evaluate_alerts(
+    client_id: uuid.UUID, db: DbSession, _client: RequireClient
+) -> AlertEvaluateResult:
     return AlertService(db).evaluate(client_id)
 
 
 @router.get("/{alert_id}", response_model=AlertRead, summary="Get an alert")
 def get_alert(
-    client_id: uuid.UUID, alert_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, alert_id: uuid.UUID, db: DbSession, _client: RequireClient
 ) -> AlertRead:
-    ClientService(db).get_client(user, client_id)
     return AlertRead.model_validate(AlertService(db).get_alert(client_id, alert_id))
 
 
@@ -86,7 +84,11 @@ def acknowledge_alert(
 
 @router.post("/{alert_id}/resolve", response_model=AlertRead, summary="Resolve an alert")
 def resolve_alert(
-    client_id: uuid.UUID, alert_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    alert_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    # Resolving is a "review results" responsibility (BE-03), same as acknowledge.
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.review_results))],
 ) -> AlertRead:
-    ClientService(db).get_client(user, client_id)
     return AlertRead.model_validate(AlertService(db).resolve(client_id, alert_id, actor_id=user.id))

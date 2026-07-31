@@ -356,9 +356,11 @@ pytest --cov=app --cov-report=term-missing   # coverage (config in pyproject.tom
   make format     # ruff format .
   ```
 - **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on push /
-  PR: ruff lint → (advisory) format check → (advisory) mypy → pytest, plus a
-  separate job that applies all migrations against a real Postgres service to
-  catch model/migration drift.
+  PR: ruff lint → ruff format check → `pip-audit` (dependency vulnerability
+  scan) → (advisory) mypy → pytest, plus a separate job that applies all
+  migrations against a real Postgres service and runs `alembic check` to catch
+  model/migration drift. mypy is advisory by design — see the `[tool.mypy]`
+  comment in [`pyproject.toml`](pyproject.toml).
 
 ---
 

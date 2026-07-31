@@ -34,6 +34,7 @@ class ClientCapability(str, enum.Enum):
     review_creatives = "review_creatives"  # approve calendar content
     manage_calendar = "manage_calendar"  # create/edit calendar items
     manage_compliance = "manage_compliance"  # edit the compliance register
+    manage_campaigns = "manage_campaigns"  # create/edit/delete campaigns
     admin = "admin"  # per-client super-grant (implies all)
 
 

@@ -12,15 +12,15 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.models.enums import ComplianceKind
-from app.schemas.common import MAX_TEXT, ORMModel
+from app.schemas.common import MAX_TEXT, ORMModel, StrictModel
 
 
-class ComplianceEntryCreate(BaseModel):
+class ComplianceEntryCreate(StrictModel):
     kind: ComplianceKind
     text: str = Field(min_length=1, max_length=MAX_TEXT)
 
 
-class ComplianceEntryUpdate(BaseModel):
+class ComplianceEntryUpdate(StrictModel):
     kind: ComplianceKind | None = None
     text: str | None = Field(None, min_length=1, max_length=MAX_TEXT)
     is_active: bool | None = None

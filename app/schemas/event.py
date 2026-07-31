@@ -19,14 +19,14 @@ from app.models.enums import (
     EventType,
     SocialPlatform,
 )
-from app.schemas.common import MAX_LONG_LINE, MAX_TEXT, ORMModel
+from app.schemas.common import MAX_LONG_LINE, MAX_TEXT, ORMModel, StrictModel
 
 # --------------------------------------------------------------------------- #
 # Sub-objects (input)
 # --------------------------------------------------------------------------- #
 
 
-class EventPostIn(BaseModel):
+class EventPostIn(StrictModel):
     image_url: str | None = Field(None, max_length=1024)
     caption: str | None = Field(None, max_length=MAX_TEXT)
     hashtags: str | None = Field(None, max_length=MAX_LONG_LINE)  # e.g. "#new #drop"
@@ -34,7 +34,7 @@ class EventPostIn(BaseModel):
     cta_url: str | None = Field(None, max_length=1024)
 
 
-class EventAdIn(BaseModel):
+class EventAdIn(StrictModel):
     budget_usd: float = Field(0, ge=0)
     objective: AdObjective = AdObjective.awareness
     audience: str | None = Field(None, max_length=MAX_TEXT)
@@ -82,7 +82,7 @@ class EventActivityRead(ORMModel):
 # --------------------------------------------------------------------------- #
 
 
-class EventCreate(BaseModel):
+class EventCreate(StrictModel):
     title: str = Field(min_length=1, max_length=200)
     type: EventType
     platform: SocialPlatform
@@ -96,7 +96,7 @@ class EventCreate(BaseModel):
     ad: EventAdIn | None = None
 
 
-class EventUpdate(BaseModel):
+class EventUpdate(StrictModel):
     """Partial autosave — only the fields present in the body are applied.
 
     Presence is detected via ``model_fields_set`` so patching one field never
@@ -116,7 +116,7 @@ class EventUpdate(BaseModel):
     ad: EventAdIn | None = None
 
 
-class ApprovalDecision(BaseModel):
+class ApprovalDecision(StrictModel):
     """Client-approval transition (approve / request changes / reject / resubmit).
 
     Setting ``status=pending`` with a note is the web's "Submit for review

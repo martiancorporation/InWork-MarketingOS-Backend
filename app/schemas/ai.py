@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.models.enums import RecommendationDecision
-from app.schemas.common import ORMModel
+from app.schemas.common import ORMModel, StrictModel
 
 HealthBand = Literal["excellent", "good", "attention", "critical"]
 Tone = Literal["up", "down", "flat"]
@@ -179,7 +179,7 @@ class OpportunityResponse(BaseModel):
 # ---- recommendation decision (write) ---- #
 
 
-class RecommendationDecisionRequest(BaseModel):
+class RecommendationDecisionRequest(StrictModel):
     decision: RecommendationDecision
     reason: str | None = Field(None, max_length=2000)
 
@@ -196,6 +196,8 @@ class RecommendationActionRead(ORMModel):
 class RecommendationActionListResponse(BaseModel):
     items: list[RecommendationActionRead]
     total: int
+    page: int
+    page_size: int
 
 
 # ---- per-client outstanding-setup indicator (BE-05) ---- #

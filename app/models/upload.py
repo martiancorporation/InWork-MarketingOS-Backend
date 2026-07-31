@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import BigInteger, ForeignKey, String
+from sqlalchemy import BigInteger, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import (
@@ -45,3 +45,7 @@ class Upload(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Loose attribution (e.g. {"client_id": ...}) without a hard FK, so uploads
     # stay decoupled from any one domain table.
     meta: Mapped[dict | None] = mapped_column(JSONColumn)
+    # Bumped by UploadService.regenerate_link to invalidate every previously
+    # issued signed permalink for this upload (see app/utils/download_link.py)
+    # without deleting the file — a leaked link can be revoked on its own.
+    link_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

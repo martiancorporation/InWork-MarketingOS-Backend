@@ -18,7 +18,7 @@ import uuid
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import AdminUser, CurrentUser, DbSession
+from app.api.deps import AdminUser, DbSession, RequireClient
 from app.integrations.embeddings import get_embedder
 from app.schemas.intelligence import (
     ClientContextResponse,
@@ -28,7 +28,6 @@ from app.schemas.intelligence import (
     ProfileVersionItem,
     RetrievedChunk,
 )
-from app.services.client_service import ClientService
 from app.services.intelligence.context_service import ContextService
 from app.services.intelligence.intelligence_service import IntelligenceService
 
@@ -41,9 +40,8 @@ router = APIRouter(prefix="/clients", tags=["intelligence"])
     summary="Current client intelligence profile + directives",
 )
 def get_intelligence(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, db: DbSession, client: RequireClient
 ) -> IntelligenceResponse:
-    client = ClientService(db).get_client(user, client_id)
     return IntelligenceService(db).get_current(client)
 
 
@@ -52,8 +50,7 @@ def get_intelligence(
     response_model=IntelligenceStatus,
     summary="Intelligence build status",
 )
-def get_status(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> IntelligenceStatus:
-    client = ClientService(db).get_client(user, client_id)
+def get_status(client_id: uuid.UUID, db: DbSession, client: RequireClient) -> IntelligenceStatus:
     return IntelligenceService(db).status(client)
 
 
@@ -63,9 +60,8 @@ def get_status(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Intell
     summary="Profile version history",
 )
 def list_versions(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, db: DbSession, client: RequireClient
 ) -> list[ProfileVersionItem]:
-    client = ClientService(db).get_client(user, client_id)
     return IntelligenceService(db).versions(client)
 
 
@@ -75,9 +71,8 @@ def list_versions(
     summary="A specific profile version",
 )
 def get_version(
-    client_id: uuid.UUID, version: int, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, version: int, db: DbSession, client: RequireClient
 ) -> IntelligenceResponse:
-    client = ClientService(db).get_client(user, client_id)
     return IntelligenceService(db).get_version(client, version)
 
 
@@ -86,8 +81,9 @@ def get_version(
     response_model=IntelligenceStatus,
     summary="Force a full intelligence rebuild (admin)",
 )
-def rebuild(client_id: uuid.UUID, admin: AdminUser, db: DbSession) -> IntelligenceStatus:
-    client = ClientService(db).get_client(admin, client_id)
+def rebuild(
+    client_id: uuid.UUID, admin: AdminUser, db: DbSession, client: RequireClient
+) -> IntelligenceStatus:
     return IntelligenceService(db).rebuild(client)
 
 
@@ -101,9 +97,9 @@ def resolve_directive(
     directive_id: uuid.UUID,
     admin: AdminUser,
     db: DbSession,
+    client: RequireClient,
     activate: bool = Query(True, description="Keep active (true) or dismiss (false)"),
 ) -> DirectiveRead:
-    client = ClientService(db).get_client(admin, client_id)
     return IntelligenceService(db).resolve_directive(client, directive_id, activate)
 
 
@@ -116,11 +112,11 @@ def get_context(
     client_id: uuid.UUID,
     admin: AdminUser,
     db: DbSession,
+    _client: RequireClient,
     query: str | None = Query(None, description="Optional query for RAG retrieval"),
 ) -> ClientContextResponse:
     # Debug endpoint exposing the raw agent preamble + retrieved RAG chunks —
     # restricted to admins rather than any assigned user.
-    ClientService(db).get_client(admin, client_id)  # access scoping
     ctx = ContextService(db, get_embedder()).build(client_id, query=query)
     return ClientContextResponse(
         version=ctx.version,

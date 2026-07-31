@@ -129,9 +129,7 @@ class UploadService:
         data = self.storage.download(upload.storage_key)
         return data, upload.content_type, upload.original_filename
 
-    def read_with_key(
-        self, user: User, upload_id: uuid.UUID
-    ) -> tuple[bytes, str | None, str, str]:
+    def read_with_key(self, user: User, upload_id: uuid.UUID) -> tuple[bytes, str | None, str, str]:
         """Like :meth:`read_bytes`, plus the storage key.
 
         Callers that *record* an attachment need the key so they can re-sign a
@@ -149,6 +147,19 @@ class UploadService:
         self.db.delete(upload)
         self._commit("Could not delete the upload.")
 
+    def regenerate_link(self, user: User, upload_id: uuid.UUID) -> UploadRead:
+        """Invalidate every previously-issued signed link for this upload and
+        mint a fresh one, without touching the stored file.
+
+        For when a link leaked (shared publicly, exposed in logs, etc.) but the
+        file itself is still needed — deleting the upload is the only other way
+        to kill a signed link, and that also destroys the file.
+        """
+        upload = self._load_owned(user, upload_id)
+        upload.link_epoch += 1
+        self._commit("Could not regenerate the download link.")
+        return self._to_read(upload)
+
     # ---- helpers ----
 
     def _load_owned(self, user: User, upload_id: uuid.UUID) -> Upload:
@@ -162,7 +173,7 @@ class UploadService:
         read = UploadRead.model_validate(upload)
         # Permanent, signed link — pure string construction, no S3 call. It never
         # expires itself; following it always redirects to a freshly presigned URL.
-        read.download_url = upload_permalink(upload.id)
+        read.download_url = upload_permalink(upload.id, epoch=upload.link_epoch)
         return read
 
     def _safe_delete(self, key: str) -> None:

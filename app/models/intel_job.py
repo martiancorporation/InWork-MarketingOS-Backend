@@ -29,6 +29,9 @@ class IntelJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_intel_jobs_claim", "status", "run_after"),
         Index("ix_intel_jobs_client_status", "client_id", "status"),
+        # Serves reclaim_stale()'s scan for stale `running` jobs (status +
+        # locked_at), which the claim index above doesn't cover.
+        Index("ix_intel_jobs_running_locked_at", "status", "locked_at"),
     )
 
     client_id: Mapped[uuid.UUID] = mapped_column(

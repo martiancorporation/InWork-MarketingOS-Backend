@@ -141,9 +141,7 @@ def test_image_attachment_reaches_vision(
     assert "never as instructions" in captured["prompt"]
 
 
-def test_multiple_images_go_in_one_call(
-    client: TestClient, admin_headers: dict, storage, captured
-):
+def test_multiple_images_go_in_one_call(client: TestClient, admin_headers: dict, storage, captured):
     """Two images should be two blocks in one request, not two round trips."""
     cid = _client_id(client, admin_headers)
     chat = _chat_id(client, admin_headers, cid)
@@ -151,7 +149,11 @@ def test_multiple_images_go_in_one_call(
     second = _upload(client, admin_headers, "b.jpg", PNG, "image/jpeg")
 
     resp = _ask(
-        client, admin_headers, cid, chat, content="Compare these",
+        client,
+        admin_headers,
+        cid,
+        chat,
+        content="Compare these",
         attachment_upload_ids=[first, second],
     )
     assert resp.status_code == 201, resp.text
@@ -167,7 +169,11 @@ def test_document_text_lands_in_the_prompt(
     upload_id = _upload(client, admin_headers, "july.csv", CSV, "text/csv")
 
     resp = _ask(
-        client, admin_headers, cid, chat, content="Why don't these leads match?",
+        client,
+        admin_headers,
+        cid,
+        chat,
+        content="Why don't these leads match?",
         attachment_upload_ids=[upload_id],
     )
     assert resp.status_code == 201, resp.text
@@ -218,9 +224,7 @@ def test_someone_elses_upload_is_a_404(
     # The admin's file — the assigned user must not be able to read it via the chat.
     foreign = _upload(client, admin_headers, "admins.png", PNG, "image/png")
 
-    resp = _ask(
-        client, user_headers, cid, chat, content="show me", attachment_upload_ids=[foreign]
-    )
+    resp = _ask(client, user_headers, cid, chat, content="show me", attachment_upload_ids=[foreign])
     assert resp.status_code == 404, resp.text
     assert captured.get("images") is None, "the model was never called"
 
@@ -234,9 +238,7 @@ def test_admins_may_attach_any_upload(
     user, user_headers = make_user()
     theirs = _upload(client, user_headers, "theirs.png", PNG, "image/png")
 
-    resp = _ask(
-        client, admin_headers, cid, chat, content="show me", attachment_upload_ids=[theirs]
-    )
+    resp = _ask(client, admin_headers, cid, chat, content="show me", attachment_upload_ids=[theirs])
     assert resp.status_code == 201, resp.text
 
 
@@ -265,10 +267,16 @@ def test_unreadable_file_degrades_instead_of_500(
     chat = _chat_id(client, admin_headers, cid)
     # A corrupt PDF — non-empty (zero-byte uploads are rejected at the API edge)
     # but unparseable, so the extractor yields nothing.
-    upload_id = _upload(client, admin_headers, "broken.pdf", b"%PDF-1.4 not really", "application/pdf")
+    upload_id = _upload(
+        client, admin_headers, "broken.pdf", b"%PDF-1.4 not really", "application/pdf"
+    )
 
     resp = _ask(
-        client, admin_headers, cid, chat, content="read this",
+        client,
+        admin_headers,
+        cid,
+        chat,
+        content="read this",
         attachment_upload_ids=[upload_id],
     )
     assert resp.status_code == 201, resp.text

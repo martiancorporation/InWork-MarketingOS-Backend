@@ -74,9 +74,7 @@ def test_synthetic_only_client_has_no_timestamp_and_reads_stale(
     assert body["sources"] == ["synthetic"]
 
 
-def test_recent_sync_reports_fresh(
-    client: TestClient, admin_headers: dict, db_session: Session
-):
+def test_recent_sync_reports_fresh(client: TestClient, admin_headers: dict, db_session: Session):
     cid = _client_id(client, admin_headers)
     _seed(db_session, uuid.UUID(cid), AnalyticsSource.connector)
     _connect(db_session, uuid.UUID(cid), synced_hours_ago=2)
@@ -87,9 +85,7 @@ def test_recent_sync_reports_fresh(
     assert body["sources"] == ["connector"]
 
 
-def test_overdue_sync_reports_stale(
-    client: TestClient, admin_headers: dict, db_session: Session
-):
+def test_overdue_sync_reports_stale(client: TestClient, admin_headers: dict, db_session: Session):
     """Nightly cadence + 36h grace: a two-day-old sync means the refresh was missed."""
     cid = _client_id(client, admin_headers)
     _seed(db_session, uuid.UUID(cid), AnalyticsSource.connector)
@@ -120,9 +116,7 @@ def test_disconnected_connector_does_not_count_as_fresh(
     assert body["stale"] is True
 
 
-def test_mixed_provenance_is_reported(
-    client: TestClient, admin_headers: dict, db_session: Session
-):
+def test_mixed_provenance_is_reported(client: TestClient, admin_headers: dict, db_session: Session):
     """A client part-migrated off seed data shows both, so the UI can caveat precisely."""
     cid = _client_id(client, admin_headers)
     service = AnalyticsService(db_session)
@@ -140,9 +134,7 @@ def test_mixed_provenance_is_reported(
     assert _summary(client, admin_headers, cid)["sources"] == ["connector", "synthetic"]
 
 
-def test_freshness_is_per_client(
-    client: TestClient, admin_headers: dict, db_session: Session
-):
+def test_freshness_is_per_client(client: TestClient, admin_headers: dict, db_session: Session):
     """One client's connected sync must not make another client's data look fresh."""
     fresh = _client_id(client, admin_headers)
     other = uuid.UUID(

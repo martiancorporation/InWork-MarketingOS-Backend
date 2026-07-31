@@ -19,7 +19,7 @@ import uuid
 
 from fastapi import APIRouter, Query, status
 
-from app.api.deps import CurrentUser, DbSession, Pagination
+from app.api.deps import CurrentUser, DbSession, Pagination, RequireClient
 from app.models.enums import MessageFolder
 from app.schemas.common import MessageResponse
 from app.schemas.conversation import (
@@ -31,7 +31,6 @@ from app.schemas.conversation import (
     MessageRead,
     MessageUpdate,
 )
-from app.services.client_service import ClientService
 from app.services.conversation_service import ConversationService
 
 router = APIRouter(prefix="/clients/{client_id}/conversations", tags=["conversations"])
@@ -40,15 +39,14 @@ router = APIRouter(prefix="/clients/{client_id}/conversations", tags=["conversat
 @router.get("", response_model=ConversationListResponse, summary="List conversations")
 def list_conversations(
     client_id: uuid.UUID,
-    user: CurrentUser,
     db: DbSession,
     pagination: Pagination,
+    _client: RequireClient,
     folder: MessageFolder | None = Query(None, description="Filter by the latest message's folder"),
     starred: bool | None = Query(None, description="Only threads with a starred message"),
     category: str | None = Query(None, description="Filter by message category label"),
     search: str | None = Query(None, description="Match subject or message body"),
 ) -> ConversationListResponse:
-    ClientService(db).get_client(user, client_id)
     return ConversationService(db).list_conversations(
         client_id,
         pagination=pagination,
@@ -66,9 +64,12 @@ def list_conversations(
     summary="Start a new conversation",
 )
 def create_conversation(
-    client_id: uuid.UUID, data: ConversationCreate, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    data: ConversationCreate,
+    user: CurrentUser,
+    db: DbSession,
+    _client: RequireClient,
 ) -> ConversationRead:
-    ClientService(db).get_client(user, client_id)
     conv = ConversationService(db).create_conversation(client_id, data, sender_user_id=user.id)
     return ConversationRead.model_validate(conv)
 
@@ -77,9 +78,8 @@ def create_conversation(
     "/{conversation_id}", response_model=ConversationRead, summary="Get a conversation thread"
 )
 def get_conversation(
-    client_id: uuid.UUID, conversation_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, conversation_id: uuid.UUID, db: DbSession, _client: RequireClient
 ) -> ConversationRead:
-    ClientService(db).get_client(user, client_id)
     conv = ConversationService(db).get_conversation(client_id, conversation_id)
     return ConversationRead.model_validate(conv)
 
@@ -91,10 +91,9 @@ def update_conversation(
     client_id: uuid.UUID,
     conversation_id: uuid.UUID,
     data: ConversationUpdate,
-    user: CurrentUser,
     db: DbSession,
+    _client: RequireClient,
 ) -> ConversationRead:
-    ClientService(db).get_client(user, client_id)
     conv = ConversationService(db).update_conversation(client_id, conversation_id, data)
     return ConversationRead.model_validate(conv)
 
@@ -103,9 +102,8 @@ def update_conversation(
     "/{conversation_id}", response_model=MessageResponse, summary="Delete a conversation"
 )
 def delete_conversation(
-    client_id: uuid.UUID, conversation_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, conversation_id: uuid.UUID, db: DbSession, _client: RequireClient
 ) -> MessageResponse:
-    ClientService(db).get_client(user, client_id)
     ConversationService(db).delete_conversation(client_id, conversation_id)
     return MessageResponse(detail="Conversation deleted.")
 
@@ -122,8 +120,8 @@ def add_message(
     data: MessageCreate,
     user: CurrentUser,
     db: DbSession,
+    _client: RequireClient,
 ) -> MessageRead:
-    ClientService(db).get_client(user, client_id)
     message = ConversationService(db).add_message(
         client_id, conversation_id, data, sender_user_id=user.id
     )
@@ -139,10 +137,9 @@ def add_message_to_source(
     client_id: uuid.UUID,
     conversation_id: uuid.UUID,
     message_id: uuid.UUID,
-    user: CurrentUser,
     db: DbSession,
+    _client: RequireClient,
 ) -> MessageRead:
-    ClientService(db).get_client(user, client_id)
     message = ConversationService(db).add_message_to_source(client_id, conversation_id, message_id)
     return MessageRead.model_validate(message)
 
@@ -157,9 +154,8 @@ def update_message(
     conversation_id: uuid.UUID,
     message_id: uuid.UUID,
     data: MessageUpdate,
-    user: CurrentUser,
     db: DbSession,
+    _client: RequireClient,
 ) -> MessageRead:
-    ClientService(db).get_client(user, client_id)
     message = ConversationService(db).update_message(client_id, conversation_id, message_id, data)
     return MessageRead.model_validate(message)

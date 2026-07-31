@@ -9,12 +9,17 @@ from __future__ import annotations
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.common import StrictModel
 from app.schemas.user import UserRead
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(StrictModel):
     email: EmailStr
-    password: str = Field(min_length=1)
+    # Upper bound is defensive, not a hashing constraint (the password is
+    # SHA-256 pre-hashed before bcrypt, see app/core/security.py) — it just
+    # stops a client from forcing the server to hash a multi-MB string on
+    # every login attempt.
+    password: str = Field(min_length=1, max_length=128)
 
 
 class TokenResponse(BaseModel):

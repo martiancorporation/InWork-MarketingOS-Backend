@@ -86,6 +86,28 @@ def get_storage() -> Storage:
     return S3Storage(get_settings().storage)
 
 
+def require_client(
+    client_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Client:
+    """Client-access-scoped dependency: 404 for an inaccessible client, else
+    the resolved ``Client`` (admin, or the caller's assignment).
+
+    A plain sync function — FastAPI runs sync dependencies in a threadpool
+    automatically (the same treatment a sync ``def`` route handler gets), so
+    depending on this from an ``async def`` route never blocks the event loop
+    the way calling ``ClientService(db).get_client(...)`` directly inside the
+    async function body would. Prefer this over the manual call in every new
+    client-scoped route.
+    """
+    # Imported lazily to avoid any import-time coupling between the API and
+    # service layers (same reasoning as require_capability below).
+    from app.services.client_service import ClientService
+
+    return ClientService(db).get_client(user, client_id)
+
+
 # Reusable annotated aliases so routers read cleanly.
 DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
@@ -93,6 +115,7 @@ AdminUser = Annotated[User, Depends(get_current_admin)]
 Pagination = Annotated[PaginationParams, Depends()]
 StorageDep = Annotated[Storage, Depends(get_storage)]
 CurrentToken = Annotated[str, Depends(get_current_token)]
+RequireClient = Annotated[Client, Depends(require_client)]
 
 
 def require_capability(

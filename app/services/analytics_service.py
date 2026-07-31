@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestError
 from app.core.pagination import PaginationParams
-from app.models.analytics import AnalyticsDaily
 from app.models.enums import AnalyticsSource, SocialPlatform
 from app.repositories.analytics_repository import AnalyticsRepository
 from app.repositories.integration_repository import IntegrationRepository
@@ -34,7 +33,6 @@ from app.schemas.analytics import (
 )
 from app.services.client_rollup import refresh_client_rollups
 
-_METRICS = ("impressions", "clicks", "conversions", "leads", "spend", "revenue")
 _CSV_MAX_ROWS = 5000
 _STALE_AFTER_HOURS = 36
 
@@ -56,34 +54,15 @@ class AnalyticsService:
 
         ``source`` is set on update as well as insert, so the first real sync
         clears the ``synthetic`` tag off a seeded cell rather than leaving stale
-        provenance behind.
+        provenance behind. Done as one batched statement (see
+        ``AnalyticsRepository.bulk_upsert``) rather than a get-then-write loop.
         """
-        for row in rows:
-            existing = self.analytics.get_cell(client_id, row.date, row.platform)
-            if existing is None:
-                self.analytics.add(
-                    AnalyticsDaily(
-                        client_id=client_id,
-                        date=row.date,
-                        platform=row.platform,
-                        impressions=row.impressions,
-                        clicks=row.clicks,
-                        conversions=row.conversions,
-                        leads=row.leads,
-                        spend=row.spend,
-                        revenue=row.revenue,
-                        source=source.value,
-                    )
-                )
-            else:
-                for m in _METRICS:
-                    setattr(existing, m, getattr(row, m))
-                existing.source = source.value
+        upserted = self.analytics.bulk_upsert(client_id, rows, source=source.value)
         # The client's lifetime rollups are read by the client list, the executive
         # brief and the cross-client assistant; keep them in step with the facts.
         refresh_client_rollups(self.db, client_id)
         self.db.commit()
-        return len(rows)
+        return upserted
 
     def import_csv(self, client_id: uuid.UUID, raw: bytes) -> AnalyticsCsvImportResponse:
         """Parse an uploaded CSV of daily facts and upsert it.

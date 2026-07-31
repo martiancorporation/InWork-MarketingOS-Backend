@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.recommendation import RecommendationAction
 from app.repositories.base import BaseRepository
@@ -19,6 +19,11 @@ class RecommendationRepository(BaseRepository[RecommendationAction]):
     model = RecommendationAction
 
     def list_for_client(self, client_id: uuid.UUID) -> list[RecommendationAction]:
+        """Full decision history for a client, newest first — unbounded on
+        purpose: ``latest_by_rec_key``/``current_decision_counts`` need to scan
+        every row to find the latest decision per recommendation. Not used to
+        serve the public decision-history endpoint directly — see
+        ``list_for_client_page`` for that."""
         return list(
             self.db.scalars(
                 select(RecommendationAction)
@@ -26,6 +31,23 @@ class RecommendationRepository(BaseRepository[RecommendationAction]):
                 .order_by(RecommendationAction.created_at.desc())
             ).all()
         )
+
+    def list_for_client_page(
+        self, client_id: uuid.UUID, *, offset: int, limit: int
+    ) -> tuple[list[RecommendationAction], int]:
+        """A bounded page of the decision history, for the public API."""
+        cond = RecommendationAction.client_id == client_id
+        total = (
+            self.db.scalar(select(func.count()).select_from(RecommendationAction).where(cond)) or 0
+        )
+        rows = self.db.scalars(
+            select(RecommendationAction)
+            .where(cond)
+            .order_by(RecommendationAction.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        ).all()
+        return list(rows), int(total)
 
     def latest_by_rec_key(self, client_id: uuid.UUID) -> dict[str, RecommendationAction]:
         """Map each rec_key → its most recent decision for this client."""

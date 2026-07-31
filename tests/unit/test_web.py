@@ -6,6 +6,8 @@ so they run offline; the extraction cases operate on in-memory strings.
 
 from __future__ import annotations
 
+import socket
+
 import httpx
 import pytest
 
@@ -14,6 +16,7 @@ from app.utils.web import (
     _extract_fonts,
     _extract_meta,
     _get,
+    _resolve_public_ip,
     candidate_urls,
     fetch_page,
     normalize_url,
@@ -62,12 +65,62 @@ def test_candidate_urls_empty_for_junk():
     assert candidate_urls("not-a-url") == []
 
 
-def test_get_refuses_redirect_to_internal_host():
-    """A public URL that 302-redirects to a link-local metadata address must
-    not be followed — the redirect target is re-validated per hop."""
+def test_candidate_urls_no_http_fallback_when_https_explicit():
+    """An explicit https:// input keeps its security intent — no silent
+    cleartext fallback (that would be an SSL-stripping shape)."""
+    cands = candidate_urls("https://acme.com")
+    assert not any(c.startswith("http://") for c in cands)
+
+
+def test_candidate_urls_still_falls_back_for_bare_domain():
+    """A bare-domain input only ever got https as our own default guess, so a
+    genuinely HTTP-only site should still be reachable."""
+    cands = candidate_urls("acme.com")
+    assert any(c.startswith("http://") for c in cands)
+
+
+def test_get_connects_to_the_resolved_ip_not_the_hostname(monkeypatch):
+    """The connection is pinned to a validated IP literal (DNS-rebinding
+    guard) — the Host header still carries the real hostname so the mock
+    handler (and, in production, TLS SNI/cert checks) sees the right name."""
+    # A real public IP so it passes the private/reserved-range guard — the
+    # MockTransport below intercepts before any real socket is opened, so
+    # nothing is actually contacted.
+    fake_ip = "8.8.8.8"
+
+    def _fake_getaddrinfo(host, *args, **kwargs):
+        assert host == "pin-me.example"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (fake_ip, 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+    assert _resolve_public_ip("pin-me.example") == fake_ip
+
+    seen = {}
 
     def _handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "evil.example":
+        seen["host"] = request.url.host
+        seen["header"] = request.headers.get("host")
+        return httpx.Response(200, text="ok")
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    with client:
+        assert _get("https://pin-me.example/", timeout=1.0, client=client) == "ok"
+
+    assert seen["host"] == fake_ip
+    assert seen["header"] == "pin-me.example"
+
+
+def test_get_refuses_redirect_to_internal_host():
+    """A public URL that 302-redirects to a link-local metadata address must
+    not be followed — the redirect target is re-validated per hop.
+
+    The connection is pinned to the resolved IP literal (DNS-rebinding guard),
+    so the mock handler distinguishes hops by the ``Host`` header (still the
+    real hostname) rather than ``request.url.host`` (now an IP literal).
+    """
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.headers.get("host") == "evil.example":
             return httpx.Response(
                 302, headers={"location": "http://169.254.169.254/latest/meta-data/"}
             )

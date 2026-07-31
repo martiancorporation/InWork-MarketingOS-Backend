@@ -29,5 +29,11 @@ htmlcov/
 .idea/
 .DS_Store
 
-# Scripts directory
-scripts/
+# Scripts directory — track operational scripts (the Docker entrypoint must be
+# tracked or the image build breaks), but keep out generated/local-only files.
+scripts/__pycache__/
+scripts/api_test_results.json
+# Contains a hardcoded production host + provisions SSH access + scp's the local
+# .env (real secrets) to a remote server — deliberately kept local-only, never
+# committed. Ask before removing this line.
+scripts/deploy.sh

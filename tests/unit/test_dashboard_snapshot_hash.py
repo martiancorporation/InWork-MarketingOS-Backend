@@ -29,7 +29,9 @@ def test_hash_changes_when_a_list_signal_changes():
 
 
 def test_hash_changes_when_goal_metrics_change():
-    metric = GoalMetric(label="CPL", target=10.0, actual=12.0, higher_is_better=False, on_track=False)
+    metric = GoalMetric(
+        label="CPL", target=10.0, actual=12.0, higher_is_better=False, on_track=False
+    )
     base = DashboardSignals(goal_metrics=[])
     changed = DashboardSignals(goal_metrics=[metric])
     assert _hash_inputs(base, 1) != _hash_inputs(changed, 1)

@@ -21,7 +21,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, status
 
-from app.api.deps import AdminUser, CurrentUser, DbSession, require_capability
+from app.api.deps import (
+    AdminUser,
+    CurrentUser,
+    DbSession,
+    Pagination,
+    RequireClient,
+    require_capability,
+)
 from app.core.rate_limit import RateLimit
 from app.models.client import Client
 from app.models.enums import ClientCapability
@@ -33,7 +40,6 @@ from app.schemas.ai import (
     RecommendationDecisionRequest,
     SetupStatusResponse,
 )
-from app.services.client_service import ClientService
 from app.services.dashboard_service import DashboardService
 
 router = APIRouter(prefix="/clients/{client_id}", tags=["dashboard"])
@@ -46,9 +52,8 @@ router = APIRouter(prefix="/clients/{client_id}", tags=["dashboard"])
     dependencies=[Depends(RateLimit("ai_dashboard", times=30, seconds=60))],
 )
 async def get_dashboard(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, user: CurrentUser, db: DbSession, client: RequireClient
 ) -> DashboardResponse:
-    client = ClientService(db).get_client(user, client_id)
     return await DashboardService(db).build(client, user_id=user.id)
 
 
@@ -59,9 +64,8 @@ async def get_dashboard(
     dependencies=[Depends(RateLimit("ai_dashboard", times=30, seconds=60))],
 )
 async def refresh_dashboard(
-    client_id: uuid.UUID, admin: AdminUser, db: DbSession
+    client_id: uuid.UUID, admin: AdminUser, db: DbSession, client: RequireClient
 ) -> DashboardResponse:
-    client = ClientService(db).get_client(admin, client_id)
     return await DashboardService(db).build(client, user_id=admin.id, force_refresh=True)
 
 
@@ -72,9 +76,8 @@ async def refresh_dashboard(
     dependencies=[Depends(RateLimit("ai_opportunities", times=20, seconds=60))],
 )
 async def get_opportunities(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, user: CurrentUser, db: DbSession, client: RequireClient
 ) -> OpportunityResponse:
-    client = ClientService(db).get_client(user, client_id)
     return await DashboardService(db).opportunities(client, user_id=user.id)
 
 
@@ -83,8 +86,9 @@ async def get_opportunities(
     response_model=SetupStatusResponse,
     summary="Per-client outstanding-setup items + count (red-dot indicator)",
 )
-def get_setup_status(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> SetupStatusResponse:
-    client = ClientService(db).get_client(user, client_id)
+def get_setup_status(
+    client_id: uuid.UUID, db: DbSession, client: RequireClient
+) -> SetupStatusResponse:
     return DashboardService(db).setup_status(client)
 
 
@@ -113,7 +117,9 @@ def decide_recommendation(
     summary="Recommendation decision history",
 )
 def list_recommendation_decisions(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    db: DbSession,
+    pagination: Pagination,
+    _client: RequireClient,
 ) -> RecommendationActionListResponse:
-    ClientService(db).get_client(user, client_id)
-    return DashboardService(db).list_decisions(client_id)
+    return DashboardService(db).list_decisions(client_id, pagination=pagination)

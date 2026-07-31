@@ -29,6 +29,7 @@ def _check_ranges(start: date | None, end: date | None, t0: time | None, t1: tim
     if t0 is not None and t1 is not None and t0 > t1:
         raise ValueError("start_time must be on or before end_time")
 
+
 # --------------------------------------------------------------------------- #
 # Create / update
 # --------------------------------------------------------------------------- #

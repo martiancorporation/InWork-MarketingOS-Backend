@@ -3,12 +3,14 @@
 Reusable across the whole app — any feature stores files here and references the
 returned ``storage_key``. Endpoints:
 
-- ``POST /uploads``               — upload a file (multipart, proxied to S3)
-- ``GET /uploads/{id}``           — file metadata + a permanent download link
-- ``GET /uploads/{id}/download``  — unauthenticated, signature-gated redirect to
+- ``POST /uploads``                    — upload a file (multipart, proxied to S3)
+- ``GET /uploads/{id}``                — file metadata + a permanent download link
+- ``GET /uploads/{id}/download``       — unauthenticated, signature-gated redirect to
   a freshly presigned, short-lived S3 URL (what the permanent link above points
   at — see ``app/utils/download_link.py``)
-- ``DELETE /uploads/{id}``        — delete the object and its record
+- ``POST /uploads/{id}/regenerate-link`` — invalidate the old signed link, mint a
+  new one (revokes a leaked link without deleting the file)
+- ``DELETE /uploads/{id}``             — delete the object and its record
 
 The metadata/delete routes require auth; a user sees only their own files, an
 admin sees all. The ``/download`` redirect deliberately has **no** bearer auth
@@ -29,30 +31,15 @@ from fastapi.responses import RedirectResponse
 
 from app.api.deps import CurrentUser, DbSession, StorageDep
 from app.core.config import get_settings
-from app.core.exceptions import NotFoundError, PayloadTooLargeError
+from app.core.exceptions import NotFoundError
 from app.repositories.upload_repository import UploadRepository
 from app.schemas.common import MessageResponse
 from app.schemas.upload import UploadRead
 from app.services.upload_service import UploadService
 from app.utils.download_link import verify_storage_key_signature, verify_upload_signature
+from app.utils.streaming import read_capped
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
-
-_READ_CHUNK = 1024 * 1024  # 1 MB
-
-
-async def _read_capped(file: UploadFile, max_bytes: int) -> bytes:
-    """Read an UploadFile into memory, bounded by ``max_bytes`` so a hostile
-    client can't exhaust memory."""
-    buffer = bytearray()
-    while True:
-        chunk = await file.read(_READ_CHUNK)
-        if not chunk:
-            break
-        buffer.extend(chunk)
-        if len(buffer) > max_bytes:
-            raise PayloadTooLargeError(f"File exceeds the {max_bytes // (1024 * 1024)} MB limit.")
-    return bytes(buffer)
 
 
 @router.post(
@@ -69,7 +56,7 @@ async def upload_file(
     feature: str | None = Form(default=None),
 ) -> UploadRead:
     max_bytes = get_settings().storage.max_upload_bytes
-    data = await _read_capped(file, max_bytes)
+    data = await read_capped(file, max_bytes)
     # store_bytes does a blocking S3 PUT + DB commit; run it off the event loop
     # so it doesn't stall every other concurrent request on this worker.
     return await anyio.to_thread.run_sync(
@@ -120,16 +107,27 @@ def download_upload(
     upload_id: uuid.UUID, db: DbSession, storage: StorageDep, sig: str = Query(...)
 ) -> RedirectResponse:
     # Same 404 for a bad signature and a missing/deleted upload — neither leaks
-    # which one it was, so a signature can't be probed for a valid id.
-    if not verify_upload_signature(upload_id, sig):
-        raise NotFoundError("Upload not found.")
+    # which one it was, so a signature can't be probed for a valid id. The
+    # signature is scoped to the upload's current link_epoch, so a link signed
+    # before a regenerate-link call no longer verifies.
     upload = UploadRepository(db).get(upload_id)
-    if upload is None:
+    if upload is None or not verify_upload_signature(upload_id, sig, epoch=upload.link_epoch):
         raise NotFoundError("Upload not found.")
     url = storage.generate_download_url(
         upload.storage_key, get_settings().storage.presign_expiry_seconds
     )
     return RedirectResponse(url, status_code=status.HTTP_302_FOUND)
+
+
+@router.post(
+    "/{upload_id}/regenerate-link",
+    response_model=UploadRead,
+    summary="Invalidate the current signed link and mint a new one",
+)
+def regenerate_link(
+    upload_id: uuid.UUID, user: CurrentUser, db: DbSession, storage: StorageDep
+) -> UploadRead:
+    return UploadService(db, storage).regenerate_link(user, upload_id)
 
 
 @router.delete(

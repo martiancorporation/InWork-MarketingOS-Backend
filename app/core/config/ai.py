@@ -28,8 +28,12 @@ class AISettings(BaseSettings):
     # (app/ai/cost_optimization.py) route between. Kept in config so model
     # identities are never hard-coded in the heuristic module.
     cheap_model: str = "claude-haiku-4-5-20251001"  # ANTHROPIC_CHEAP_MODEL — data-gathering steps
-    mid_model: str = "claude-sonnet-5"  # ANTHROPIC_MID_MODEL — non-gathering steps on the expensive tier
-    expensive_models: str = "claude-opus-4-8"  # ANTHROPIC_EXPENSIVE_MODELS — comma-separated tier to route down from
+    mid_model: str = (
+        "claude-sonnet-5"  # ANTHROPIC_MID_MODEL — non-gathering steps on the expensive tier
+    )
+    expensive_models: str = (
+        "claude-opus-4-8"  # ANTHROPIC_EXPENSIVE_MODELS — comma-separated tier to route down from
+    )
 
     # Optional pricing override (JSON, USD per 1M tokens). Read through config so
     # nothing outside app/core/config touches the environment. Env var name is

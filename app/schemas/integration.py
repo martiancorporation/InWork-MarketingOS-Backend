@@ -38,7 +38,7 @@ class OAuthCompleteRequest(StrictModel):
     ad_account_id: str | None = Field(None, max_length=160)  # Meta: which ad account
 
 
-class IntegrationConnectRequest(BaseModel):
+class IntegrationConnectRequest(StrictModel):
     """Simulated-connect body — the account the connector is bound to.
 
     Optional: the frontend may connect a bare connector (status flips to
