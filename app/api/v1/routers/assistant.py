@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import CurrentUser, DbSession, Pagination, RequireClient, StorageDep
+from app.core.pagination import PaginationParams
 from app.core.rate_limit import RateLimit
 from app.schemas.assistant import (
     AssistantAskRequest,
@@ -74,9 +75,18 @@ def get_chat(
     client_id: uuid.UUID,
     chat_id: uuid.UUID,
     db: DbSession,
-    pagination: Pagination,
     _client: RequireClient,
+    page: int = Query(1, ge=1, description="1-based page number"),
+    # Defaults to the max allowed (not the shared Pagination dependency's 20)
+    # — the client renders `messages` as the complete thread and re-fetches
+    # this route after every send, so a low default would make a chat that
+    # crosses the page boundary appear to silently drop its newest messages
+    # (including the one just sent) rather than growing. 100 comfortably
+    # covers a real working conversation; only a genuinely huge thread needs
+    # an explicit `page=2` to see further back.
+    page_size: int = Query(100, ge=1, le=100, description="Items per page (max 100)"),
 ) -> AssistantChatDetail:
+    pagination = PaginationParams(page=page, page_size=page_size)
     return AssistantService(db).get_chat_detail(client_id, chat_id, pagination=pagination)
 
 

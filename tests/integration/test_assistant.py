@@ -117,6 +117,35 @@ def test_chat_detail_orders_messages(client: TestClient, admin_headers: dict):
     assert msgs[1]["role"] == "assistant"
 
 
+def test_chat_detail_defaults_to_the_full_thread_past_20_messages(
+    client: TestClient, admin_headers: dict
+):
+    """The frontend fetches ``GET .../chats/{id}`` with no page/page_size at
+    all, renders ``messages`` as the complete thread, and re-fetches this same
+    call after every send. If the default page defaulted to the shared
+    Pagination dependency's 20-per-page, a chat that grows past 20 messages
+    would have its newest turns (including the one just sent) silently drop
+    out of the response. 11 user turns + 11 assistant replies = 22 messages,
+    one past that boundary."""
+    cid = _client_id(client, admin_headers)
+    chat = _new_chat(client, admin_headers, cid)
+    for i in range(11):
+        resp = client.post(
+            f"{API}/clients/{cid}/assistant/chats/{chat['id']}/messages",
+            headers=admin_headers,
+            json={"content": f"question {i}"},
+        )
+        assert resp.status_code == 201, resp.text
+
+    detail = client.get(f"{API}/clients/{cid}/assistant/chats/{chat['id']}", headers=admin_headers)
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["messages_total"] == 22
+    assert len(body["messages"]) == 22, "the newest turns must not be dropped by default"
+    assert body["messages"][-2]["content"] == "question 10"
+    assert body["messages"][-1]["role"] == "assistant"
+
+
 def test_list_chats(client: TestClient, admin_headers: dict):
     cid = _client_id(client, admin_headers)
     _new_chat(client, admin_headers, cid, title="A")

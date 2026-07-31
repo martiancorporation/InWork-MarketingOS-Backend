@@ -6,8 +6,11 @@ built links are deterministic absolute URLs.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import uuid
 
+from app.core.config import get_settings
 from app.utils.download_link import (
     key_permalink,
     sign_upload_id,
@@ -62,3 +65,34 @@ def test_key_permalink_tampered_signature_rejected() -> None:
     url = key_permalink(key)
     sig = url.split("sig=")[1]
     assert not verify_storage_key_signature(key, sig[:-1] + ("0" if sig[-1] != "0" else "1"))
+
+
+def test_epoch_0_is_byte_compatible_with_pre_epoch_links() -> None:
+    """Every link ever issued before ``link_epoch`` existed was signed over the
+    bare upload id, with no epoch marker at all. Upgrading to this module must
+    not invalidate those — including ones already persisted in a DB row (e.g.
+    ``Report.file_url``) or shown as a client logo — which nothing here has a
+    chance to re-sign.
+
+    Regression test: a prior deploy signed ``f"{upload_id}:{epoch}"``
+    unconditionally (even at epoch 0, the default for every upload), which
+    broke every pre-existing image/logo/attachment link in production the
+    moment it went live. Do not remove the epoch==0 special case in
+    ``app/utils/download_link.py``.
+    """
+    upload_id = uuid.uuid4()
+    key = get_settings().security.secret_key.encode("utf-8")
+    pre_epoch_signature = hmac.new(key, str(upload_id).encode("utf-8"), hashlib.sha256).hexdigest()
+
+    assert sign_upload_id(upload_id, epoch=0) == pre_epoch_signature
+    assert verify_upload_signature(upload_id, pre_epoch_signature, epoch=0)
+
+
+def test_bumping_the_epoch_still_invalidates_the_old_signature() -> None:
+    """The revocation feature (UploadService.regenerate_link) must still work:
+    a signature minted at epoch 0 must fail once the epoch is bumped."""
+    upload_id = uuid.uuid4()
+    old_signature = sign_upload_id(upload_id, epoch=0)
+
+    assert not verify_upload_signature(upload_id, old_signature, epoch=1)
+    assert verify_upload_signature(upload_id, sign_upload_id(upload_id, epoch=1), epoch=1)
