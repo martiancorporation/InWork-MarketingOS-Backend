@@ -28,6 +28,7 @@ from app.api.v1.routers import (
     plans,
     reports,
     strategy,
+    support_tickets,
     uploads,
     users,
 )
@@ -57,4 +58,5 @@ api_router.include_router(plans.router)
 api_router.include_router(automation.router)
 api_router.include_router(notifications.router)
 api_router.include_router(strategy.router)
+api_router.include_router(support_tickets.router)
 api_router.include_router(me.router)

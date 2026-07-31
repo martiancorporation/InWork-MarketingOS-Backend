@@ -46,6 +46,7 @@ from app.models.plan import PlanTask
 from app.models.recommendation import RecommendationAction
 from app.models.report import Report
 from app.models.strategy import Strategy
+from app.models.support_ticket import SupportTicket, SupportTicketAttachment, SupportTicketReply
 from app.models.upload import Upload
 from app.models.user import User, UserSession
 
@@ -91,6 +92,9 @@ __all__ = [
     "Report",
     "Strategy",
     "StrategyVisual",
+    "SupportTicket",
+    "SupportTicketAttachment",
+    "SupportTicketReply",
     "Upload",
     "User",
     "UserSession",

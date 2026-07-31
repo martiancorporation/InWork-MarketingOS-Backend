@@ -382,3 +382,34 @@ class ConsistencyLevel(str, enum.Enum):
 # action identifiers per feature (e.g. "report.pdf.exported",
 # "recommendation.accepted", "integration.connect") and that set grows with
 # every new feature. See ``AuditLog.action`` for the string column instead.
+
+
+# ---- Support & feedback tickets ----
+
+
+class TicketCategory(str, enum.Enum):
+    bug = "bug"
+    feature_request = "feature_request"
+    billing = "billing"
+    account = "account"
+    technical_support = "technical_support"
+    feedback = "feedback"
+    other = "other"
+
+
+class TicketPriority(str, enum.Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    urgent = "urgent"
+
+
+class TicketStatus(str, enum.Enum):
+    """A ticket's lifecycle. Only an admin may transition it (see
+    ``SupportTicketService.update``) — the reporter can edit their own
+    ticket's content but not decide it's resolved."""
+
+    open = "open"
+    in_progress = "in_progress"
+    resolved = "resolved"
+    closed = "closed"
