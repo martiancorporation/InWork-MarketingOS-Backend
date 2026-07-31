@@ -216,7 +216,9 @@ def test_compliance_feed_is_readable_so_resume_can_repopulate_it(
         json={"step": 5, "compliance": {"feed": fetched.json()["compliance_feed"]}},
     )
     assert again.status_code == 200
-    assert client.get(f"{API}/clients/{cid}", headers=admin_headers).json()["compliance_feed"] == rules
+    assert (
+        client.get(f"{API}/clients/{cid}", headers=admin_headers).json()["compliance_feed"] == rules
+    )
 
 
 def test_blank_compliance_feed_still_clears_it_deliberately(
@@ -235,7 +237,9 @@ def test_blank_compliance_feed_still_clears_it_deliberately(
         headers=admin_headers,
         json={"step": 5, "compliance": {"feed": ""}},
     )
-    assert client.get(f"{API}/clients/{cid}", headers=admin_headers).json()["compliance_feed"] is None
+    assert (
+        client.get(f"{API}/clients/{cid}", headers=admin_headers).json()["compliance_feed"] is None
+    )
 
 
 def test_measurement_channels_are_accepted(client: TestClient, admin_headers: dict):
@@ -267,9 +271,7 @@ def test_measurement_channels_are_accepted(client: TestClient, admin_headers: di
     }
 
 
-def test_channels_not_offered_by_the_wizard_are_rejected(
-    client: TestClient, admin_headers: dict
-):
+def test_channels_not_offered_by_the_wizard_are_rejected(client: TestClient, admin_headers: dict):
     """The allow-list must mirror the wizard's picker exactly — anything the UI
     cannot select is not a valid channel, so a stray value fails loudly."""
     cid = _draft_id(client, admin_headers)

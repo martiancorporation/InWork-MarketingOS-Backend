@@ -16,6 +16,11 @@ Every write records a ``changes`` diff. A service can attach a rich before/after
 diff via ``set_audit_changes`` (preferred — see ``ClientService``); when it does
 not, this middleware falls back to the submitted JSON body (secret fields
 redacted) so a write is never logged with an empty ``changes``.
+
+``BodySizeLimitMiddleware`` rejects any request body over
+``settings.app.max_request_body_bytes`` before it reaches routing/parsing —
+defense in depth so a client can't force the app to buffer an arbitrarily large
+body in memory just by omitting or lying about ``Content-Length``.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import time
 import uuid
 
 import jwt
+from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.types import ASGIApp
 
@@ -34,8 +40,9 @@ from app.core.request_context import (
     get_audit_changes,
     reset_audit_changes,
 )
-from app.core.security import TOKEN_TYPE_ACCESS, decode_token
+from app.core.security import TOKEN_TYPE_ACCESS, decode_token, token_id_hash
 from app.db.session import get_session_factory
+from app.repositories.session_repository import SessionRepository
 from app.services.audit_service import AuditService, created_changes, derive_audit
 
 logger = logging.getLogger(__name__)
@@ -128,7 +135,13 @@ class AuditMiddleware:
             changes = get_audit_changes()
             try:
                 self._record(
-                    request, method, path, status_code, duration_ms, body_chunks, changes,
+                    request,
+                    method,
+                    path,
+                    status_code,
+                    duration_ms,
+                    body_chunks,
+                    changes,
                     request_body,
                 )
             except Exception as exc:  # never let auditing break the response
@@ -146,7 +159,6 @@ class AuditMiddleware:
         changes: dict | None = None,
         request_body: bytes = b"",
     ) -> None:
-        actor_id = self._actor(request)
         entity, entity_id, action = derive_audit(method, path, prefix=self.prefix)
         client_id = entity_id if entity == "clients" else None
 
@@ -175,6 +187,9 @@ class AuditMiddleware:
 
         session_factory = get_session_factory()
         with session_factory() as db:
+            # Same session used for the revocation lookup below and the write
+            # itself — one connection, not two.
+            actor_id = self._actor(request, db)
             AuditService(db).record(
                 entity=entity,
                 action=action,
@@ -187,7 +202,17 @@ class AuditMiddleware:
             )
 
     @staticmethod
-    def _actor(request: Request) -> uuid.UUID | None:
+    def _actor(request: Request, db: Session) -> uuid.UUID | None:
+        """Resolve the acting user from the bearer token, or ``None``.
+
+        Mirrors ``get_current_user``'s revocation rule exactly: a token
+        carrying a ``jti`` whose session row is gone (logged out) is treated
+        as unauthenticated here too — otherwise a revoked token, which can
+        never actually succeed at mutating anything, would still show up
+        attributed to its original owner in the audit trail, disagreeing with
+        the app's own definition of "still authenticated". A token without a
+        ``jti`` stays stateless, same as ``get_current_user``.
+        """
         auth = request.headers.get("authorization", "")
         if not auth.lower().startswith("bearer "):
             return None
@@ -195,6 +220,11 @@ class AuditMiddleware:
             payload = decode_token(auth[7:])
             if payload.get("type") != TOKEN_TYPE_ACCESS:
                 return None
+            jti = payload.get("jti")
+            if jti is not None:
+                session = SessionRepository(db).get_by_token_hash(token_id_hash(str(jti)))
+                if session is None:
+                    return None  # revoked
             return uuid.UUID(str(payload.get("sub")))
         except (jwt.PyJWTError, ValueError, TypeError):
             return None
@@ -270,3 +300,91 @@ def _changes_from_body(body: bytes) -> dict | None:
         for key, value in data.items()
     }
     return created_changes(safe)
+
+
+class _BodyTooLarge(Exception):
+    """Raised internally when a streamed request body exceeds the cap; caught
+    by ``BodySizeLimitMiddleware`` itself, never leaks past it."""
+
+
+class BodySizeLimitMiddleware:
+    """Reject any request body over ``max_bytes``.
+
+    Two layers: a fast ``Content-Length``-header check, handled entirely by
+    this middleware before the app reads a single byte — this is the common
+    case (any normal HTTP client sends an honest, or honestly-oversized,
+    header) and always yields a clean 413. A second layer, a running total on
+    the actual bytes streamed through ``receive()``, catches a client that
+    omits or *understates* ``Content-Length`` (e.g. hand-crafted chunked
+    transfer encoding); this fires from inside the app's own request-body
+    read, so FastAPI's routing layer (which wraps body-parsing in a broad
+    ``except Exception`` and reinterprets whatever it catches as a generic
+    400) usually reports it as a 400 rather than a 413. Either way the
+    oversized body is never fully buffered and the request is rejected — the
+    413 is the goal on the common path, not a guarantee on this rarer one.
+    Registered outermost so it runs before routing, auth, or body parsing.
+    """
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers") or [])
+        declared = headers.get(b"content-length")
+        if declared is not None:
+            try:
+                if int(declared) > self.max_bytes:
+                    await self._reject(send)
+                    return
+            except ValueError:
+                pass  # malformed header — fall through to the streaming guard
+
+        total = 0
+        response_started = False
+
+        async def guarded_receive():
+            nonlocal total
+            message = await receive()
+            if message["type"] == "http.request":
+                total += len(message.get("body", b""))
+                if total > self.max_bytes:
+                    raise _BodyTooLarge()
+            return message
+
+        async def tracking_send(message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, guarded_receive, tracking_send)
+        except _BodyTooLarge:
+            if not response_started:
+                await self._reject(send)
+            # else: the app already began its response — the ASGI protocol
+            # forbids sending a second http.response.start, so there's nothing
+            # safe left to do but drop the connection, same as any other
+            # mid-stream abort.
+
+    @staticmethod
+    async def _reject(send) -> None:
+        body = json.dumps(
+            {"error": {"code": "payload_too_large", "message": "Request body too large."}}
+        ).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})

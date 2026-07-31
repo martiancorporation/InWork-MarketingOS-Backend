@@ -84,9 +84,7 @@ def test_reseeding_is_idempotent(client: TestClient, admin_headers: dict, db_ses
     service.ingest(cid, rows, source=AnalyticsSource.synthetic)
 
     total = db_session.scalar(
-        select(func.count())
-        .select_from(AnalyticsDaily)
-        .where(AnalyticsDaily.client_id == cid)
+        select(func.count()).select_from(AnalyticsDaily).where(AnalyticsDaily.client_id == cid)
     )
     assert total == 2
 
@@ -153,9 +151,7 @@ def test_source_is_not_settable_from_the_request_body(client: TestClient, admin_
         f"{API}/clients/{cid}/analytics/ingest",
         headers=admin_headers,
         json={
-            "rows": [
-                {"date": DAY, "platform": "google", "impressions": 10, "source": "connector"}
-            ]
+            "rows": [{"date": DAY, "platform": "google", "impressions": 10, "source": "connector"}]
         },
     )
     assert resp.status_code == 200, resp.text

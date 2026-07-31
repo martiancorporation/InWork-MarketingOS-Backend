@@ -152,9 +152,9 @@ def test_remove_document(client: TestClient, admin_headers: dict):
         },
     )
     assert attach.status_code == 201, attach.text
-    doc_id = client.get(f"{API}/clients/{cid}/documents", headers=admin_headers).json()["items"][
-        0
-    ]["id"]
+    doc_id = client.get(f"{API}/clients/{cid}/documents", headers=admin_headers).json()["items"][0][
+        "id"
+    ]
 
     resp = client.delete(f"{API}/clients/{cid}/documents/{doc_id}", headers=admin_headers)
     assert resp.status_code == 200, resp.text
@@ -192,9 +192,9 @@ def test_remove_document_wrong_client_404(client: TestClient, admin_headers: dic
         },
     )
     assert attach.status_code == 201, attach.text
-    doc_id = client.get(f"{API}/clients/{cid_a}/documents", headers=admin_headers).json()[
-        "items"
-    ][0]["id"]
+    doc_id = client.get(f"{API}/clients/{cid_a}/documents", headers=admin_headers).json()["items"][
+        0
+    ]["id"]
 
     resp = client.delete(f"{API}/clients/{cid_b}/documents/{doc_id}", headers=admin_headers)
     assert resp.status_code == 404

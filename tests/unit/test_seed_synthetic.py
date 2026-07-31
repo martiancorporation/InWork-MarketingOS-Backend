@@ -60,9 +60,7 @@ def test_metrics_form_a_coherent_funnel():
 
 def test_weekends_dip_below_weekdays():
     rows = [
-        r
-        for r in seeder.rows_for_client(_slug(), 60, TODAY)
-        if r.platform == SocialPlatform.google
+        r for r in seeder.rows_for_client(_slug(), 60, TODAY) if r.platform == SocialPlatform.google
     ]
     weekend = [r.impressions for r in rows if r.date.weekday() >= 5]
     weekday = [r.impressions for r in rows if r.date.weekday() < 5]

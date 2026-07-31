@@ -18,7 +18,7 @@ from datetime import date
 
 from fastapi import APIRouter, Query, status
 
-from app.api.deps import CurrentUser, DbSession, Pagination
+from app.api.deps import CurrentUser, DbSession, Pagination, RequireClient
 from app.models.enums import TaskCategory, TaskStatus
 from app.schemas.common import MessageResponse
 from app.schemas.plan import (
@@ -27,7 +27,6 @@ from app.schemas.plan import (
     PlanTaskRead,
     PlanTaskUpdate,
 )
-from app.services.client_service import ClientService
 from app.services.plan_service import PlanService
 
 router = APIRouter(prefix="/clients/{client_id}/plan", tags=["plan"])
@@ -36,9 +35,9 @@ router = APIRouter(prefix="/clients/{client_id}/plan", tags=["plan"])
 @router.get("/tasks", response_model=PlanTaskListResponse, summary="List plan tasks")
 def list_tasks(
     client_id: uuid.UUID,
-    user: CurrentUser,
     db: DbSession,
     pagination: Pagination,
+    _client: RequireClient,
     status: TaskStatus | None = Query(None, description="todo / in_progress / blocked / done"),
     category: TaskCategory | None = Query(None),
     assignee_id: uuid.UUID | None = Query(None),
@@ -48,7 +47,6 @@ def list_tasks(
         False, description="With a window, also return tasks that have no dates at all"
     ),
 ) -> PlanTaskListResponse:
-    ClientService(db).get_client(user, client_id)  # 404 if not accessible
     return PlanService(db).list_tasks(
         client_id,
         pagination=pagination,
@@ -68,18 +66,20 @@ def list_tasks(
     summary="Create a plan task",
 )
 def create_task(
-    client_id: uuid.UUID, data: PlanTaskCreate, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    data: PlanTaskCreate,
+    user: CurrentUser,
+    db: DbSession,
+    _client: RequireClient,
 ) -> PlanTaskRead:
-    ClientService(db).get_client(user, client_id)
     task = PlanService(db).create_task(client_id, data, created_by=user.id)
     return PlanTaskRead.model_validate(task)
 
 
 @router.get("/tasks/{task_id}", response_model=PlanTaskRead, summary="Get a plan task")
 def get_task(
-    client_id: uuid.UUID, task_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, task_id: uuid.UUID, db: DbSession, _client: RequireClient
 ) -> PlanTaskRead:
-    ClientService(db).get_client(user, client_id)
     task = PlanService(db).get_task(client_id, task_id)
     return PlanTaskRead.model_validate(task)
 
@@ -89,10 +89,9 @@ def update_task(
     client_id: uuid.UUID,
     task_id: uuid.UUID,
     data: PlanTaskUpdate,
-    user: CurrentUser,
     db: DbSession,
+    _client: RequireClient,
 ) -> PlanTaskRead:
-    ClientService(db).get_client(user, client_id)
     task = PlanService(db).update_task(client_id, task_id, data)
     return PlanTaskRead.model_validate(task)
 
@@ -103,8 +102,7 @@ def update_task(
     summary="Delete a plan task",
 )
 def delete_task(
-    client_id: uuid.UUID, task_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, task_id: uuid.UUID, db: DbSession, _client: RequireClient
 ) -> MessageResponse:
-    ClientService(db).get_client(user, client_id)
     PlanService(db).delete_task(client_id, task_id)
     return MessageResponse(detail="Task deleted.")

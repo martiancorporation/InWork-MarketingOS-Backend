@@ -24,7 +24,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import CurrentUser, DbSession, require_capability
+from app.api.deps import DbSession, RequireClient, require_capability
 from app.models.client import Client
 from app.models.enums import ClientCapability, IntegrationKey
 from app.schemas.integration import (
@@ -34,7 +34,6 @@ from app.schemas.integration import (
     OAuthCompleteRequest,
     OAuthStartResponse,
 )
-from app.services.client_service import ClientService
 from app.services.integration_service import IntegrationService
 
 router = APIRouter(prefix="/clients/{client_id}/integrations", tags=["integrations"])
@@ -42,17 +41,15 @@ router = APIRouter(prefix="/clients/{client_id}/integrations", tags=["integratio
 
 @router.get("", response_model=IntegrationListResponse, summary="List integrations")
 def list_integrations(
-    client_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, db: DbSession, _client: RequireClient
 ) -> IntegrationListResponse:
-    ClientService(db).get_client(user, client_id)  # 404 if not accessible
     return IntegrationService(db).list(client_id)
 
 
 @router.get("/{key}", response_model=IntegrationRead, summary="Get one integration")
 def get_integration(
-    client_id: uuid.UUID, key: IntegrationKey, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, key: IntegrationKey, db: DbSession, _client: RequireClient
 ) -> IntegrationRead:
-    ClientService(db).get_client(user, client_id)
     integration = IntegrationService(db).get(client_id, key)
     return IntegrationRead.model_validate(integration)
 
@@ -63,9 +60,11 @@ def get_integration(
     summary="Begin real OAuth (Meta) — returns the authorization URL",
 )
 def oauth_start(
-    client_id: uuid.UUID, key: IntegrationKey, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    key: IntegrationKey,
+    db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
 ) -> OAuthStartResponse:
-    ClientService(db).get_client(user, client_id)
     url, state = IntegrationService(db).oauth_start(client_id, key)
     return OAuthStartResponse(authorization_url=url, state=state)
 
@@ -79,10 +78,9 @@ async def oauth_complete(
     client_id: uuid.UUID,
     key: IntegrationKey,
     data: OAuthCompleteRequest,
-    user: CurrentUser,
     db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
 ) -> IntegrationRead:
-    ClientService(db).get_client(user, client_id)
     integration = await IntegrationService(db).oauth_complete(
         client_id, key, data.code, data.state, ad_account_id=data.ad_account_id
     )
@@ -95,9 +93,11 @@ async def oauth_complete(
     summary="Pull live insights from the provider into analytics",
 )
 async def sync_integration(
-    client_id: uuid.UUID, key: IntegrationKey, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    key: IntegrationKey,
+    db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
 ) -> IntegrationRead:
-    ClientService(db).get_client(user, client_id)
     integration = await IntegrationService(db).sync(client_id, key)
     return IntegrationRead.model_validate(integration)
 
@@ -126,8 +126,10 @@ def connect_integration(
     summary="Disconnect an integration",
 )
 def disconnect_integration(
-    client_id: uuid.UUID, key: IntegrationKey, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    key: IntegrationKey,
+    db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
 ) -> IntegrationRead:
-    ClientService(db).get_client(user, client_id)
     integration = IntegrationService(db).disconnect(client_id, key)
     return IntegrationRead.model_validate(integration)

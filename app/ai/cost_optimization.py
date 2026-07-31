@@ -27,6 +27,7 @@ from app.schemas.ai_usage import CostOptimizationReport, CostSuggestion
 # Model tiers (expensive → cheap/mid) come from config, not hard-coded here —
 # see AISettings.cheap_model / mid_model / expensive_models.
 
+
 @dataclass(frozen=True)
 class _ModelTiers:
     """Configured model tiers the router suggests moving between."""
@@ -49,9 +50,7 @@ def build_report(rows: list[dict]) -> CostOptimizationReport:
     analyzed_cost = sum(float(r.get("total_cost", 0.0)) for r in rows)
 
     ai = get_settings().ai
-    tiers = _ModelTiers(
-        cheap=ai.cheap_model, mid=ai.mid_model, expensive=ai.expensive_model_set
-    )
+    tiers = _ModelTiers(cheap=ai.cheap_model, mid=ai.mid_model, expensive=ai.expensive_model_set)
 
     suggestions: list[CostSuggestion] = []
     for r in rows:

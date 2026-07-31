@@ -147,7 +147,9 @@ def _count_calls(monkeypatch, *agent_classes) -> dict[str, int]:
     return counts
 
 
-def test_dashboard_caches_when_nothing_changed(client: TestClient, admin_headers: dict, monkeypatch):
+def test_dashboard_caches_when_nothing_changed(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
     from app.ai.executive_brief import ExecutiveBriefAgent
     from app.ai.health_score import HealthScoreAgent
     from app.ai.recommendations import RecommendationsAgent

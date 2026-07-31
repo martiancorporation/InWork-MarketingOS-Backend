@@ -6,12 +6,25 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy.orm import Session
 
+import app.services.intelligence.job_queue as job_queue_module
 from app.models.client import Client
 from app.models.enums import IntelJobStatus
 from app.models.intel_job import IntelJob
 from app.services.intelligence.job_queue import _STALE_RUNNING_TIMEOUT_SECONDS, JobQueue
+
+
+@pytest.fixture(autouse=True)
+def _reset_reclaim_throttle():
+    """reclaim_stale() is throttled process-wide (see _RECLAIM_INTERVAL_SECONDS)
+    so it doesn't full-scan on every ~2s worker poll. Reset the module-level
+    timer before each test so these tests observe every call, uncoupled from
+    real wall-clock timing / test execution order."""
+    job_queue_module._last_reclaim_at_monotonic = 0.0
+    yield
+    job_queue_module._last_reclaim_at_monotonic = 0.0
 
 
 def _client(db: Session) -> Client:

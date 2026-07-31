@@ -15,7 +15,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 from app.models.enums import AdObjective, CampaignStatus
-from app.schemas.common import MAX_TEXT, ORMModel
+from app.schemas.common import MAX_TEXT, ORMModel, StrictModel
 
 
 def _rate(numerator: float, denominator: float) -> float | None:
@@ -32,7 +32,7 @@ def _ratio(numerator: float, denominator: float) -> float | None:
 # --------------------------------------------------------------------------- #
 
 
-class CampaignCreate(BaseModel):
+class CampaignCreate(StrictModel):
     name: str = Field(min_length=1, max_length=200)
     objective: AdObjective = AdObjective.awareness
     status: CampaignStatus = CampaignStatus.draft
@@ -51,7 +51,7 @@ class CampaignCreate(BaseModel):
         return self
 
 
-class CampaignUpdate(BaseModel):
+class CampaignUpdate(StrictModel):
     """Partial autosave — only fields present in the body apply (model_fields_set).
 
     Covers both the definition/targets and the actual rollup counters (the

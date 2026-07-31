@@ -15,9 +15,8 @@ import uuid
 
 from fastapi import APIRouter, status
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, RequireClient
 from app.schemas.strategy import AdherenceSummary, StrategyCreate, StrategyRead
-from app.services.client_service import ClientService
 from app.services.strategy_service import StrategyService
 
 router = APIRouter(prefix="/clients/{client_id}/strategy", tags=["strategy"])
@@ -30,9 +29,12 @@ router = APIRouter(prefix="/clients/{client_id}/strategy", tags=["strategy"])
     summary="Record the current strategy the operator signs off on",
 )
 def set_strategy(
-    client_id: uuid.UUID, data: StrategyCreate, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    data: StrategyCreate,
+    user: CurrentUser,
+    db: DbSession,
+    _client: RequireClient,
 ) -> StrategyRead:
-    ClientService(db).get_client(user, client_id)  # 404 if inaccessible
     strategy = StrategyService(db).set_strategy(client_id, data, signed_by=user.id)
     return StrategyRead.model_validate(strategy)
 
@@ -42,12 +44,10 @@ def set_strategy(
     response_model=AdherenceSummary,
     summary="How closely the operator followed the recorded strategy",
 )
-def get_adherence(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> AdherenceSummary:
-    ClientService(db).get_client(user, client_id)
+def get_adherence(client_id: uuid.UUID, db: DbSession, _client: RequireClient) -> AdherenceSummary:
     return StrategyService(db).adherence(client_id)
 
 
 @router.get("", response_model=StrategyRead, summary="Get the current strategy")
-def get_strategy(client_id: uuid.UUID, user: CurrentUser, db: DbSession) -> StrategyRead:
-    ClientService(db).get_client(user, client_id)
+def get_strategy(client_id: uuid.UUID, db: DbSession, _client: RequireClient) -> StrategyRead:
     return StrategyRead.model_validate(StrategyService(db).get_current(client_id))

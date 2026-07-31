@@ -12,10 +12,10 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 from app.models.enums import SocialPlatform
-from app.schemas.common import ORMModel
+from app.schemas.common import ORMModel, StrictModel
 
 
-class AnalyticsDailyIn(BaseModel):
+class AnalyticsDailyIn(StrictModel):
     date: date
     platform: SocialPlatform
     impressions: int = Field(0, ge=0)
@@ -24,9 +24,13 @@ class AnalyticsDailyIn(BaseModel):
     leads: int = Field(0, ge=0)
     spend: float = Field(0, ge=0)
     revenue: float = Field(0, ge=0)
+    # Provenance is server-determined (AnalyticsService.ingest always stamps its
+    # own `source`, never this value) — accepted-but-ignored so a client/CSV
+    # echoing back what a previous read returned doesn't 422.
+    source: str | None = None
 
 
-class AnalyticsIngestRequest(BaseModel):
+class AnalyticsIngestRequest(StrictModel):
     rows: list[AnalyticsDailyIn] = Field(min_length=1, max_length=1000)
 
 

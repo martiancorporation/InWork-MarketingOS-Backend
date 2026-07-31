@@ -17,7 +17,9 @@ from tests.helpers import onboarding_payload
 
 
 def _client_id(client, headers, name="Stream Co."):
-    resp = client.post(f"{API}/clients/onboarding", headers=headers, json=onboarding_payload(name=name))
+    resp = client.post(
+        f"{API}/clients/onboarding", headers=headers, json=onboarding_payload(name=name)
+    )
     assert resp.status_code == 201, resp.text
     return resp.json()["client"]["id"]
 
@@ -121,9 +123,7 @@ def test_stream_fallback_when_ai_configured_but_call_fails(
     assert "credit balance" not in done["content"]
 
 
-def test_stream_unassigned_user_gets_404(
-    client: TestClient, admin_headers: dict, make_user
-):
+def test_stream_unassigned_user_gets_404(client: TestClient, admin_headers: dict, make_user):
     cid = _client_id(client, admin_headers, name="Private Co.")
     chat = _chat_id(client, admin_headers, cid)
     _, user_headers = make_user(role="user")  # not assigned to this client

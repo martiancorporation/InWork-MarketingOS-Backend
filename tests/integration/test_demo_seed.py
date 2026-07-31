@@ -129,9 +129,9 @@ def test_plan_tasks_span_a_range_and_vary_in_status(client: TestClient, admin_he
     ).json()["items"]
 
     assert len({t["status"] for t in items}) >= 3, "want done + overdue + upcoming"
-    assert any(t["start_date"] and t["due_date"] and t["start_date"] != t["due_date"] for t in items), (
-        "at least one multi-day span, so the calendar draws a bar"
-    )
+    assert any(
+        t["start_date"] and t["due_date"] and t["start_date"] != t["due_date"] for t in items
+    ), "at least one multi-day span, so the calendar draws a bar"
     assert any(t["start_date"] is None and t["due_date"] is None for t in items), (
         "one undated item, so the board's unscheduled counter is exercised"
     )
@@ -203,7 +203,9 @@ def test_reseeding_does_not_duplicate(client: TestClient, admin_headers: dict, d
 def test_atomic_onboarding_also_seeds(client: TestClient, admin_headers: dict):
     """Both creation paths must behave the same."""
     resp = client.post(
-        f"{API}/clients/onboarding", headers=admin_headers, json=onboarding_payload(name="Atomic Co.")
+        f"{API}/clients/onboarding",
+        headers=admin_headers,
+        json=onboarding_payload(name="Atomic Co."),
     )
     assert resp.status_code == 201, resp.text
     cid = resp.json()["client"]["id"]
@@ -211,9 +213,7 @@ def test_atomic_onboarding_also_seeds(client: TestClient, admin_headers: dict):
     assert summary.json()["totals"]["impressions"] > 0
 
 
-def test_client_rollups_are_populated(
-    client: TestClient, admin_headers: dict, db_session: Session
-):
+def test_client_rollups_are_populated(client: TestClient, admin_headers: dict, db_session: Session):
     """``spend_total``/``leads_total``/``cpl`` were read in four places, written in none.
 
     They back the client list, the dashboard's budget card and headline, and the

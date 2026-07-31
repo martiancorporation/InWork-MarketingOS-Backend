@@ -14,10 +14,10 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import ReportFormat, ReportKind
-from app.schemas.common import ORMModel
+from app.schemas.common import ORMModel, StrictModel
 
 
-class ReportCreate(BaseModel):
+class ReportCreate(StrictModel):
     kind: ReportKind = ReportKind.performance
     format: ReportFormat = ReportFormat.pdf
     title: str = Field(min_length=1, max_length=200)
@@ -39,7 +39,7 @@ class ReportCreate(BaseModel):
         return self
 
 
-class ReportUpdate(BaseModel):
+class ReportUpdate(StrictModel):
     """Manually attach/replace the file, or tweak delivery, after the fact. Partial."""
 
     title: str | None = Field(None, min_length=1, max_length=200)

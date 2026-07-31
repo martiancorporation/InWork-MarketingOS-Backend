@@ -46,6 +46,13 @@ from app.utils.download_link import upload_permalink
 
 logger = logging.getLogger("app.services.assistant")
 
+# Cap how much prior conversation is replayed into the LLM prompt on every
+# turn. Without a bound, a long-running chat sends an ever-growing transcript
+# on every single message — token cost (and latency) grows without limit as
+# the conversation gets longer. 40 messages is ~20 user/assistant turns, well
+# past what's useful for the model to stay grounded in the recent thread.
+_MAX_LLM_HISTORY_MESSAGES = 40
+
 
 @dataclass
 class StreamContext:
@@ -101,9 +108,13 @@ class AssistantService:
         self.db.refresh(chat)
         return chat
 
-    def get_chat_detail(self, client_id: uuid.UUID, chat_id: uuid.UUID) -> AssistantChatDetail:
+    def get_chat_detail(
+        self, client_id: uuid.UUID, chat_id: uuid.UUID, *, pagination: PaginationParams
+    ) -> AssistantChatDetail:
         chat = self._require_chat(client_id, chat_id)
-        messages = self.chats.list_messages(chat_id)
+        messages, total = self.chats.list_messages_page(
+            chat_id, offset=pagination.offset, limit=pagination.limit
+        )
         return AssistantChatDetail(
             id=chat.id,
             title=chat.title,
@@ -112,6 +123,9 @@ class AssistantService:
             created_at=chat.created_at,
             updated_at=chat.updated_at,
             messages=[self._message_read(m) for m in messages],
+            messages_total=total,
+            messages_page=pagination.page,
+            messages_page_size=pagination.page_size,
         )
 
     @staticmethod
@@ -154,7 +168,10 @@ class AssistantService:
         storage: Storage | None = None,
     ) -> AssistantAskResponse:
         chat = self._require_chat(client_id, chat_id)
-        history = [(m.role.value, m.content) for m in self.chats.list_messages(chat_id)]
+        history = [
+            (m.role.value, m.content)
+            for m in self.chats.list_messages(chat_id, limit=_MAX_LLM_HISTORY_MESSAGES)
+        ]
 
         bundle, meta = await self._resolve_attachments(user, attachment_upload_ids, storage)
         self.chats.add_message(chat_id, AiRole.user, content, meta=meta)
@@ -238,7 +255,10 @@ class AssistantService:
                 "POST to /messages instead."
             )
         self._require_chat(client_id, chat_id)
-        history = [(m.role.value, m.content) for m in self.chats.list_messages(chat_id)]
+        history = [
+            (m.role.value, m.content)
+            for m in self.chats.list_messages(chat_id, limit=_MAX_LLM_HISTORY_MESSAGES)
+        ]
         self.chats.add_message(chat_id, AiRole.user, content)
         self.db.commit()
 

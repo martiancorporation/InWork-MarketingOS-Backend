@@ -6,6 +6,7 @@ from app.core.config.scheduler import SchedulerSettings
 from app.tasks.scheduler import (
     DIGEST_JOB,
     INTEGRATION_SYNC_JOB,
+    SESSION_PURGE_JOB,
     WATCHDOG_JOB,
     build_jobs,
 )
@@ -16,6 +17,7 @@ def test_defaults():
     assert jobs[WATCHDOG_JOB].interval_seconds == 60 * 60  # 60 min
     assert jobs[INTEGRATION_SYNC_JOB].interval_seconds == 360 * 60
     assert jobs[DIGEST_JOB].interval_seconds == 1440 * 60
+    assert jobs[SESSION_PURGE_JOB].interval_seconds == 60 * 60
 
 
 def test_custom_intervals_are_honored():

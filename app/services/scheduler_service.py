@@ -27,6 +27,7 @@ from app.models.enums import (
 )
 from app.repositories.alert_repository import AlertRepository
 from app.repositories.campaign_repository import CampaignRepository
+from app.repositories.session_repository import SessionRepository
 from app.schemas.automation import (
     AlertBrief,
     ClientDigest,
@@ -135,6 +136,17 @@ class SchedulerService:
         return SyncSweepResult(
             clients=len(self._active_clients()), synced=synced, failed=failed, details=details
         )
+
+    # ---- expired session purge ---------------------------------------- #
+
+    def purge_expired_sessions(self) -> int:
+        """Delete every ``user_sessions`` row past its expiry. Nothing else ever
+        cleans this table up (logout deletes one row; expiry alone never did),
+        so left unswept it grows by one row per login forever."""
+        deleted = SessionRepository(self.db).purge_expired(now=datetime.now(UTC))
+        if deleted:
+            self.db.commit()
+        return deleted
 
     # ---- daily digest ------------------------------------------------- #
 

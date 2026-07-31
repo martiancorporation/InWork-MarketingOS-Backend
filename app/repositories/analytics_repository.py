@@ -1,27 +1,71 @@
 """Data access + aggregation for daily analytics facts (hard-filtered by client_id).
 
-Upsert is done row-by-row (find-then-update-or-insert) to stay portable across
-Postgres and the SQLite test DB; ingest batches are bounded. Aggregations mirror
-the ai-usage repository's coalesce-sum pattern.
+Upsert is a single dialect-native ``INSERT ... ON CONFLICT DO UPDATE`` statement
+(Postgres and SQLite both support the standard syntax) keyed on the
+``(client_id, date, platform)`` unique constraint, so ingesting an N-row batch
+costs one round trip instead of up to ``2N``. Aggregations mirror the ai-usage
+repository's coalesce-sum pattern.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import date
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.sql import Select
 
 from app.models.analytics import AnalyticsDaily
 from app.models.enums import SocialPlatform
 from app.repositories.base import BaseRepository
 
+if TYPE_CHECKING:
+    from app.schemas.analytics import AnalyticsDailyIn
+
 _METRICS = ("impressions", "clicks", "conversions", "leads", "spend", "revenue")
+_CONFLICT_COLUMNS = ("client_id", "date", "platform")
 
 
 class AnalyticsRepository(BaseRepository[AnalyticsDaily]):
     model = AnalyticsDaily
+
+    def bulk_upsert(
+        self, client_id: uuid.UUID, rows: list[AnalyticsDailyIn], *, source: str
+    ) -> int:
+        """Upsert ``rows`` on ``(client_id, date, platform)`` in one statement.
+
+        Within a batch, a later row for the same (date, platform) wins — same
+        last-write-wins semantics as the previous row-by-row loop — since a
+        single ``ON CONFLICT`` statement can't affect the same target row
+        twice. Returns the number of distinct cells upserted.
+        """
+        if not rows:
+            return 0
+
+        dedup: dict[tuple[date, str], dict[str, Any]] = {}
+        for row in rows:
+            platform_value = getattr(row.platform, "value", row.platform)
+            values: dict[str, Any] = {
+                "client_id": client_id,
+                "date": row.date,
+                "platform": row.platform,
+                "source": source,
+            }
+            for m in _METRICS:
+                values[m] = getattr(row, m)
+            dedup[(row.date, platform_value)] = values
+
+        dialect = self.db.bind.dialect.name if self.db.bind is not None else ""
+        insert_fn = pg_insert if dialect == "postgresql" else sqlite_insert
+        stmt = insert_fn(AnalyticsDaily).values(list(dedup.values()))
+        set_ = {m: getattr(stmt.excluded, m) for m in _METRICS}
+        set_["source"] = stmt.excluded.source
+        stmt = stmt.on_conflict_do_update(index_elements=list(_CONFLICT_COLUMNS), set_=set_)
+        self.db.execute(stmt)
+        return len(dedup)
 
     def _scope(
         self,

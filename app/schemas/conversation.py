@@ -13,14 +13,14 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
 
 from app.models.enums import ConversationSource, MessageFolder, RecipientKind
-from app.schemas.common import MAX_TEXT, ORMModel
+from app.schemas.common import MAX_TEXT, ORMModel, StrictModel
 
 # --------------------------------------------------------------------------- #
 # Recipients / attachments
 # --------------------------------------------------------------------------- #
 
 
-class RecipientIn(BaseModel):
+class RecipientIn(StrictModel):
     email: EmailStr = Field(max_length=255)
     kind: RecipientKind = RecipientKind.to
 
@@ -56,7 +56,7 @@ class MessageRead(ORMModel):
     attachments: list[AttachmentRead] = []
 
 
-class MessageCreate(BaseModel):
+class MessageCreate(StrictModel):
     """Reply within a thread. Defaults to an outbound (sent) message."""
 
     body: str = Field(min_length=1, max_length=MAX_TEXT)
@@ -65,7 +65,7 @@ class MessageCreate(BaseModel):
     recipients: list[RecipientIn] = Field(default=[], max_length=100)
 
 
-class MessageUpdate(BaseModel):
+class MessageUpdate(StrictModel):
     """Message-level actions: move folder, (un)star, relabel. Partial."""
 
     folder: MessageFolder | None = None
@@ -78,7 +78,7 @@ class MessageUpdate(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
-class ConversationCreate(BaseModel):
+class ConversationCreate(StrictModel):
     """Compose a new thread with its first message."""
 
     subject: str | None = Field(None, max_length=255)
@@ -89,7 +89,7 @@ class ConversationCreate(BaseModel):
     recipients: list[RecipientIn] = Field(default=[], max_length=100)
 
 
-class ConversationUpdate(BaseModel):
+class ConversationUpdate(StrictModel):
     is_read: bool | None = None
 
 

@@ -132,6 +132,9 @@ def candidate_urls(raw: str) -> list[str]:
     host = parsed.hostname or ""
     port = f":{parsed.port}" if parsed.port else ""
     alt_host = host[4:] if host.startswith("www.") else "www." + host
+    # True only when the caller's raw input spelled out a scheme (vs. a bare
+    # domain that normalize_url defaulted to https).
+    explicit_scheme = bool(_SCHEME_RE.match((raw or "").strip()))
 
     def build(scheme: str, hostname: str) -> str:
         return urlunparse(
@@ -139,7 +142,12 @@ def candidate_urls(raw: str) -> list[str]:
         )
 
     out = [base, build(parsed.scheme, alt_host)]
-    if parsed.scheme == "https":
+    # A cleartext fallback is only offered when https was our own default
+    # guess for a bare-domain input (some small sites really are HTTP-only) —
+    # never when the caller explicitly asked for https://, since silently
+    # falling back to plaintext on a connection failure is exactly the shape
+    # of an SSL-stripping/downgrade attack an on-path adversary could force.
+    if parsed.scheme == "https" and not explicit_scheme:
         out.append(build("http", host))
 
     seen: set[str] = set()
@@ -167,21 +175,50 @@ def _is_public_http_url(url: str) -> bool:
     """Only http(s) whose host resolves exclusively to public addresses.
 
     Every resolved A/AAAA record is checked, so a name that returns *any*
-    private/loopback/link-local address is rejected (basic SSRF guard).
+    private/loopback/link-local address is rejected (basic SSRF guard). This is
+    a fast pre-filter (used by the headless-render path, which can't easily pin
+    a connection to a specific IP); ``_resolve_public_ip`` below is the version
+    ``_get`` actually connects with, to close the DNS-rebinding TOCTOU between
+    this check and the real connection.
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return False
+    return _resolve_public_ip(parsed.hostname) is not None
+
+
+def _resolve_public_ip(hostname: str) -> str | None:
+    """Resolve ``hostname`` and return one address literal to connect to, or
+    ``None`` if resolution fails or *any* returned address is private/reserved.
+
+    Rejecting the whole hostname when only some of its addresses are private
+    (rather than just skipping those) matters because DNS can round-robin
+    across records — accepting the hostname on the strength of its public
+    addresses alone would still let a request land on a private one later.
+    """
     try:
-        infos = socket.getaddrinfo(parsed.hostname, None)
-        if not infos:
-            return False
-        for info in infos:
-            if _is_blocked_ip(ipaddress.ip_address(info[4][0])):
-                return False
+        infos = socket.getaddrinfo(hostname, None)
     except (socket.gaierror, ValueError):
-        return False
-    return True
+        return None
+    if not infos:
+        return None
+    addrs: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if _is_blocked_ip(ip):
+            return None
+        addrs.append(ip)
+    if not addrs:
+        return None
+    # Prefer an IPv4 literal (matches typical resolver/client ordering); any
+    # validated address is equally safe to pin to.
+    for ip in addrs:
+        if ip.version == 4:
+            return str(ip)
+    return str(addrs[0])
 
 
 # Follow at most this many redirects, re-validating the target of each hop.
@@ -193,20 +230,42 @@ def _get(url: str, *, timeout: float, client: httpx.Client) -> str | None:
 
     Auto-redirects are disabled so every hop (including cross-host 3xx to an
     internal address) is re-validated against the private-range guard before we
-    connect — a plain ``follow_redirects=True`` would bypass the initial check.
+    connect. The connection itself is made to the resolved, validated IP
+    literal (not the hostname) — ``Host``/SNI are still set to the real
+    hostname so virtual-hosting and certificate verification work — which
+    closes the DNS-rebinding gap a plain "check then let the HTTP client
+    re-resolve" approach has: a low-TTL attacker-controlled name could
+    otherwise return a public address to the check and a private one (e.g.
+    the cloud metadata IP) to the actual connection moments later.
     """
+    current = url
     for _ in range(_MAX_REDIRECTS + 1):
-        if not _is_public_http_url(url):
+        parsed = urlparse(current)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
             return None
+        ip = _resolve_public_ip(parsed.hostname)
+        if ip is None:
+            return None
+        host_literal = f"[{ip}]" if ":" in ip else ip
+        netloc = host_literal + (f":{parsed.port}" if parsed.port else "")
+        pinned = urlunparse(
+            (parsed.scheme, netloc, parsed.path or "/", parsed.params, parsed.query, "")
+        )
         try:
-            resp = client.get(url, timeout=timeout, follow_redirects=False)
+            resp = client.get(
+                pinned,
+                timeout=timeout,
+                follow_redirects=False,
+                headers={"Host": parsed.hostname},
+                extensions={"sni_hostname": parsed.hostname},
+            )
         except httpx.HTTPError:
             return None
         if resp.is_redirect:
             location = resp.headers.get("location")
             if not location:
                 return None
-            url = urljoin(url, location)
+            current = urljoin(current, location)  # resolve against the real hostname
             continue
         try:
             resp.raise_for_status()

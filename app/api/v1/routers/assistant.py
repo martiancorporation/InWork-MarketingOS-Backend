@@ -19,7 +19,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import CurrentUser, DbSession, Pagination, StorageDep
+from app.api.deps import CurrentUser, DbSession, Pagination, RequireClient, StorageDep
 from app.core.rate_limit import RateLimit
 from app.schemas.assistant import (
     AssistantAskRequest,
@@ -31,7 +31,6 @@ from app.schemas.assistant import (
 )
 from app.schemas.common import MessageResponse
 from app.services.assistant_service import AssistantService
-from app.services.client_service import ClientService
 
 router = APIRouter(prefix="/clients/{client_id}/assistant", tags=["assistant"])
 
@@ -39,12 +38,11 @@ router = APIRouter(prefix="/clients/{client_id}/assistant", tags=["assistant"])
 @router.get("/chats", response_model=AssistantChatListResponse, summary="List project AI chats")
 def list_chats(
     client_id: uuid.UUID,
-    user: CurrentUser,
     db: DbSession,
     pagination: Pagination,
+    _client: RequireClient,
     context_type: str | None = Query(None, max_length=40, description="e.g. 'project'"),
 ) -> AssistantChatListResponse:
-    ClientService(db).get_client(user, client_id)  # 404 if not accessible
     return AssistantService(db).list_chats(
         client_id, pagination=pagination, context_type=context_type
     )
@@ -57,9 +55,12 @@ def list_chats(
     summary="Start a project AI chat",
 )
 def create_chat(
-    client_id: uuid.UUID, data: AssistantChatCreate, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    data: AssistantChatCreate,
+    user: CurrentUser,
+    db: DbSession,
+    _client: RequireClient,
 ) -> AssistantChatRead:
-    ClientService(db).get_client(user, client_id)
     chat = AssistantService(db).create_chat(client_id, user.id, data)
     return AssistantChatRead.model_validate(chat)
 
@@ -72,11 +73,11 @@ def create_chat(
 def get_chat(
     client_id: uuid.UUID,
     chat_id: uuid.UUID,
-    user: CurrentUser,
     db: DbSession,
+    pagination: Pagination,
+    _client: RequireClient,
 ) -> AssistantChatDetail:
-    ClientService(db).get_client(user, client_id)
-    return AssistantService(db).get_chat_detail(client_id, chat_id)
+    return AssistantService(db).get_chat_detail(client_id, chat_id, pagination=pagination)
 
 
 @router.post(
@@ -93,8 +94,8 @@ async def ask(
     user: CurrentUser,
     db: DbSession,
     storage: StorageDep,
+    _client: RequireClient,
 ) -> AssistantAskResponse:
-    ClientService(db).get_client(user, client_id)
     return await AssistantService(db).ask(
         client_id,
         chat_id,
@@ -116,11 +117,11 @@ async def ask_stream(
     data: AssistantAskRequest,
     user: CurrentUser,
     db: DbSession,
+    _client: RequireClient,
 ) -> StreamingResponse:
     """Server-Sent Events: a ``sources`` frame, a ``delta`` frame per token chunk,
     then a ``done`` frame with the persisted message id + full text. Access +
     chat-existence are checked (404) before the stream opens."""
-    ClientService(db).get_client(user, client_id)
     service = AssistantService(db)
     ctx = service.begin_stream(
         client_id,
@@ -138,8 +139,7 @@ async def ask_stream(
 
 @router.delete("/chats/{chat_id}", response_model=MessageResponse, summary="Delete a chat")
 def delete_chat(
-    client_id: uuid.UUID, chat_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, chat_id: uuid.UUID, db: DbSession, _client: RequireClient
 ) -> MessageResponse:
-    ClientService(db).get_client(user, client_id)
     AssistantService(db).delete_chat(client_id, chat_id)
     return MessageResponse(detail="Chat deleted.")

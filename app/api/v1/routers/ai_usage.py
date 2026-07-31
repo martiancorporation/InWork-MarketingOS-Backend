@@ -14,7 +14,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import AdminUser, CurrentUser, DbSession, Pagination
+from app.api.deps import AdminUser, DbSession, Pagination, RequireClient
 from app.repositories.ai_usage_repository import UsageFilters
 from app.schemas.ai_usage import (
     AiUsageListResponse,
@@ -23,7 +23,6 @@ from app.schemas.ai_usage import (
     PlatformUsageSummary,
 )
 from app.services.ai_usage_service import AiUsageService
-from app.services.client_service import ClientService
 
 router = APIRouter(prefix="/ai-usage", tags=["ai-usage"])
 
@@ -112,13 +111,11 @@ def platform_optimization(
 )
 def client_optimization(
     client_id: uuid.UUID,
-    user: CurrentUser,
     db: DbSession,
+    _client: RequireClient,
     start: datetime | None = Query(None),
     end: datetime | None = Query(None),
 ) -> CostOptimizationReport:
-    # Enforce client access-scoping: 404 if the caller can't see this client.
-    ClientService(db).get_client(user, client_id)
     f = UsageFilters(client_id=client_id, start=start, end=end)
     return AiUsageService(db).optimization(f)
 
@@ -130,13 +127,11 @@ def client_optimization(
 )
 def client_summary(
     client_id: uuid.UUID,
-    user: CurrentUser,
     db: DbSession,
+    _client: RequireClient,
     start: datetime | None = Query(None),
     end: datetime | None = Query(None),
     feature: str | None = Query(None),
 ) -> ClientUsageSummary:
-    # Enforce client access-scoping: 404 if the caller can't see this client.
-    ClientService(db).get_client(user, client_id)
     f = UsageFilters(client_id=client_id, feature=feature, start=start, end=end)
     return AiUsageService(db).client_summary(f)

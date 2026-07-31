@@ -4,9 +4,10 @@ Client-access scoping is enforced at the router (``ClientService.get_client``)
 before any method here runs; every query is additionally hard-filtered by
 ``client_id``. Repositories flush; this service owns the commit.
 
-List filtering (folder/starred/category/search) is applied in Python over the
-client's threads — an agency inbox is bounded, and it keeps the thread-summary
-logic (derived from each thread's latest message) in one place.
+List filtering (folder/starred/category/search) and pagination are pushed into
+the repository's SQL query — see ``ConversationRepository.list_summaries_for_client``
+— so listing a busy inbox never loads every thread's full message history into
+memory just to show a page of summaries.
 """
 
 from __future__ import annotations
@@ -57,48 +58,33 @@ class ConversationService:
         category: str | None = None,
         search: str | None = None,
     ) -> ConversationListResponse:
-        rows = self.conversations.list_for_client(client_id)
-        items: list[ConversationListItem] = []
-        q = (search or "").strip().lower()
-        for conv in rows:
-            latest = self._latest(conv)
-            if latest is None:
-                continue
-            is_starred = any(m.is_starred for m in conv.messages)
-            if folder is not None and latest.folder != folder:
-                continue
-            if starred and not is_starred:
-                continue
-            if category is not None and not any(
-                (m.category or "") == category for m in conv.messages
-            ):
-                continue
-            if q and not (
-                (conv.subject or "").lower().find(q) >= 0
-                or any(q in (m.body or "").lower() for m in conv.messages)
-            ):
-                continue
-            items.append(
-                ConversationListItem(
-                    id=conv.id,
-                    subject=conv.subject,
-                    source=conv.source,
-                    is_read=conv.is_read,
-                    last_message_at=conv.last_message_at,
-                    message_count=len(conv.messages),
-                    preview=(latest.body or "")[:140],
-                    latest_folder=latest.folder,
-                    latest_category=latest.category,
-                    latest_sender_email=latest.sender_email,
-                    is_starred=is_starred,
-                )
+        rows, total = self.conversations.list_summaries_for_client(
+            client_id,
+            offset=pagination.offset,
+            limit=pagination.limit,
+            folder=folder,
+            starred=starred,
+            category=category,
+            search=search,
+        )
+        items = [
+            ConversationListItem(
+                id=row.id,
+                subject=row.subject,
+                source=row.source,
+                is_read=row.is_read,
+                last_message_at=row.last_message_at,
+                message_count=row.message_count,
+                preview=(row.latest_body or "")[:140],
+                latest_folder=row.latest_folder,
+                latest_category=row.latest_category,
+                latest_sender_email=row.latest_sender_email,
+                is_starred=bool(row.is_starred),
             )
-        # Rows are already newest-activity first; filtering preserves that order.
-        # Slice the matched set to the requested page (bounds the response).
-        total = len(items)
-        page_items = items[pagination.offset : pagination.offset + pagination.limit]
+            for row in rows
+        ]
         return ConversationListResponse(
-            items=page_items,
+            items=items,
             total=total,
             page=pagination.page,
             page_size=pagination.page_size,
@@ -244,12 +230,6 @@ class ConversationService:
         self.db.commit()
 
     # ---- helpers ------------------------------------------------------- #
-
-    @staticmethod
-    def _latest(conv: Conversation) -> Message | None:
-        if not conv.messages:
-            return None
-        return max(conv.messages, key=lambda m: m.created_at)
 
     @staticmethod
     def _recipients(recipients: list[RecipientIn]) -> list[MessageRecipient]:

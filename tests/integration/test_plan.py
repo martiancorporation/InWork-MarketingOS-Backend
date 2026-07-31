@@ -270,7 +270,12 @@ def test_date_window_uses_overlap_not_containment(client: TestClient, admin_head
     """
     cid = _client_id(client, admin_headers)
     _create_task(
-        client, admin_headers, cid, title="Straddles", start_date="2026-07-01", due_date="2026-07-31"
+        client,
+        admin_headers,
+        cid,
+        title="Straddles",
+        start_date="2026-07-01",
+        due_date="2026-07-31",
     )
     _create_task(client, admin_headers, cid, title="Inside", due_date="2026-07-14")
     _create_task(client, admin_headers, cid, title="Before", due_date="2026-06-01")
@@ -329,9 +334,7 @@ def test_include_undated_adds_the_unscheduled_pile(client: TestClient, admin_hea
     _create_task(client, admin_headers, cid, title="Other month", due_date="2026-09-01")
 
     params = {"start": "2026-07-01", "end": "2026-07-31"}
-    calendar = client.get(
-        f"{API}/clients/{cid}/plan/tasks", headers=admin_headers, params=params
-    )
+    calendar = client.get(f"{API}/clients/{cid}/plan/tasks", headers=admin_headers, params=params)
     assert {t["title"] for t in calendar.json()["items"]} == {"In window"}
 
     board = client.get(

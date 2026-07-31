@@ -34,3 +34,6 @@ class SchedulerSettings(BaseSettings):
     # Build the per-client daily digest (open alerts + onboarding/integration status).
     digest_interval_minutes: int = 1440  # SCHEDULER_DIGEST_INTERVAL_MINUTES
     digest_enabled: bool = True  # SCHEDULER_DIGEST_ENABLED
+
+    # Delete expired `user_sessions` rows (nothing else ever cleans them up).
+    session_purge_interval_minutes: int = 60  # SCHEDULER_SESSION_PURGE_INTERVAL_MINUTES

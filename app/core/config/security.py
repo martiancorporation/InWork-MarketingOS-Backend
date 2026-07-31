@@ -28,6 +28,15 @@ class SecuritySettings(BaseSettings):
     access_token_expire_minutes: int = 420  # 7 hours
     # Comma-separated list in the env; exposed as a parsed list below.
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    # Dedicated key for encrypting stored OAuth tokens at rest (see
+    # app/integrations/crypto.py). Falls back to SECRET_KEY when unset, for
+    # backward compatibility — but that couples two very different blast
+    # radii: rotating SECRET_KEY (e.g. after a JWT-signing leak) would
+    # otherwise also silently destroy every client's stored ad-platform
+    # credentials, and a single SECRET_KEY compromise would yield both token
+    # forgery *and* decryption of all customer OAuth tokens. Set this
+    # explicitly (and separately) in production.
+    encryption_key: str | None = None  # ENCRYPTION_KEY
 
     @field_validator("secret_key")
     @classmethod
@@ -36,6 +45,13 @@ class SecuritySettings(BaseSettings):
         every environment (the placeholder itself is comfortably long)."""
         if len(value) < MIN_SECRET_LENGTH:
             raise ValueError(f"SECRET_KEY must be at least {MIN_SECRET_LENGTH} characters.")
+        return value
+
+    @field_validator("encryption_key")
+    @classmethod
+    def _reject_weak_encryption_key(cls, value: str | None) -> str | None:
+        if value is not None and len(value) < MIN_SECRET_LENGTH:
+            raise ValueError(f"ENCRYPTION_KEY must be at least {MIN_SECRET_LENGTH} characters.")
         return value
 
     @field_validator("cors_origins")
@@ -57,3 +73,9 @@ class SecuritySettings(BaseSettings):
     @property
     def uses_placeholder_secret(self) -> bool:
         return self.secret_key == DEV_SECRET_PLACEHOLDER
+
+    @property
+    def token_encryption_key(self) -> str:
+        """The key TokenCipher derives its Fernet key from — ENCRYPTION_KEY if
+        set, else SECRET_KEY (backward-compatible default)."""
+        return self.encryption_key or self.secret_key

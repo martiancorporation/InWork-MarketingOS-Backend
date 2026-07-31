@@ -16,11 +16,13 @@ declared before ``/{campaign_id}`` so the literal segment wins the match.
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
-from app.api.deps import CurrentUser, DbSession, Pagination
-from app.models.enums import CampaignStatus
+from app.api.deps import CurrentUser, DbSession, Pagination, RequireClient, require_capability
+from app.models.client import Client
+from app.models.enums import CampaignStatus, ClientCapability
 from app.schemas.campaign import (
     CampaignCompareResponse,
     CampaignCreate,
@@ -31,7 +33,6 @@ from app.schemas.campaign import (
 )
 from app.schemas.common import MessageResponse
 from app.services.campaign_service import CampaignService
-from app.services.client_service import ClientService
 
 router = APIRouter(prefix="/clients/{client_id}/campaigns", tags=["campaigns"])
 
@@ -39,12 +40,11 @@ router = APIRouter(prefix="/clients/{client_id}/campaigns", tags=["campaigns"])
 @router.get("", response_model=CampaignListResponse, summary="List campaigns")
 def list_campaigns(
     client_id: uuid.UUID,
-    user: CurrentUser,
     db: DbSession,
     pagination: Pagination,
+    _client: RequireClient,
     status_filter: CampaignStatus | None = Query(None, alias="status"),
 ) -> CampaignListResponse:
-    ClientService(db).get_client(user, client_id)
     return CampaignService(db).list_campaigns(
         client_id,
         pagination=pagination,
@@ -59,9 +59,13 @@ def list_campaigns(
     summary="Create a campaign",
 )
 def create_campaign(
-    client_id: uuid.UUID, data: CampaignCreate, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    data: CampaignCreate,
+    user: CurrentUser,
+    db: DbSession,
+    # Creating/editing campaigns is a "manage campaigns" responsibility (BE-03).
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_campaigns))],
 ) -> CampaignRead:
-    ClientService(db).get_client(user, client_id)
     campaign = CampaignService(db).create_campaign(client_id, data, created_by=user.id)
     return CampaignRead.model_validate(campaign)
 
@@ -73,19 +77,17 @@ def create_campaign(
 )
 def compare_campaigns(
     client_id: uuid.UUID,
-    user: CurrentUser,
     db: DbSession,
+    _client: RequireClient,
     ids: list[uuid.UUID] = Query(..., min_length=2, description="Campaign ids to compare"),
 ) -> CampaignCompareResponse:
-    ClientService(db).get_client(user, client_id)
     return CampaignService(db).compare(client_id, ids)
 
 
 @router.get("/{campaign_id}", response_model=CampaignRead, summary="Get a campaign")
 def get_campaign(
-    client_id: uuid.UUID, campaign_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, campaign_id: uuid.UUID, db: DbSession, _client: RequireClient
 ) -> CampaignRead:
-    ClientService(db).get_client(user, client_id)
     return CampaignRead.model_validate(CampaignService(db).get_campaign(client_id, campaign_id))
 
 
@@ -95,9 +97,8 @@ def get_campaign(
     summary="Target-relative campaign health score",
 )
 def campaign_health(
-    client_id: uuid.UUID, campaign_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID, campaign_id: uuid.UUID, db: DbSession, _client: RequireClient
 ) -> CampaignHealth:
-    ClientService(db).get_client(user, client_id)
     return CampaignService(db).health(client_id, campaign_id)
 
 
@@ -106,10 +107,9 @@ def update_campaign(
     client_id: uuid.UUID,
     campaign_id: uuid.UUID,
     data: CampaignUpdate,
-    user: CurrentUser,
     db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_campaigns))],
 ) -> CampaignRead:
-    ClientService(db).get_client(user, client_id)
     return CampaignRead.model_validate(
         CampaignService(db).update_campaign(client_id, campaign_id, data)
     )
@@ -117,8 +117,10 @@ def update_campaign(
 
 @router.delete("/{campaign_id}", response_model=MessageResponse, summary="Delete a campaign")
 def delete_campaign(
-    client_id: uuid.UUID, campaign_id: uuid.UUID, user: CurrentUser, db: DbSession
+    client_id: uuid.UUID,
+    campaign_id: uuid.UUID,
+    db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_campaigns))],
 ) -> MessageResponse:
-    ClientService(db).get_client(user, client_id)
     CampaignService(db).delete_campaign(client_id, campaign_id)
     return MessageResponse(detail="Campaign deleted.")

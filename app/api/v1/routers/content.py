@@ -16,10 +16,9 @@ import uuid
 from fastapi import APIRouter, Depends
 
 from app.ai.content_review import ContentReviewAgent
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import DbSession, RequireClient
 from app.core.rate_limit import RateLimit
 from app.schemas.content import ContentReviewReport, ContentReviewRequest
-from app.services.client_service import ClientService
 
 router = APIRouter(prefix="/clients/{client_id}/content", tags=["content"])
 
@@ -33,8 +32,7 @@ router = APIRouter(prefix="/clients/{client_id}/content", tags=["content"])
 async def review_content(
     client_id: uuid.UUID,
     data: ContentReviewRequest,
-    user: CurrentUser,
     db: DbSession,
+    _client: RequireClient,
 ) -> ContentReviewReport:
-    ClientService(db).get_client(user, client_id)  # 404 if not accessible
     return await ContentReviewAgent(db, client_id).review(data.content, platform=data.platform)

@@ -20,6 +20,7 @@ logger = logging.getLogger("app.scheduler")
 WATCHDOG_JOB = "kpi_watchdog"
 INTEGRATION_SYNC_JOB = "integration_sync"
 DIGEST_JOB = "daily_digest"
+SESSION_PURGE_JOB = "session_purge"
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,11 @@ def build_jobs(settings: SchedulerSettings | None = None) -> list[ScheduledJob]:
             INTEGRATION_SYNC_JOB,
             s.integration_sync_interval_minutes * 60,
             "Sync connected ad-platform integrations",
+        ),
+        ScheduledJob(
+            SESSION_PURGE_JOB,
+            s.session_purge_interval_minutes * 60,
+            "Delete expired auth sessions (user_sessions)",
         ),
     ]
     if s.digest_enabled:
@@ -84,6 +90,9 @@ async def run_job(name: str) -> None:
         elif name == DIGEST_JOB:
             digests = service.build_all_digests()
             logger.info("daily digest: built %d client digest(s)", digests.total)
+        elif name == SESSION_PURGE_JOB:
+            deleted = service.purge_expired_sessions()
+            logger.info("session purge: deleted %d expired session(s)", deleted)
         else:
             logger.warning("Unknown scheduled job: %s", name)
     finally:

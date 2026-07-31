@@ -6,6 +6,12 @@ through our own API: this module signs/verifies an HMAC-SHA256 capability link
 to ``GET /uploads/{id}/download`` (see ``app/api/v1/routers/uploads.py``), which
 re-presigns against S3 with a short, invisible TTL on every hit. The link
 itself never changes; only what it redirects to does.
+
+The signature is scoped to the upload's current ``link_epoch`` (see
+``app/models/upload.py``), so a specific leaked link can be revoked —
+``UploadService.regenerate_link`` bumps the epoch, which invalidates every
+signature issued before the bump, without deleting the file or forcing every
+other upload's links to expire too.
 """
 
 from __future__ import annotations
@@ -23,26 +29,29 @@ def _digest(value: str) -> str:
     return hmac.new(key, value.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def sign_upload_id(upload_id: uuid.UUID) -> str:
-    """HMAC-SHA256 signature proving a download link was minted by us."""
-    return _digest(str(upload_id))
+def sign_upload_id(upload_id: uuid.UUID, *, epoch: int = 0) -> str:
+    """HMAC-SHA256 signature proving a download link was minted by us for the
+    upload's current ``link_epoch``."""
+    return _digest(f"{upload_id}:{epoch}")
 
 
-def verify_upload_signature(upload_id: uuid.UUID, signature: str) -> bool:
-    """Constant-time check that ``signature`` matches ``upload_id``."""
-    return hmac.compare_digest(_digest(str(upload_id)), signature)
+def verify_upload_signature(upload_id: uuid.UUID, signature: str, *, epoch: int = 0) -> bool:
+    """Constant-time check that ``signature`` matches ``upload_id`` at ``epoch``."""
+    return hmac.compare_digest(_digest(f"{upload_id}:{epoch}"), signature)
 
 
-def upload_permalink(upload_id: uuid.UUID | str) -> str:
+def upload_permalink(upload_id: uuid.UUID | str, *, epoch: int = 0) -> str:
     """Build the permanent, signed download link for an upload.
 
     Never expires from the caller's perspective — hitting it always 302s to a
-    freshly presigned, short-lived S3 URL. Falls back to a relative path when
-    ``public_api_base_url`` isn't configured (local/dev), so the link still
-    resolves through whatever host actually served it.
+    freshly presigned, short-lived S3 URL — unless its ``link_epoch`` is bumped
+    (revocation), which invalidates links signed for an earlier epoch. Falls
+    back to a relative path when ``public_api_base_url`` isn't configured
+    (local/dev), so the link still resolves through whatever host actually
+    served it.
     """
     uid = upload_id if isinstance(upload_id, uuid.UUID) else uuid.UUID(str(upload_id))
-    sig = sign_upload_id(uid)
+    sig = sign_upload_id(uid, epoch=epoch)
     base = (get_settings().app.public_api_base_url or "").rstrip("/")
     return f"{base}/uploads/{uid}/download?sig={sig}"
 

@@ -5,10 +5,11 @@ newly created client would open onto empty dashboards. When ``seed_on_create`` i
 on, creating a client also writes a synthetic history for it — see
 ``app/services/demo_data_service.py``.
 
-This is scaffolding with an expiry date: turn it off (``DEMO_SEED_ON_CREATE=false``)
-once connectors are live, so real clients start empty and fill from their own data.
-Existing synthetic rows stay identifiable (``analytics_daily.source='synthetic'``)
-and a connector sync overwrites them in place regardless of this flag.
+This is scaffolding, **off by default** — a real deployment should not silently
+fabricate spend/leads data for real clients. Opt in explicitly
+(``DEMO_SEED_ON_CREATE=true``) for a demo/sales environment. Existing synthetic
+rows stay identifiable (``analytics_daily.source='synthetic'``) and a connector
+sync overwrites them in place regardless of this flag.
 """
 
 from __future__ import annotations
@@ -27,8 +28,9 @@ class DemoSettings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Seed a synthetic history when a client is created.
-    seed_on_create: bool = True  # DEMO_SEED_ON_CREATE
+    # Seed a synthetic history when a client is created. Off by default — a
+    # production deployment must opt in explicitly.
+    seed_on_create: bool = False  # DEMO_SEED_ON_CREATE
 
     # Days of history to generate. 90 gives the dashboard's 7/30/90-day
     # comparisons something to compare against.

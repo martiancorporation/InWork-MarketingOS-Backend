@@ -11,8 +11,11 @@ Scope & caveats:
   (Redis) behind the same interface. This is a deliberate, documented first line
   of defense, not a distributed limiter.
 - Disabled wholesale when ``settings.app.rate_limit_enabled`` is false (tests).
-- Keyed by best-effort client IP (honours a single ``X-Forwarded-For`` hop when
-  present, since the app is expected to run behind a trusted proxy/ALB).
+- Keyed by best-effort client IP: honours a single ``X-Forwarded-For`` hop only
+  when the immediate socket peer is a configured trusted proxy
+  (``settings.app.trusted_proxy_cidrs``) — otherwise the header is attacker-
+  controlled and would let anyone spoof a fresh IP on every request to dodge
+  the limit, so it is ignored and the raw socket peer is used instead.
 """
 
 from __future__ import annotations
@@ -32,10 +35,16 @@ _hits: dict[str, dict[str, deque[float]]] = defaultdict(lambda: defaultdict(dequ
 
 
 def _client_ip(request: Request) -> str:
+    peer = request.client.host if request.client else "unknown"
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    # Only honour the header when the direct connection is from a configured
+    # trusted proxy — otherwise a client can set any value it likes and get a
+    # fresh rate-limit bucket on every request.
+    if forwarded and peer != "unknown" and get_settings().app.is_trusted_proxy(peer):
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    return peer
 
 
 def _allow(scope: str, ip: str, *, times: int, seconds: float, now: float) -> bool:
