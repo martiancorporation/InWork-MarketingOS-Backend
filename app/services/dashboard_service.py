@@ -91,12 +91,20 @@ class DashboardService:
         def usage(feature: str) -> AiUsageContext:
             return AiUsageContext(feature=feature, client_id=client.id, user_id=user_id)
 
-        health, brief, watchdog, recs = await asyncio.gather(
-            HealthScoreAgent().generate(client, context, signals, usage(AiFeature.HEALTH_SCORE)),
+        # QA only reviews `brief` + `recs`, not health/watchdog — scheduling
+        # health/watchdog as background tasks (rather than one flat `gather`)
+        # lets QA start the moment brief+recs land instead of waiting on
+        # whichever of all four engines happens to be slowest.
+        health_task = asyncio.create_task(
+            HealthScoreAgent().generate(client, context, signals, usage(AiFeature.HEALTH_SCORE))
+        )
+        watchdog_task = asyncio.create_task(
+            WatchdogAgent().generate(client, context, signals, usage(AiFeature.WATCHDOG))
+        )
+        brief, recs = await asyncio.gather(
             ExecutiveBriefAgent().generate(
                 client, context, signals, usage(AiFeature.EXECUTIVE_BRIEF)
             ),
-            WatchdogAgent().generate(client, context, signals, usage(AiFeature.WATCHDOG)),
             RecommendationsAgent().generate(
                 client, context, signals, usage(AiFeature.RECOMMENDATION)
             ),
@@ -104,6 +112,7 @@ class DashboardService:
 
         self._merge_decisions(client.id, recs)
         qa_review = await self._qa_review(brief, recs, context.preamble, signals, usage)
+        health, watchdog = await asyncio.gather(health_task, watchdog_task)
         response = DashboardResponse(
             health_score=health,
             executive_brief=brief,
