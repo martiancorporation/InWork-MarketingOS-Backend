@@ -37,7 +37,8 @@
 27. [Module 24 — Strategy](#module-24--strategy) *(Strategy & adherence)*
 28. [Module 25 — My Work](#module-25--my-work-cross-client) *(cross-client pending / red-dots)*
 29. [Module 26 — Global Assistant](#module-26--global-assistant) *(portfolio-wide Ask AI)*
-30. [Appendix A — Enum reference](#appendix-a--enum-reference)
+30. [Module 27 — Support & Feedback Tickets](#module-27--support--feedback-tickets) *(Help / Support)*
+31. [Appendix A — Enum reference](#appendix-a--enum-reference)
 
 ---
 
@@ -57,7 +58,7 @@ Every endpoint entry lists: **method + path**, **auth/permissions**, **rate limi
 ### Base URL & versioning
 - All endpoints are under **`/api/v1`** (configurable via `API_V1_PREFIX`).
 - Interactive docs (Swagger UI): **`/docs`** · OpenAPI schema: **`/openapi.json`**.
-- Liveness (unversioned): **`GET /health`**.
+- Liveness (unversioned): **`GET /health`**. Readiness, verifies DB connectivity (unversioned): **`GET /health/ready`** — `200 {"status": "ready"}` or `503 {"status": "not_ready"}`.
 
 ### Authentication
 - **Scheme:** JWT bearer (HS256). Obtain a token from `POST /api/v1/auth/login`.
@@ -72,6 +73,7 @@ Every endpoint entry lists: **method + path**, **auth/permissions**, **rate limi
 - **`manager` / `user`** (non-admin) — can only see **clients assigned to them** (via Module 5). Any client they are not assigned to is reported as **`404 Not Found`, never `403`** — so client IDs can't be probed. This "object-level authorization" applies to every `/clients/{client_id}/...` route.
 - **Per-project capabilities (granular RBAC):** on top of the bare client assignment, an assignment can scope **what** a `user` may do on that client via a set of `ClientCapability` values (`manage_integrations`, `review_results`, `review_creatives`, `manage_calendar`, `manage_compliance`, and a per-client `admin` super-grant). **`admin` and `manager` roles implicitly hold every capability** on every client they can see; a plain `user` holds only the capabilities their assignment grants (an assignment created without an explicit set grants the full set, preserving pre-RBAC behaviour). Capability-gated routes return **`403 Forbidden`** when the caller can see the client but lacks the capability (vs. `404` when the client itself is inaccessible). Capability-gated routes today: `POST .../recommendations/{rec_key}/decision` (`review_results`) and `POST .../integrations/{key}/connect` (`manage_integrations`). Manage capabilities per assignment via Module 5.
 - **Uploads** are **owner-scoped** the same way (a non-admin sees only their own uploads).
+- **Support tickets** are **owner-scoped** the same way (a non-admin sees/edits/deletes only their own tickets; an admin sees and can act on every ticket, including changing `status` and adding replies — see Module 27).
 - **Notifications** are **per-user** (each caller sees only their own).
 
 ### Error envelope
@@ -91,7 +93,7 @@ Every error returns the same JSON shape, plus an `X-Request-ID` response header 
 | `403 Forbidden` | `forbidden` | Authenticated but not an admin on an admin-only route. |
 | `404 Not Found` | `not_found` | Resource missing **or** not accessible to the caller. |
 | `409 Conflict` | `conflict` | Duplicate (email/assignment) or illegal state transition. |
-| `413 Content Too Large` | `payload_too_large` | Upload / CSV exceeds the size cap. |
+| `413 Content Too Large` | `payload_too_large` | Upload / CSV exceeds its own size cap, **or** any request body exceeds the global 25 MB cap (`MAX_REQUEST_BODY_BYTES`) enforced before routing. |
 | `415 Unsupported Media Type` | `unsupported_media_type` | Upload content-type not on the allow-list. |
 | `422 Unprocessable Content` | `validation_error` | Body/query failed validation (missing field, bad enum, unknown field on strict models). |
 | `429 Too Many Requests` | `too_many_requests` | Rate limit exceeded. |
@@ -116,6 +118,8 @@ A few endpoints are throttled (per worker; sliding window; disabled in dev/test)
 | `POST /clients/{id}/assistant/chats/{chat_id}/messages` | 30 requests / 60s |
 | `POST /clients/{id}/content/review` | 30 requests / 60s |
 | `POST /assistant/ask` (global assistant) | 30 requests / 60s |
+| `POST /clients/{id}/dashboard/refresh` | 30 requests / 60s |
+| `POST /support-tickets` | 20 requests / 60s |
 
 On exceed → `429`. The frontend should surface a friendly "please slow down" toast and back off.
 
@@ -151,6 +155,7 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 | 24 | Strategy | Client | Strategy / adherence | All (scoped) |
 | 25 | My Work | Global | Cross-client pending / red-dot badges | All (per-user) |
 | 26 | Global Assistant | Global | Portfolio-wide "Ask AI" | All (scoped) |
+| 27 | Support & Feedback Tickets | Global | Help / Support | All (owner-scoped) / Admin |
 
 **Typical flow:** Login → (agency) see Clients → Onboard a client (8-step wizard, with AI brand extraction + consistency check) → Assign the client to a manager/user → open the client → Dashboard (AI health/brief/watchdog/recommendations) → work across Analytics, Calendar, Conversations, Compliance, Plan, Reports, Integrations. Admins additionally use Automation, Token Usage, Audit Logs.
 
@@ -308,6 +313,20 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 - **Errors:** `401`; `403`; `404`; `422`.
 - **Why/when:** Attach uploaded document references to the client.
 
+### `GET /api/v1/clients/{client_id}/documents`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Query params:** `page`, `page_size`; `kind` (`DocumentKind`).
+- **Success `200`:** `DocumentListResponse` = `{ items: DocumentRead[], total, page, page_size }`. `DocumentRead`: `id`, `kind`, `name`, `mime_type?`, `size_bytes`, `storage_url` (resolved to a permanent, signed download link — see Module 19), `uploaded_by?`, `created_at`.
+- **Errors:** `401`; `404` client inaccessible; `422`.
+- **Object scoping:** Admin all; non-admin only assigned; inaccessible → `404`.
+- **Why/when:** List the documents attached to a client (e.g. render the Documents step / a client's file drawer).
+
+### `DELETE /api/v1/clients/{client_id}/documents/{document_id}`
+- **Auth:** Admin only. **Rate limited:** No.
+- **Success `200`:** `OnboardingStepResponse` (recomputed `readiness`/`onboarding` after removal).
+- **Errors:** `401`; `403`; `404` client or document not found.
+- **Why/when:** Remove an attached document reference (does not delete the underlying upload).
+
 ### `POST /api/v1/clients/{client_id}/onboarding/consistency`  *(step 8 — Review, AI check)*
 - **Auth:** Admin only. **Rate limited:** No.
 - **Request payload:** None.
@@ -408,7 +427,14 @@ Base path: `/clients/{client_id}`.
   - `qa_review` — `QAVerdict` = `{ status: ok|concerns|not_reviewed, provider?, model?, notes: str[], summary? }` — an independent second-provider review of the generated brief + recommendations. Defaults to `status="not_reviewed"` when cross-provider QA is disabled/unconfigured (never an error).
 - **Errors:** `401`; `404` client inaccessible; `429`.
 - **Object scoping:** Admin all; non-admin only assigned; inaccessible → `404`.
-- **Why/when:** Render the full client dashboard in one request.
+- **Why/when:** Render the full client dashboard in one request. **Cached:** rebuilt only when the underlying inputs (analytics, campaigns, alerts, intelligence version, etc.) have actually changed since the last build — a repeat call with nothing changed returns the cached bundle without re-invoking the AI.
+
+### `POST /api/v1/clients/{client_id}/dashboard/refresh`
+- **Auth:** **Admin only.** **Rate limited:** **Yes — 30 / 60s** (shares the `dashboard` bucket above).
+- **Request payload:** None.
+- **Success `200`:** `DashboardResponse` (same shape as the `GET` above).
+- **Errors:** `401`; `403`; `404` client inaccessible; `429`.
+- **Why/when:** Force-regenerate the dashboard bundle, bypassing the cache — use for a manual "refresh" action when an admin knows something changed that the cache-invalidation heuristic wouldn't catch.
 
 ### `GET /api/v1/clients/{client_id}/opportunities`
 - **Auth:** Authenticated (any role). **Rate limited:** **Yes — 20 / 60s** (paid-AI + external research).
@@ -517,9 +543,10 @@ Base path: `/clients/{client_id}/assistant`.
 
 ### `GET /api/v1/clients/{client_id}/assistant/chats/{chat_id}`
 - **Auth:** Authenticated (any role). **Rate limited:** No.
-- **Success `200`:** `AssistantChatDetail` = `AssistantChatRead` + `messages: AssistantMessageRead[]` (chronological). `AssistantMessageRead`: `id`, `role` (`user`/`assistant`/`system`), `content`, `tokens?`, `created_at`.
-- **Errors:** `401`; `404` client or chat.
-- **Why/when:** Open a chat with its full message history.
+- **Query params:** `page` (`int`, ≥1, default `1`), `page_size` (`int`, `1..100`, **default `100`** — deliberately higher than the shared list default so a normal working thread renders as one page and never appears to silently drop its newest message; only a genuinely long thread needs `page=2`).
+- **Success `200`:** `AssistantChatDetail` = `AssistantChatRead` + `messages: AssistantMessageRead[]` (chronological, oldest first within the page) + `messages_total`, `messages_page`, `messages_page_size`. `AssistantMessageRead`: `id`, `role` (`user`/`assistant`/`system`), `content`, `tokens?`, `created_at`.
+- **Errors:** `401`; `404` client or chat; `422`.
+- **Why/when:** Open a chat with its (paginated) message history.
 
 ### `POST /api/v1/clients/{client_id}/assistant/chats/{chat_id}/messages`
 - **Auth:** Authenticated (any role). **Rate limited:** **Yes — 30 / 60s** (paid-AI).
@@ -967,7 +994,7 @@ Base path: `/clients/{client_id}/integrations`.
 ---
 
 ## Module 19 — Uploads
-**Screen:** Global file service — used by the onboarding **Documents** step, report file attachments, and conversation attachments. **Role:** All authenticated; **owner-scoped** (a non-admin sees only their own uploads; admins see all; inaccessible → `404`). **Frontend notes:** Upload the file bytes here first (multipart), then reference the returned **`storage_key`** wherever a feature needs it (e.g. the onboarding `documents[]`). Download URLs are **short-lived presigned S3 URLs (~15 min)** — fetch a fresh one via `GET /uploads/{id}` right before use rather than caching. If storage is unconfigured server-side, calls return `503`.
+**Screen:** Global file service — used by the onboarding **Documents** step, report file attachments, conversation attachments, and Support Ticket attachments (Module 27). **Role:** All authenticated; **owner-scoped** (a non-admin sees only their own uploads; admins see all; inaccessible → `404`). **Frontend notes:** Upload the file bytes here first (multipart), then reference the returned **`id`** (or `storage_key`, for legacy fields like the onboarding `documents[]`) wherever a feature needs it. `download_url` is a **permanent, signed link** — it never expires on its own (it 302-redirects to a freshly presigned, short-lived S3 URL on every hit), so **cache it and don't refetch before use**; it only stops working if explicitly revoked (`regenerate-link` below) or the upload is deleted. If storage is unconfigured server-side, calls return `503`.
 
 Base path: `/uploads`.
 
@@ -980,15 +1007,22 @@ Base path: `/uploads`.
 
 ### `GET /api/v1/uploads/{upload_id}`
 - **Auth:** Authenticated (any role). **Rate limited:** No.
-- **Success `200`:** `UploadRead` with a **fresh** presigned `download_url`.
+- **Success `200`:** `UploadRead` with the permanent `download_url` (see module note above — safe to cache).
 - **Errors:** `401`; `404` not found / not owned; `422`.
-- **Why/when:** Get metadata + a fresh download link.
+- **Why/when:** Get metadata + the download link.
+
+### `POST /api/v1/uploads/{upload_id}/regenerate-link`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Request payload:** None.
+- **Success `200`:** `UploadRead` — a **new** `download_url`; every previously issued link for this upload stops working immediately.
+- **Errors:** `401`; `404` not found / not owned.
+- **Why/when:** Revoke a leaked/shared link (e.g. posted somewhere it shouldn't have been) without deleting the underlying file — bumps the upload's internal `link_epoch`, invalidating every signature minted before the bump.
 
 ### `DELETE /api/v1/uploads/{upload_id}`
 - **Auth:** Authenticated (any role). **Rate limited:** No.
 - **Success `200`:** `MessageResponse` = `{ detail: "Upload deleted." }`.
 - **Errors:** `401`; `404`; `409` delete failure.
-- **Why/when:** Delete the S3 object + its record.
+- **Why/when:** Delete the S3 object + its record (also permanently kills the download link).
 
 ---
 
@@ -1169,6 +1203,62 @@ Base path: `/assistant`.
 
 ---
 
+## Module 27 — Support & Feedback Tickets
+**Screen:** Help / Support (global, app shell — not tied to any client). **Role:** All authenticated; **owner-scoped**, not client-scoped — a non-admin sees, edits, and deletes only tickets **they filed**; an admin sees and can act on **every** ticket across the whole platform (including changing `status` and posting replies). An inaccessible ticket (someone else's, for a non-admin) is **`404`, never `403`** — same anti-IDOR rule as every other resource. **Frontend notes:** File a ticket from anywhere in the app (bug report, feature request, billing question, etc.). Attach files by uploading them first via `POST /uploads` (Module 19) and passing the returned `id`s in `attachment_upload_ids` — this feature has no upload mechanism of its own. `PUT` is a **partial update** (only fields present in the body are applied) despite the verb — send just the field(s) you're changing, not the whole ticket. Only an admin may change `status` or the ticket moves at all; a reporter can still edit their own ticket's `subject`/`category`/`description`/`priority`/attachments and append a `reply` while it's in any state. A reporter may only `DELETE` their own ticket while it is still `open` — once an admin has started working it (`in_progress`/`resolved`/`closed`), only an admin can delete it.
+
+Base path: `/support-tickets`.
+
+### `POST /api/v1/support-tickets`
+- **Auth:** Authenticated (any role). **Rate limited:** **Yes — 20 / 60s.**
+- **Request payload:** `SupportTicketCreate` (**strict**):
+  - `subject` — `str` — **required**, `1..200`
+  - `category` — `TicketCategory` — **required** (see Appendix A)
+  - `description` — `str` — **required**, `1..20000`
+  - `priority` — `TicketPriority` — optional, default `medium`
+  - `attachment_upload_ids` — `list[uuid]` — optional, `≤10` — each id must be an upload owned by the caller (an admin may also attach any upload, per Module 19's owner-scoping)
+- **Success `201`:** `SupportTicketRead` (see shape below) — `status` is always `open`, `ticket_number` is generated (`TCK-XXXXXXXX`).
+- **Errors:** `401`; `404` an `attachment_upload_ids` entry doesn't exist or isn't the caller's; `409` (rare) ticket-number generation race; `422` (missing required field, unknown field, invalid enum, too many attachments); `429`.
+- **Why/when:** File a new support/feedback ticket. The single entry point for bug reports, feature requests, billing/account questions, and general feedback.
+
+### `GET /api/v1/support-tickets`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Query params:** `page`, `page_size`; `search` (`str`, ≤200 — matches `subject`/`ticket_number`/`description`), `status` (`TicketStatus`), `category` (`TicketCategory`), `priority` (`TicketPriority`).
+- **Success `200`:** `SupportTicketListResponse` = `{ items: SupportTicketListItem[], total, page, page_size }`. `SupportTicketListItem`: `id`, `ticket_number`, `subject`, `category`, `priority`, `status`, `created_by?`, `created_at`, `updated_at`, `attachment_count`, `reply_count`.
+- **Errors:** `401`; `422`.
+- **Object scoping:** **Non-admin: only tickets they created** (the filter is hard-scoped server-side — no query parameter can widen it). **Admin: every ticket**, filterable/searchable the same way.
+- **Why/when:** The Support screen's ticket list — a reporter's "my tickets" view, or an admin's full support queue.
+
+### `GET /api/v1/support-tickets/{ticket_id}`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Success `200`:** `SupportTicketRead` = `{ id, ticket_number, subject, category, description, priority, status, created_by?, created_at, updated_at, attachments: TicketAttachmentRead[], replies: TicketReplyRead[] }`. `TicketAttachmentRead`: `id`, `upload_id`, `filename?`, `content_type?`, `size_bytes?`, `download_url?` (re-signed on every read — see Module 19). `TicketReplyRead`: `id`, `author_id?`, `author_role` (`"user"` or `"admin"`, snapshotted at post time), `message`, `created_at`.
+- **Errors:** `401`; `404` not found, or belongs to a different (non-admin) user.
+- **Object scoping:** Owner or admin only; otherwise `404`.
+- **Why/when:** Open a single ticket's full detail, including its attachments and reply thread.
+
+### `PUT /api/v1/support-tickets/{ticket_id}`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Request payload:** `SupportTicketUpdate` (**strict, partial** — only fields present in the body are applied):
+  - `subject` — `str | None`, `1..200`
+  - `category` — `TicketCategory | None`
+  - `description` — `str | None`, `1..20000`
+  - `priority` — `TicketPriority | None`
+  - `status` — `TicketStatus | None` — **admin only** (a non-admin sending this field at all → `403`, even to set it to its current value)
+  - `reply` — `str | None`, `1..20000` — appends one message to the thread as the caller (reporter or admin); omit to leave the thread untouched
+  - `attachment_upload_ids` — `list[uuid] | None`, `≤10` — when present, **replaces** the ticket's full attachment set (each id must be the caller's own upload, or any upload if the caller is admin); omit to leave attachments untouched
+- **Success `200`:** `SupportTicketRead` (full detail, as above).
+- **Errors:** `401`; `403` a non-admin included `status`; `404` not found / not the caller's ticket (non-admin); `404` an `attachment_upload_ids` entry isn't accessible; `422`.
+- **Object scoping:** Owner or admin only; otherwise `404`. Within an accessible ticket, `status` changes are admin-only (`403`, not `404` — the ticket's existence is already known to the caller).
+- **Why/when:** Edit a ticket's content (reporter or admin), and — admin only — move it through its lifecycle (`open → in_progress → resolved/closed`) and post replies as "Support Team".
+
+### `DELETE /api/v1/support-tickets/{ticket_id}`
+- **Auth:** Authenticated (any role). **Rate limited:** No.
+- **Success `200`:** `MessageResponse` = `{ detail: "Support ticket deleted." }`.
+- **Errors:** `401`; `403` a non-admin tried to delete a ticket that has moved past `open` (an admin has already started working it); `404` not found / not the caller's ticket (non-admin).
+- **Object scoping:** Owner or admin only; otherwise `404`. A reporter may delete their **own** ticket only while it is still `open`; an admin can always delete any ticket.
+- **Why/when:** Withdraw a ticket you filed by mistake (before support has started on it), or an admin housekeeping/spam-cleanup action.
+
+---
+
 ## Appendix A — Enum reference
 
 | Enum | Values | Used by |
@@ -1198,6 +1288,9 @@ Base path: `/assistant`.
 | `IntegrationKey` | `ga4`, `search_console`, `google_ads`, `google_lsa`, `meta`, `linkedin` | Integrations |
 | `IntegrationStatus` | `disconnected`, `connected`, `error` (+ pending states) | Integrations |
 | `NotificationLevel` | `info`, `warning`, `critical` | Notifications |
+| `TicketCategory` | `bug`, `feature_request`, `billing`, `account`, `technical_support`, `feedback`, `other` | Support Tickets |
+| `TicketPriority` | `low`, `medium`, `high`, `urgent` | Support Tickets |
+| `TicketStatus` | `open`, `in_progress`, `resolved`, `closed` | Support Tickets |
 
 ---
 
