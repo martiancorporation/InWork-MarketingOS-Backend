@@ -4,6 +4,9 @@ Operator question:
 Relevant project knowledge (retrieved for this question):
 {context}
 
+Ad-performance data (real numbers from connected integrations):
+{performance}
+
 Recent conversation:
 {history}
 

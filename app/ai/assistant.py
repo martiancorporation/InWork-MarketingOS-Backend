@@ -1,9 +1,12 @@
 """Project AI assistant — "Ask AI about this project".
 
 A per-client conversational agent grounded in the client's intelligence context
-(directive preamble + capability flags) and its RAG knowledge store, so answers
-reflect that client's brand, goals, and compliance rules. Extends ``ClientAgent``
-so the client's rule preamble is always prepended and usage is attributed.
+(directive preamble + capability flags), its RAG knowledge store, and its real
+ad-performance numbers (``analytics_daily``, via ``AnalyticsService``), so
+answers reflect that client's brand, goals, compliance rules — AND actual
+spend/leads/campaign performance, not just onboarding/document knowledge.
+Extends ``ClientAgent`` so the client's rule preamble is always prepended and
+usage is attributed.
 
 Graceful degradation: when Anthropic is unconfigured or the call fails, it returns
 a deterministic, source-grounded reply instead of raising — the same house stance
@@ -14,17 +17,20 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Literal
 
 from app.ai.attachments import AttachmentBundle
 from app.ai.features import AiFeature
 from app.prompts.loader import load_prompt, render
+from app.services.analytics_service import AnalyticsService
 from app.services.intelligence.client_agent import ClientAgent
 
 logger = logging.getLogger("app.ai.assistant")
 
 _MAX_SNIPPETS = 6  # retrieved RAG chunks fed as grounding
 _MAX_HISTORY = 10  # recent turns fed back for continuity
+_PERFORMANCE_WINDOW_DAYS = 30
 
 
 @dataclass
@@ -76,6 +82,7 @@ class ProjectAssistantAgent(ClientAgent):
                 # blank line the model has to guess at.
                 "question": question.strip() or "(no question text — see the attachments)",
                 "context": context_block,
+                "performance": self._performance_facts(),
                 "history": _format_history(history or []),
                 "attachments": attachments.as_prompt_block() if attachments else "(none)",
             },
@@ -119,6 +126,7 @@ class ProjectAssistantAgent(ClientAgent):
             {
                 "question": question,
                 "context": context_block,
+                "performance": self._performance_facts(),
                 "history": _format_history(history or []),
                 # The streaming route rejects attachments (the provider's stream API
                 # is text-only), so this is always empty here.
@@ -126,6 +134,39 @@ class ProjectAssistantAgent(ClientAgent):
             },
         )
         return AssistantStreamPrep(snippets, fallback, error_fallback, system, prompt)
+
+    def _performance_facts(self) -> str:
+        """Real spend/lead/campaign numbers from ``analytics_daily``, formatted
+        for the prompt — without this, the assistant only ever sees onboarding/
+        brand knowledge and has no way to answer "how are my ads doing"."""
+        end = date.today()
+        start = end - timedelta(days=_PERFORMANCE_WINDOW_DAYS)
+        summary = AnalyticsService(self.db).summary(self.client_id, start=start, end=end)
+        t = summary.totals
+        if not any([t.impressions, t.clicks, t.spend, t.leads, t.conversions, t.revenue]):
+            return (
+                f"(No ad-performance data for the last {_PERFORMANCE_WINDOW_DAYS} days — "
+                "either no integration is connected and synced yet, or this client has no "
+                "spend/activity in this window.)"
+            )
+        lines = [
+            f"Last {_PERFORMANCE_WINDOW_DAYS} days"
+            + (f", as of {summary.data_as_of:%Y-%m-%d %H:%M} UTC" if summary.data_as_of else "")
+            + (" — DATA MAY BE STALE (no sync in 36h+)" if summary.stale else "")
+            + ":",
+            f"- Spend: ${t.spend:,.2f} | Impressions: {t.impressions:,} | Clicks: {t.clicks:,} "
+            f"| CTR: {t.ctr:.2f}%",
+            f"- Leads: {t.leads} | CPL: ${t.cpl:,.2f} | Conversions: {t.conversions} "
+            f"| Revenue: ${t.revenue:,.2f} | ROAS: {t.roas:.2f}x",
+        ]
+        if summary.by_platform:
+            lines.append("- By platform:")
+            for p in summary.by_platform:
+                lines.append(
+                    f"    - {p.platform.value}: spend ${p.spend:,.2f}, "
+                    f"impressions {p.impressions:,}, clicks {p.clicks:,}, leads {p.leads}"
+                )
+        return "\n".join(lines)
 
     def _fallback(
         self,
