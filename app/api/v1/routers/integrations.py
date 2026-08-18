@@ -4,6 +4,8 @@
 - ``GET  /clients/{id}/integrations/{key}``               — one connector's state
 - ``POST /clients/{id}/integrations/{key}/oauth/start``   — begin real OAuth (Meta)
 - ``POST /clients/{id}/integrations/{key}/oauth/complete`` — finish OAuth, store token
+- ``POST /clients/{id}/integrations/{key}/oauth/select-account`` — pick a Meta ad account
+  when ``oauth/complete`` came back ambiguous (``available_accounts`` non-empty)
 - ``POST /clients/{id}/integrations/{key}/sync``          — pull live insights
 - ``POST /clients/{id}/integrations/{key}/connect``       — placeholder connect (other providers)
 - ``POST /clients/{id}/integrations/{key}/disconnect``    — reset to disconnected
@@ -31,8 +33,10 @@ from app.schemas.integration import (
     IntegrationConnectRequest,
     IntegrationListResponse,
     IntegrationRead,
+    MetaAdAccountOption,
     OAuthCompleteRequest,
     OAuthStartResponse,
+    SelectAccountRequest,
 )
 from app.services.integration_service import IntegrationService
 
@@ -81,9 +85,31 @@ async def oauth_complete(
     db: DbSession,
     _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
 ) -> IntegrationRead:
-    integration = await IntegrationService(db).oauth_complete(
+    integration, pending_accounts = await IntegrationService(db).oauth_complete(
         client_id, key, data.code, data.state, ad_account_id=data.ad_account_id
     )
+    result = IntegrationRead.model_validate(integration)
+    if pending_accounts:
+        result.available_accounts = [
+            MetaAdAccountOption(id=str(a.get("account_id") or a.get("id")), name=a.get("name"))
+            for a in pending_accounts
+        ]
+    return result
+
+
+@router.post(
+    "/{key}/oauth/select-account",
+    response_model=IntegrationRead,
+    summary="Pick which Meta ad account to bind (when oauth/complete came back ambiguous)",
+)
+async def oauth_select_account(
+    client_id: uuid.UUID,
+    key: IntegrationKey,
+    data: SelectAccountRequest,
+    db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
+) -> IntegrationRead:
+    integration = await IntegrationService(db).select_account(client_id, key, data.ad_account_id)
     return IntegrationRead.model_validate(integration)
 
 

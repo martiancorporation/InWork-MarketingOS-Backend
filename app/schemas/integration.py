@@ -28,14 +28,31 @@ class OAuthCompleteRequest(StrictModel):
     """The ``code`` + ``state`` the provider redirected back with (via the SPA).
 
     For Meta, optionally pin which **ad account** to bind (the one you collected
-    from the client, e.g. ``act_1234567890``). If omitted and the authorized user
-    has exactly one ad account it's used; if they have several, the API asks you
-    to specify one rather than silently guessing.
+    from the client, e.g. ``act_1234567890``). If omitted, the connection still
+    succeeds but comes back with ``available_accounts`` populated and no account
+    bound yet — never auto-picked, even when there's only one, since the
+    authorized user may have access to more than a single OAuth call surfaces.
+    Call ``oauth/select-account`` to finish picking one.
     """
 
     code: str = Field(min_length=1, max_length=2048)
     state: str = Field(min_length=1, max_length=1024)
     ad_account_id: str | None = Field(None, max_length=160)  # Meta: which ad account
+
+
+class SelectAccountRequest(StrictModel):
+    """Finish binding a Meta ad account after ``oauth/complete`` came back
+    ambiguous (``available_accounts`` non-empty). Uses the already-stored
+    token — no new OAuth round-trip (the provider's ``code`` is single-use)."""
+
+    ad_account_id: str = Field(min_length=1, max_length=160)
+
+
+class MetaAdAccountOption(BaseModel):
+    """One ad account the authorized user could bind — offered when there's more than one."""
+
+    id: str
+    name: str | None = None
 
 
 class IntegrationConnectRequest(StrictModel):
@@ -68,6 +85,9 @@ class IntegrationRead(ORMModel):
     last_error: str | None = None
     created_at: datetime
     updated_at: datetime
+    # Populated only by oauth/complete when the authorized user has several
+    # Meta ad accounts and none was picked yet — see SelectAccountRequest.
+    available_accounts: list[MetaAdAccountOption] | None = None
 
 
 class IntegrationListResponse(BaseModel):

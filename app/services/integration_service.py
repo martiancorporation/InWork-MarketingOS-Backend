@@ -75,14 +75,17 @@ _LINKEDIN_KEYS = {IntegrationKey.linkedin}
 _REAL_KEYS = _META_KEYS | _GOOGLE_KEYS | _LINKEDIN_KEYS
 
 
-def _select_ad_account(accounts: list[dict], requested: str | None) -> dict:
+def _select_ad_account(accounts: list[dict], requested: str | None) -> dict | None:
     """Pick which Meta ad account to bind after OAuth.
 
     - ``requested`` given → match it (``act_`` prefix optional); error if the
       authorized user can't access it (so a wrong id fails loudly).
-    - none requested + exactly one account → that one.
-    - none requested + several → error asking to specify (never silently guess).
-    - none requested + zero → connect with no account bound.
+    - none requested + zero accounts → connect with no account bound (``{}``).
+    - none requested + one or more accounts → ``None`` (always ask — never
+      auto-bind, even when there's only one, since the authorized user may
+      have access to more accounts than a single OAuth call surfaces; the
+      caller surfaces the full list instead of silently guessing — see
+      ``select_account``).
     """
     if requested:
         want = requested.removeprefix("act_")
@@ -98,11 +101,7 @@ def _select_ad_account(accounts: list[dict], requested: str | None) -> dict:
         )
     if not accounts:
         return {}
-    if len(accounts) > 1:
-        raise BadRequestError(
-            "This account has multiple Meta ad accounts — pass 'ad_account_id' to pick one."
-        )
-    return accounts[0]
+    return None
 
 
 class IntegrationService:
@@ -227,20 +226,55 @@ class IntegrationService:
         state: str,
         *,
         ad_account_id: str | None = None,
-    ) -> Integration:
-        """Finish OAuth: exchange the code, store the client's own token(s) encrypted."""
+    ) -> tuple[Integration, list[dict]]:
+        """Finish OAuth: exchange the code, store the client's own token(s) encrypted.
+
+        Returns ``(integration, pending_accounts)`` — ``pending_accounts`` is
+        non-empty only for Meta when several ad accounts were found and none
+        was picked yet; the connection still succeeds (no account bound), and
+        the caller should finish with ``select_account``.
+        """
         self._require_real(key)
         if not self._verify_state(state, client_id, key):
             raise BadRequestError("Invalid or expired OAuth state.")
         integration = self._upsert(client_id, key)
+        pending_accounts: list[dict] = []
         if key in _META_KEYS:
-            await self._complete_meta(integration, code, ad_account_id=ad_account_id)
+            pending_accounts = await self._complete_meta(
+                integration, code, ad_account_id=ad_account_id
+            )
         elif key in _LINKEDIN_KEYS:
             await self._complete_linkedin(integration, code)
         else:
             await self._complete_google(integration, key, code)
         integration.status = IntegrationStatus.connected
         integration.last_error = None
+        self.db.commit()
+        self.db.refresh(integration)
+        return integration, pending_accounts
+
+    async def select_account(
+        self, client_id: uuid.UUID, key: IntegrationKey, ad_account_id: str
+    ) -> Integration:
+        """Finish binding a Meta ad account after ``oauth_complete`` came back
+        ambiguous. Uses the already-stored token — no new OAuth round-trip."""
+        if key not in _META_KEYS:
+            raise BadRequestError("Ad account selection is only needed for Meta.")
+        integration = self.get(client_id, key)  # 404 if never configured
+        if (
+            integration.status != IntegrationStatus.connected
+            or not integration.access_token_encrypted
+        ):
+            raise BadRequestError("Integration is not connected — run OAuth first.")
+        token = self.cipher.decrypt(integration.access_token_encrypted)
+        accounts = await self.meta_oauth.list_ad_accounts(token)
+        account = _select_ad_account(accounts, ad_account_id)
+        if not account:
+            raise BadRequestError(
+                "The requested Meta ad account isn't accessible to the authorized user."
+            )
+        integration.external_account_id = account.get("account_id") or account.get("id")
+        integration.account_label = account.get("name")
         self.db.commit()
         self.db.refresh(integration)
         return integration
@@ -255,15 +289,17 @@ class IntegrationService:
         ):
             raise BadRequestError("Integration is not connected — run OAuth first.")
         try:
-            insights, platform = await self._fetch_insights(integration, key)
+            rows, platform = await self._fetch_insights(integration, key)
         except Exception as exc:
             integration.status = IntegrationStatus.error
             integration.last_error = str(exc)[:1000]
             self.db.commit()
             raise
-        # Upsert today's facts for the provider's platform (own transaction).
+        # Upsert every day's facts for the provider's platform (own transaction).
+        # Meta returns one row per day (last_90d); every other provider still
+        # returns a single row dated today until they grow day-level pulls too.
         AnalyticsService(self.db).ingest(
-            client_id, [AnalyticsDailyIn(date=date.today(), platform=platform, **insights)]
+            client_id, [AnalyticsDailyIn(platform=platform, **row) for row in rows]
         )
         integration.status = IntegrationStatus.connected
         integration.last_sync_at = datetime.now(UTC)
@@ -276,15 +312,20 @@ class IntegrationService:
 
     async def _fetch_insights(
         self, integration: Integration, key: IntegrationKey
-    ) -> tuple[dict, SocialPlatform]:
-        """Pull normalized insights for a connected integration + its platform."""
+    ) -> tuple[list[dict], SocialPlatform]:
+        """Pull normalized insight rows for a connected integration + its platform.
+
+        Each row already carries its own ``date`` key (see ``AnalyticsDailyIn``).
+        """
         account = integration.external_account_id or ""
         if key in _META_KEYS:
             token = self.cipher.decrypt(integration.access_token_encrypted)
-            return await self.meta_client.fetch_insights(token, account), SocialPlatform.facebook
+            rows = await self.meta_client.fetch_daily_insights(token, account)
+            return rows, SocialPlatform.facebook
         if key in _LINKEDIN_KEYS:
             token = await self._linkedin_access_token(integration)
-            return await self.linkedin_client.fetch_metrics(token, account), SocialPlatform.linkedin
+            insights = await self.linkedin_client.fetch_metrics(token, account)
+            return [{"date": date.today(), **insights}], SocialPlatform.linkedin
         # Google family (Ads / LSA / GA4 / Search Console) — shared OAuth token.
         access = await self._google_access_token(integration)
         if key == IntegrationKey.google_ads:
@@ -297,13 +338,15 @@ class IntegrationService:
             insights = await self.search_console.fetch_metrics(access, account)
         else:  # pragma: no cover - guarded by _require_real
             raise BadRequestError(f"Sync is not implemented for '{key.value}'.")
-        return insights, _GOOGLE_PLATFORM[key]
+        return [{"date": date.today(), **insights}], _GOOGLE_PLATFORM[key]
 
     # ---- per-provider OAuth completion -------------------------------- #
 
     async def _complete_meta(
         self, integration: Integration, code: str, *, ad_account_id: str | None = None
-    ) -> None:
+    ) -> list[dict]:
+        """Returns the accounts list when ambiguous (see ``_select_ad_account``),
+        else ``[]`` — the account (if any) is already bound on ``integration``."""
         oauth = self.meta_oauth
         short = await oauth.exchange_code(code)
         long_lived = await oauth.exchange_long_lived(short.get("access_token", ""))
@@ -316,9 +359,14 @@ class IntegrationService:
         integration.access_token_encrypted = self.cipher.encrypt(token)
         integration.refresh_token_encrypted = None  # Meta long-lived tokens self-renew
         integration.token_expires_at = self._expiry(expires_in)
+        integration.scopes = get_settings().integrations.meta_scopes
+        if account is None:
+            integration.external_account_id = None
+            integration.account_label = None
+            return accounts
         integration.external_account_id = account.get("account_id") or account.get("id")
         integration.account_label = account.get("name")
-        integration.scopes = get_settings().integrations.meta_scopes
+        return []
 
     async def _complete_google(
         self, integration: Integration, key: IntegrationKey, code: str
