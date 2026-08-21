@@ -7,7 +7,7 @@ expiry, and metrics → analytics — is exercised. Config enabled per-test.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -52,8 +52,15 @@ def fake_google(monkeypatch):
         assert token == "g-access"
         return ["1234567890"]
 
+    async def no_insights_yet(self, access_token, customer_id, *, days=90):
+        # oauth/complete auto-syncs immediately — default to "nothing yet" so
+        # connect-only tests stay hermetic (no real network call); tests that
+        # care about sync results override this themselves.
+        return []
+
     monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(GoogleAdsClient, "list_accessible_customers", list_accessible_customers)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_daily_insights", no_insights_yet)
 
 
 def _connect(client, admin_headers, cid):
@@ -109,18 +116,21 @@ def test_sync_pulls_metrics_into_analytics(
     cid = _client_id(client, admin_headers)
     _connect(client, admin_headers, cid)
 
-    async def fake_metrics(self, access_token, customer_id):
+    async def fake_daily_insights(self, access_token, customer_id, *, days=90):
         assert access_token == "g-access" and customer_id == "1234567890"
-        return {
-            "impressions": 5000,
-            "clicks": 120,
-            "spend": 340.5,
-            "conversions": 18,
-            "leads": 18,
-            "revenue": 1500.0,
-        }
+        return [
+            {
+                "date": date.today(),
+                "impressions": 5000,
+                "clicks": 120,
+                "spend": 340.5,
+                "conversions": 18,
+                "leads": 18,
+                "revenue": 1500.0,
+            }
+        ]
 
-    monkeypatch.setattr(GoogleAdsClient, "fetch_metrics", fake_metrics)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_daily_insights", fake_daily_insights)
     resp = client.post(f"{API}/clients/{cid}/integrations/google_ads/sync", headers=admin_headers)
     assert resp.status_code == 200, resp.text
 
@@ -149,19 +159,22 @@ def test_sync_refreshes_expired_token(
         assert refresh_token == "g-refresh"
         return {"access_token": "g-access-REFRESHED", "expires_in": 3600}
 
-    async def fake_metrics(self, access_token, customer_id):
+    async def fake_daily_insights(self, access_token, customer_id, *, days=90):
         assert access_token == "g-access-REFRESHED"  # the refreshed token was used
-        return {
-            "impressions": 1,
-            "clicks": 1,
-            "spend": 1.0,
-            "conversions": 0,
-            "leads": 0,
-            "revenue": 0.0,
-        }
+        return [
+            {
+                "date": date.today(),
+                "impressions": 1,
+                "clicks": 1,
+                "spend": 1.0,
+                "conversions": 0,
+                "leads": 0,
+                "revenue": 0.0,
+            }
+        ]
 
     monkeypatch.setattr(GoogleOAuthClient, "refresh_access_token", fake_refresh)
-    monkeypatch.setattr(GoogleAdsClient, "fetch_metrics", fake_metrics)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_daily_insights", fake_daily_insights)
     resp = client.post(f"{API}/clients/{cid}/integrations/google_ads/sync", headers=admin_headers)
     assert resp.status_code == 200, resp.text
 

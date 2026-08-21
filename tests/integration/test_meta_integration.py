@@ -56,9 +56,17 @@ def fake_meta_oauth(monkeypatch):
         assert token == "long-lived-token"
         return [{"account_id": "act_999", "name": "Acme Ad Account"}]
 
+    async def no_insights_yet(self, token, ad_account_id, *, date_preset="last_90d"):
+        # oauth/complete (and select_account, once an account is bound)
+        # auto-syncs immediately — default to "nothing yet" so connect-only
+        # tests stay hermetic; tests that care about sync results override
+        # this themselves.
+        return []
+
     monkeypatch.setattr(MetaOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(MetaOAuthClient, "exchange_long_lived", exchange_long_lived)
     monkeypatch.setattr(MetaOAuthClient, "list_ad_accounts", list_ad_accounts)
+    monkeypatch.setattr(MetaClient, "fetch_daily_insights", no_insights_yet)
 
 
 def test_oauth_start_unconfigured_returns_503(client, admin_headers: dict):
@@ -220,9 +228,13 @@ def fake_meta_multi(monkeypatch):
             {"account_id": "act_222", "name": "Client Secondary"},
         ]
 
+    async def no_insights_yet(self, token, ad_account_id, *, date_preset="last_90d"):
+        return []
+
     monkeypatch.setattr(MetaOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(MetaOAuthClient, "exchange_long_lived", exchange_long_lived)
     monkeypatch.setattr(MetaOAuthClient, "list_ad_accounts", list_ad_accounts)
+    monkeypatch.setattr(MetaClient, "fetch_daily_insights", no_insights_yet)
 
 
 def _state(client, admin_headers, cid):

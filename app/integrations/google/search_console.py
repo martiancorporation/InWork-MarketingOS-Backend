@@ -2,10 +2,11 @@
 
 Authenticated by the client's OAuth access token (the shared Google OAuth client,
 scope ``webmasters.readonly``). ``list_sites`` discovers the verified properties a
-token can read so completion can bind one; ``fetch_metrics`` queries the last 30
-days of search analytics and normalizes it into the flat analytics shape
-(impressions + clicks map directly; Search Console has no spend/revenue). This
-data lands in ``analytics_daily`` under the ``seo`` platform bucket.
+token can read so completion can bind one; ``fetch_daily_insights`` queries the
+last N days of search analytics broken down **by day** (not one aggregated
+blob) and normalizes each day into the flat analytics shape (impressions +
+clicks map directly; Search Console has no spend/revenue). This data lands in
+``analytics_daily`` under the ``seo`` platform bucket.
 """
 
 from __future__ import annotations
@@ -33,18 +34,22 @@ class SearchConsoleClient:
             entry.get("siteUrl") for entry in (data.get("siteEntry") or []) if entry.get("siteUrl")
         ]
 
-    async def fetch_metrics(self, access_token: str, site_url: str) -> dict:
+    async def fetch_daily_insights(
+        self, access_token: str, site_url: str, *, days: int = 90
+    ) -> list[dict]:
+        """One row per day over the last ``days`` days — the historical trend a
+        dashboard chart needs, not a single rolled-up total."""
         today = date.today()
-        start = today - timedelta(days=30)
+        start = today - timedelta(days=days)
         url = f"{_BASE}/sites/{quote(site_url, safe='')}/searchAnalytics/query"
         body = {
             "startDate": start.isoformat(),
             "endDate": today.isoformat(),
-            "dimensions": [],  # totals only
-            "rowLimit": 1,
+            "dimensions": ["date"],
+            "rowLimit": days + 5,
         }
         data = await self._request("POST", url, access_token, json=body)
-        return _normalize(data)
+        return [_normalize(row) for row in (data.get("rows") or [])]
 
     async def _request(
         self, method: str, url: str, access_token: str, json: dict | None = None
@@ -74,15 +79,15 @@ class SearchConsoleClient:
         return payload
 
 
-def _normalize(payload: dict) -> dict:
-    """Aggregate query rows → flat AnalyticsDailyIn-shaped totals."""
-    impressions = clicks = 0
-    for row in payload.get("rows") or []:
-        impressions += int(float(row.get("impressions", 0) or 0))
-        clicks += int(float(row.get("clicks", 0) or 0))
+def _normalize(row: dict) -> dict:
+    """One query row (with a ``date`` dimension) → flat AnalyticsDailyIn-shaped
+    totals, keyed by ``row["keys"][0]`` (a ``YYYY-MM-DD`` string)."""
+    keys = row.get("keys") or []
+    date_str = keys[0] if keys else None
     return {
-        "impressions": impressions,
-        "clicks": clicks,
+        "date": date.fromisoformat(date_str) if date_str else date.today(),
+        "impressions": int(float(row.get("impressions", 0) or 0)),
+        "clicks": int(float(row.get("clicks", 0) or 0)),
         "spend": 0.0,
         "conversions": 0,
         "leads": 0,

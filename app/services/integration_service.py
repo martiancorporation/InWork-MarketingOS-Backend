@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import time
 import uuid
 from datetime import UTC, date, datetime, timedelta
@@ -51,6 +52,7 @@ from app.schemas.integration import (
 from app.services.analytics_service import AnalyticsService
 
 _STATE_MAX_AGE = 600  # seconds an OAuth `state` stays valid
+logger = logging.getLogger("app.services.integration_service")
 
 # Google OAuth scopes per integration (one Google OAuth client, per-key scope).
 # GA4 + Search Console + Ads + LSA all authorize through the same Google OAuth
@@ -251,6 +253,11 @@ class IntegrationService:
         integration.last_error = None
         self.db.commit()
         self.db.refresh(integration)
+        if not pending_accounts:
+            # An account is already bound (single-account Meta, or any other
+            # provider) — pull data right away instead of leaving the operator
+            # to find and click "Sync" separately.
+            integration = await self._try_sync_after_connect(client_id, key, integration)
         return integration, pending_accounts
 
     async def select_account(
@@ -277,7 +284,35 @@ class IntegrationService:
         integration.account_label = account.get("name")
         self.db.commit()
         self.db.refresh(integration)
-        return integration
+        # The account is only known now — this is the first point a sync can
+        # actually pull anything, so do it immediately rather than waiting for
+        # the operator to notice and click "Sync".
+        return await self._try_sync_after_connect(client_id, key, integration)
+
+    async def _try_sync_after_connect(
+        self, client_id: uuid.UUID, key: IntegrationKey, integration: Integration
+    ) -> Integration:
+        """Best-effort immediate sync right after connecting. The connect
+        itself already succeeded (a valid token is stored) — a failed
+        first-sync attempt (e.g. a still-missing developer token) must not
+        look like the *connection* failed, so this deliberately overrides
+        ``sync``'s own error-status side effect back to ``connected``,
+        keeping ``last_error`` as a hint that a manual "Sync" retry is
+        needed."""
+        try:
+            return await self.sync(client_id, key)
+        except Exception as exc:
+            logger.warning(
+                "Auto-sync after connect failed for client %s key %s",
+                client_id,
+                key.value,
+                exc_info=True,
+            )
+            integration.status = IntegrationStatus.connected
+            integration.last_error = f"Connected, but the first automatic sync failed: {exc}"[:1000]
+            self.db.commit()
+            self.db.refresh(integration)
+            return integration
 
     async def sync(self, client_id: uuid.UUID, key: IntegrationKey) -> Integration:
         """Pull live insights from the provider into ``analytics_daily``."""
@@ -288,6 +323,12 @@ class IntegrationService:
             or not integration.access_token_encrypted
         ):
             raise BadRequestError("Integration is not connected — run OAuth first.")
+        if key in _META_KEYS and not integration.external_account_id:
+            # Connected (token stored), but the ambiguous-accounts case was
+            # never finished with select_account — nothing bound to query yet.
+            raise BadRequestError(
+                "No ad account is bound yet — finish account selection before syncing."
+            )
         try:
             rows, platform = await self._fetch_insights(integration, key)
         except Exception as exc:
@@ -326,19 +367,20 @@ class IntegrationService:
             token = await self._linkedin_access_token(integration)
             insights = await self.linkedin_client.fetch_metrics(token, account)
             return [{"date": date.today(), **insights}], SocialPlatform.linkedin
-        # Google family (Ads / LSA / GA4 / Search Console) — shared OAuth token.
+        # Google family (Ads / LSA / GA4 / Search Console) — shared OAuth token,
+        # each pulling its own day-by-day series.
         access = await self._google_access_token(integration)
         if key == IntegrationKey.google_ads:
-            insights = await self.google_ads.fetch_metrics(access, account)
+            rows = await self.google_ads.fetch_daily_insights(access, account)
         elif key == IntegrationKey.google_lsa:
-            insights = await self.lsa_client.fetch_metrics(access, account)
+            rows = await self.lsa_client.fetch_daily_insights(access, account)
         elif key == IntegrationKey.ga4:
-            insights = await self.ga4_client.fetch_metrics(access, account)
+            rows = await self.ga4_client.fetch_daily_insights(access, account)
         elif key == IntegrationKey.search_console:
-            insights = await self.search_console.fetch_metrics(access, account)
+            rows = await self.search_console.fetch_daily_insights(access, account)
         else:  # pragma: no cover - guarded by _require_real
             raise BadRequestError(f"Sync is not implemented for '{key.value}'.")
-        return [{"date": date.today(), **insights}], _GOOGLE_PLATFORM[key]
+        return rows, _GOOGLE_PLATFORM[key]
 
     # ---- per-provider OAuth completion -------------------------------- #
 

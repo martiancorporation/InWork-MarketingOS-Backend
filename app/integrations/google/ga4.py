@@ -2,13 +2,15 @@
 
 Authenticated by the client's OAuth access token (the shared Google OAuth client,
 scope ``analytics.readonly``). ``list_properties`` discovers the GA4 properties a
-token can read (Admin API) so completion can bind one; ``fetch_metrics`` runs a
-``runReport`` over the last 30 days and normalizes the result into the same flat
-shape as the Meta / Google Ads clients so it feeds ``analytics_daily`` identically
-(GA4 has no ad spend, so ``spend`` is always 0).
+token can read (Admin API) so completion can bind one; ``fetch_daily_insights``
+runs a ``runReport`` broken down by day (not one aggregated blob) and normalizes
+each day into the same flat shape as the Meta / Google Ads clients so it feeds
+``analytics_daily`` identically (GA4 has no ad spend, so ``spend`` is always 0).
 """
 
 from __future__ import annotations
+
+from datetime import date, datetime
 
 import httpx
 
@@ -37,15 +39,22 @@ class Ga4Client:
                     ids.append(name.split("/")[-1])
         return ids
 
-    async def fetch_metrics(self, access_token: str, property_id: str) -> dict:
+    async def fetch_daily_insights(
+        self, access_token: str, property_id: str, *, days: int = 90
+    ) -> list[dict]:
+        """One row per day over the last ``days`` days — the historical trend a
+        dashboard chart needs, not a single rolled-up total."""
         pid = (property_id or "").removeprefix("properties/")
         url = f"{_DATA}/properties/{pid}:runReport"
         body = {
-            "dateRanges": [{"startDate": "30daysAgo", "endDate": "today"}],
+            "dateRanges": [{"startDate": f"{days}daysAgo", "endDate": "today"}],
+            "dimensions": [{"name": "date"}],
             "metrics": [{"name": m} for m in _METRICS],
+            "orderBys": [{"dimension": {"dimensionName": "date"}}],
+            "limit": 100000,
         }
         data = await self._request("POST", url, access_token, json=body)
-        return _normalize(data)
+        return [_normalize(row) for row in (data.get("rows") or [])]
 
     async def _request(
         self, method: str, url: str, access_token: str, json: dict | None = None
@@ -75,14 +84,18 @@ class Ga4Client:
         return payload
 
 
-def _normalize(payload: dict) -> dict:
-    """First (only) report row → flat AnalyticsDailyIn-shaped totals."""
-    rows = payload.get("rows") or []
-    metric_values = (rows[0].get("metricValues") if rows else []) or []
+def _normalize(row: dict) -> dict:
+    """One ``runReport`` row (with a ``date`` dimension) → flat
+    AnalyticsDailyIn-shaped totals, keyed by ``row["dimensionValues"][0]``
+    (a ``YYYYMMDD`` string)."""
+    dim_values = row.get("dimensionValues") or []
+    date_str = dim_values[0].get("value") if dim_values else None
+    metric_values = row.get("metricValues") or []
     values = [v.get("value", 0) for v in metric_values]
     by_metric = dict(zip(_METRICS, values))
     conversions = int(float(by_metric.get("conversions", 0) or 0))
     return {
+        "date": datetime.strptime(date_str, "%Y%m%d").date() if date_str else date.today(),
         "impressions": int(float(by_metric.get("screenPageViews", 0) or 0)),
         "clicks": int(float(by_metric.get("sessions", 0) or 0)),
         "spend": 0.0,  # GA4 has no ad spend
