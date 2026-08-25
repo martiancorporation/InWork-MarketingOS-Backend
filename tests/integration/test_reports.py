@@ -10,13 +10,21 @@ real headless Chromium; the other three formats run their real renderers
 from __future__ import annotations
 
 import re
+import uuid
 from collections.abc import Generator
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_storage
 from app.main import app
+from app.models.platform_insight import (
+    PlatformCampaign,
+    PlatformMetricDaily,
+    PlatformRecommendation,
+)
 from app.services.reports import generator as report_generator
 from tests.conftest import API
 from tests.helpers import onboarding_payload
@@ -238,6 +246,71 @@ def test_export_with_no_analytics_or_campaigns_still_succeeds(
     upload = client.get(f"{API}/uploads/{upload_id}", headers=admin_headers)
     assert upload.status_code == 200
     assert upload.json()["size_bytes"] > 0
+
+
+def test_export_includes_platform_insights_sections(
+    client: TestClient, admin_headers: dict, db_session: Session, storage: FakeStorage
+):
+    """Live Meta campaigns + an open recommendation land in a CSV export's
+    new sections — the Platform Insights ↔ reports wiring end to end."""
+    cid = _client_id(client, admin_headers, name="Platform Insights Co.")
+    client_uuid = uuid.UUID(cid)
+
+    campaign = PlatformCampaign(
+        client_id=client_uuid,
+        integration_key="meta",
+        external_id="cmp_report_1",
+        name="Report Test Campaign",
+        status="ACTIVE",
+        effective_status="ACTIVE",
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(
+        PlatformMetricDaily(
+            client_id=client_uuid,
+            integration_key="meta",
+            entity_type="campaign",
+            entity_id="cmp_report_1",
+            date=date(2026, 9, 15),
+            impressions=5000,
+            clicks=150,
+            spend=200.0,
+            conversions=6,
+            revenue=480.0,
+        )
+    )
+    db_session.add(
+        PlatformRecommendation(
+            client_id=client_uuid,
+            integration_key="meta",
+            entity_type="account",
+            entity_id="act_1",
+            title="Broaden your audience",
+            message="Too narrow.",
+            importance="HIGH",
+            status="open",
+            rec_key="account:act_1:1234",
+        )
+    )
+    db_session.commit()
+
+    body = _create(
+        client,
+        admin_headers,
+        cid,
+        format="csv",
+        channels=["meta"],
+        sections=["platform_campaigns", "platform_recommendations"],
+    )
+    upload_id = _upload_id_from(body["file_url"])
+    upload = client.get(f"{API}/uploads/{upload_id}", headers=admin_headers)
+    assert upload.status_code == 200, upload.text
+
+    file_bytes = next(iter(storage.objects.values()))["data"]
+    text = file_bytes.decode("utf-8")
+    assert "Report Test Campaign" in text
+    assert "Broaden your audience" in text
 
 
 def test_export_unknown_channels_and_sections_falls_back_gracefully(

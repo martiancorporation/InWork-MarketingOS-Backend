@@ -34,6 +34,12 @@ if TYPE_CHECKING:
     from app.models.event import MarketingEvent
     from app.models.integration import Integration
     from app.models.plan import PlanTask
+    from app.models.platform_insight import (
+        PlatformCampaign,
+        PlatformDeliveryIssue,
+        PlatformMetricDaily,
+        PlatformRecommendation,
+    )
     from app.models.recommendation import RecommendationAction
     from app.models.report import Report
     from app.models.strategy import Strategy
@@ -147,6 +153,18 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="client", cascade="all, delete-orphan"
     )
     strategies: Mapped[list[Strategy]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+    platform_campaigns: Mapped[list[PlatformCampaign]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+    platform_metrics_daily: Mapped[list[PlatformMetricDaily]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+    platform_recommendations: Mapped[list[PlatformRecommendation]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+    platform_delivery_issues: Mapped[list[PlatformDeliveryIssue]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
 

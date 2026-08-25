@@ -25,6 +25,8 @@ _SECTION_TITLES = {
     "ga_overview": "Channel Overview",
     "top_ads": "Top Campaigns",
     "went_wrong_right": "Summary",
+    "platform_campaigns": "Live Campaigns",
+    "platform_recommendations": "Recommendations & Issues",
 }
 
 _CAMPAIGN_HEADER = [
@@ -49,6 +51,19 @@ _CHANNEL_HEADER = [
     "CPL",
     "ROAS",
 ]
+_PLATFORM_CAMPAIGN_HEADER = [
+    "Channel",
+    "Campaign",
+    "Status",
+    "Impressions",
+    "Clicks",
+    "CTR %",
+    "Spend",
+    "Conversions",
+    "Revenue",
+    "ROAS",
+]
+_PLATFORM_ISSUE_HEADER = ["Channel", "Type", "Severity/Importance", "Title", "Detail"]
 
 
 def _write_header(ws: Worksheet, header: list[str]) -> None:
@@ -144,6 +159,37 @@ def render_excel(content: ReportContent) -> bytes:
                 t.roas,
             ]
         )
+        _autosize(ws)
+
+    if "platform_campaigns" in content.included_sections:
+        ws = wb.create_sheet(_SECTION_TITLES["platform_campaigns"])
+        _write_header(ws, _PLATFORM_CAMPAIGN_HEADER)
+        if not content.platform_campaigns:
+            ws.append(["No live campaigns synced for the selected channels."])
+        for c in content.platform_campaigns:
+            ws.append(
+                [
+                    c.channel_label,
+                    c.name,
+                    c.status,
+                    c.impressions,
+                    c.clicks,
+                    c.ctr,
+                    c.spend,
+                    c.conversions,
+                    c.revenue,
+                    c.roas,
+                ]
+            )
+        _autosize(ws)
+
+    if "platform_recommendations" in content.included_sections:
+        ws = wb.create_sheet(_SECTION_TITLES["platform_recommendations"])
+        _write_header(ws, _PLATFORM_ISSUE_HEADER)
+        if not content.platform_issues:
+            ws.append(["Nothing open for the selected channels."])
+        for issue in content.platform_issues:
+            ws.append([issue.channel_label, issue.kind, issue.severity, issue.title, issue.detail])
         _autosize(ws)
 
     buf = io.BytesIO()

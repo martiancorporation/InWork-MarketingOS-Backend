@@ -50,6 +50,7 @@ from app.schemas.integration import (
     IntegrationRead,
 )
 from app.services.analytics_service import AnalyticsService
+from app.services.platform_insight_service import PlatformInsightService
 
 _STATE_MAX_AGE = 600  # seconds an OAuth `state` stays valid
 logger = logging.getLogger("app.services.integration_service")
@@ -342,12 +343,33 @@ class IntegrationService:
         AnalyticsService(self.db).ingest(
             client_id, [AnalyticsDailyIn(platform=platform, **row) for row in rows]
         )
+        if key in _META_KEYS:
+            await self._sync_platform_insights(client_id, integration)
         integration.status = IntegrationStatus.connected
         integration.last_sync_at = datetime.now(UTC)
         integration.last_error = None
         self.db.commit()
         self.db.refresh(integration)
         return integration
+
+    async def _sync_platform_insights(self, client_id: uuid.UUID, integration: Integration) -> None:
+        """Best-effort: pull the richer campaign/ad-set/ad/recommendation data
+        into the Platform Insights tables. Additive to the core
+        ``analytics_daily`` sync above, which has already succeeded by the
+        time this runs — a failure here must not flip the whole sync to
+        ``error`` (same reasoning as ``_try_sync_after_connect``)."""
+        try:
+            token = self.cipher.decrypt(integration.access_token_encrypted)
+            await PlatformInsightService(self.db).sync_meta(
+                client_id, self.meta_client, token, integration.external_account_id
+            )
+        except Exception:
+            logger.warning(
+                "Platform insights sync failed for client %s key %s",
+                client_id,
+                integration.key.value,
+                exc_info=True,
+            )
 
     # ---- per-provider sync dispatch ----------------------------------- #
 

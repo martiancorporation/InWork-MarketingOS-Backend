@@ -63,10 +63,22 @@ def fake_meta_oauth(monkeypatch):
         # this themselves.
         return []
 
+    async def no_hierarchy_yet(self, token, ad_account_id):
+        return {"campaigns": [], "ad_sets": [], "ads": []}
+
+    async def no_campaign_metrics_yet(self, token, ad_account_id, *, date_preset="last_90d"):
+        return []
+
+    async def no_recommendations_yet(self, token, ad_account_id):
+        return []
+
     monkeypatch.setattr(MetaOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(MetaOAuthClient, "exchange_long_lived", exchange_long_lived)
     monkeypatch.setattr(MetaOAuthClient, "list_ad_accounts", list_ad_accounts)
     monkeypatch.setattr(MetaClient, "fetch_daily_insights", no_insights_yet)
+    monkeypatch.setattr(MetaClient, "fetch_campaign_hierarchy", no_hierarchy_yet)
+    monkeypatch.setattr(MetaClient, "fetch_campaign_metrics_daily", no_campaign_metrics_yet)
+    monkeypatch.setattr(MetaClient, "fetch_recommendations", no_recommendations_yet)
 
 
 def test_oauth_start_unconfigured_returns_503(client, admin_headers: dict):
@@ -231,10 +243,22 @@ def fake_meta_multi(monkeypatch):
     async def no_insights_yet(self, token, ad_account_id, *, date_preset="last_90d"):
         return []
 
+    async def no_hierarchy_yet(self, token, ad_account_id):
+        return {"campaigns": [], "ad_sets": [], "ads": []}
+
+    async def no_campaign_metrics_yet(self, token, ad_account_id, *, date_preset="last_90d"):
+        return []
+
+    async def no_recommendations_yet(self, token, ad_account_id):
+        return []
+
     monkeypatch.setattr(MetaOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(MetaOAuthClient, "exchange_long_lived", exchange_long_lived)
     monkeypatch.setattr(MetaOAuthClient, "list_ad_accounts", list_ad_accounts)
     monkeypatch.setattr(MetaClient, "fetch_daily_insights", no_insights_yet)
+    monkeypatch.setattr(MetaClient, "fetch_campaign_hierarchy", no_hierarchy_yet)
+    monkeypatch.setattr(MetaClient, "fetch_campaign_metrics_daily", no_campaign_metrics_yet)
+    monkeypatch.setattr(MetaClient, "fetch_recommendations", no_recommendations_yet)
 
 
 def _state(client, admin_headers, cid):

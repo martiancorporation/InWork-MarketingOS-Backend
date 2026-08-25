@@ -43,6 +43,14 @@ from app.models.intel_job import IntelJob
 from app.models.knowledge import KnowledgeChunk, KnowledgeSource
 from app.models.notification import Notification
 from app.models.plan import PlanTask
+from app.models.platform_insight import (
+    PlatformAd,
+    PlatformAdSet,
+    PlatformCampaign,
+    PlatformDeliveryIssue,
+    PlatformMetricDaily,
+    PlatformRecommendation,
+)
 from app.models.recommendation import RecommendationAction
 from app.models.report import Report
 from app.models.strategy import Strategy
@@ -88,6 +96,12 @@ __all__ = [
     "MessageAttachment",
     "MessageRecipient",
     "PlanTask",
+    "PlatformAd",
+    "PlatformAdSet",
+    "PlatformCampaign",
+    "PlatformDeliveryIssue",
+    "PlatformMetricDaily",
+    "PlatformRecommendation",
     "RecommendationAction",
     "Report",
     "Strategy",

@@ -21,6 +21,16 @@ os.environ["STORAGE_S3_REGION"] = ""
 # ScrapingBee/Brave calls); the ScrapingBee/Brave wiring is tested with fakes.
 os.environ["SCRAPINGBEE_API_KEY"] = ""
 os.environ["BRAVE_API_KEY"] = ""
+# Meta/Google OAuth app credentials off so the "provider not configured" tests
+# stay true regardless of what real credentials the shared local `.env` has
+# (added there for the deployed server, not for this suite); tests that
+# exercise the configured branch monkeypatch these settings themselves.
+os.environ["META_APP_ID"] = ""
+os.environ["META_APP_SECRET"] = ""
+os.environ["META_REDIRECT_URI"] = ""
+os.environ["GOOGLE_CLIENT_ID"] = ""
+os.environ["GOOGLE_CLIENT_SECRET"] = ""
+os.environ["GOOGLE_REDIRECT_URI"] = ""
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-must-be-at-least-32-bytes-long-00")
 os.environ.setdefault("DATABASE_URL", "sqlite://")

@@ -18,6 +18,8 @@ _SECTION_TITLES = {
     "ga_overview": "Channel Overview",
     "top_ads": "Top-Performing Campaigns",
     "went_wrong_right": "What Went Right / Wrong",
+    "platform_campaigns": "Live Campaigns",
+    "platform_recommendations": "Recommendations & Delivery Issues",
 }
 
 _CAMPAIGN_HEADER = [
@@ -42,6 +44,19 @@ _CHANNEL_HEADER = [
     "CPL",
     "ROAS",
 ]
+_PLATFORM_CAMPAIGN_HEADER = [
+    "Channel",
+    "Campaign",
+    "Status",
+    "Impressions",
+    "Clicks",
+    "CTR %",
+    "Spend",
+    "Conversions",
+    "Revenue",
+    "ROAS",
+]
+_PLATFORM_ISSUE_HEADER = ["Channel", "Type", "Severity/Importance", "Title", "Detail"]
 
 
 def render_csv(content: ReportContent) -> bytes:
@@ -111,6 +126,33 @@ def render_csv(content: ReportContent) -> bytes:
         elif section == "went_wrong_right":
             writer.writerow(["What went right", content.went_right])
             writer.writerow(["What went wrong", content.went_wrong])
+        elif section == "platform_campaigns":
+            writer.writerow(_PLATFORM_CAMPAIGN_HEADER)
+            if not content.platform_campaigns:
+                writer.writerow(["No live campaigns synced for the selected channels."])
+            for c in content.platform_campaigns:
+                writer.writerow(
+                    [
+                        c.channel_label,
+                        c.name,
+                        c.status,
+                        c.impressions,
+                        c.clicks,
+                        c.ctr,
+                        c.spend,
+                        c.conversions,
+                        c.revenue,
+                        c.roas,
+                    ]
+                )
+        elif section == "platform_recommendations":
+            writer.writerow(_PLATFORM_ISSUE_HEADER)
+            if not content.platform_issues:
+                writer.writerow(["Nothing open for the selected channels."])
+            for issue in content.platform_issues:
+                writer.writerow(
+                    [issue.channel_label, issue.kind, issue.severity, issue.title, issue.detail]
+                )
         writer.writerow([])
 
     return buf.getvalue().encode("utf-8")

@@ -25,10 +25,18 @@ from app.models.client import Client
 from app.models.enums import IntegrationKey, SocialPlatform
 from app.repositories.analytics_repository import AnalyticsRepository
 from app.repositories.campaign_repository import CampaignRepository
+from app.repositories.platform_insight_repository import PlatformInsightRepository
 from app.schemas.analytics import AnalyticsTotals
 from app.services.analytics_service import AnalyticsService
 
-ALL_SECTION_KEYS = ("campaign_performance", "ga_overview", "top_ads", "went_wrong_right")
+ALL_SECTION_KEYS = (
+    "campaign_performance",
+    "ga_overview",
+    "top_ads",
+    "went_wrong_right",
+    "platform_campaigns",
+    "platform_recommendations",
+)
 
 # Which SocialPlatform bucket(s) an analytics_daily row lands in for a given
 # IntegrationKey — mirrors the sync write path (integration_service.py's Meta
@@ -54,6 +62,11 @@ _PLATFORM_TO_CHANNEL: dict[SocialPlatform, IntegrationKey] = {
     platform: channel for channel, platforms in _CHANNEL_PLATFORMS.items() for platform in platforms
 }
 
+# Channels with a Platform Insights (campaign-hierarchy) sync today. Others
+# resolve to empty platform_campaigns/platform_issues until their own sync
+# lands — same "quietly render nothing" stance as an unselected channel.
+_PLATFORM_INSIGHT_KEYS = {IntegrationKey.meta}
+
 
 @dataclass
 class ChannelRow:
@@ -74,6 +87,36 @@ class CampaignRow:
 
 
 @dataclass
+class PlatformCampaignRow:
+    """A live provider campaign (Meta today) + its summed performance over the
+    report window — distinct from ``CampaignRow``, which comes from the
+    legacy, manually-tracked ``Campaign`` model."""
+
+    channel_label: str
+    name: str
+    status: str
+    spend: float
+    impressions: int
+    clicks: int
+    ctr: float
+    conversions: int
+    revenue: float
+    roas: float
+
+
+@dataclass
+class PlatformIssueRow:
+    """One row from either the platform's own recommendations or our derived
+    delivery issues — merged into a single "needs attention" list."""
+
+    channel_label: str
+    kind: str  # "Recommendation" | "Delivery issue"
+    severity: str
+    title: str
+    detail: str
+
+
+@dataclass
 class ReportContent:
     client_name: str
     date_from: date
@@ -85,6 +128,8 @@ class ReportContent:
     top_campaigns: list[CampaignRow] = field(default_factory=list)
     went_right: str = ""
     went_wrong: str = ""
+    platform_campaigns: list[PlatformCampaignRow] = field(default_factory=list)
+    platform_issues: list[PlatformIssueRow] = field(default_factory=list)
     included_sections: tuple[str, ...] = ALL_SECTION_KEYS
 
 
@@ -113,6 +158,10 @@ def build_report_content(
     top_campaigns = sorted(campaigns, key=lambda c: c.leads, reverse=True)[:5]
     went_right, went_wrong = _went_right_wrong(campaigns)
 
+    platform_campaigns, platform_issues = _platform_insights(
+        db, client, selected_channels, date_from=date_from, date_to=date_to
+    )
+
     requested = tuple(s for s in (sections or ALL_SECTION_KEYS) if s in ALL_SECTION_KEYS)
 
     return ReportContent(
@@ -126,6 +175,8 @@ def build_report_content(
         top_campaigns=top_campaigns,
         went_right=went_right,
         went_wrong=went_wrong,
+        platform_campaigns=platform_campaigns,
+        platform_issues=platform_issues,
         included_sections=requested or ALL_SECTION_KEYS,
     )
 
@@ -176,6 +227,77 @@ def _to_campaign_row(campaign: Campaign) -> CampaignRow:
         ctr=round(clicks / impressions * 100, 2) if impressions else 0.0,
         target_ctr=float(campaign.target_ctr) if campaign.target_ctr is not None else None,
     )
+
+
+def _platform_insights(
+    db: Session,
+    client: Client,
+    selected_channels: list[IntegrationKey],
+    *,
+    date_from: date,
+    date_to: date,
+) -> tuple[list[PlatformCampaignRow], list[PlatformIssueRow]]:
+    """Live provider campaigns + open recommendations/delivery issues, across
+    every selected channel that has a Platform Insights sync (Meta today)."""
+    repo = PlatformInsightRepository(db)
+    campaign_rows: list[PlatformCampaignRow] = []
+    issue_rows: list[PlatformIssueRow] = []
+
+    for channel in selected_channels:
+        if channel not in _PLATFORM_INSIGHT_KEYS:
+            continue
+        label = _CHANNEL_LABELS[channel]
+
+        campaigns, _ = repo.list_campaigns(client.id, channel.value, limit=None)
+        totals_by_id = repo.aggregate_metrics_by_entity(
+            client.id, channel.value, entity_type="campaign", start=date_from, end=date_to
+        )
+        for campaign in campaigns:
+            m = totals_by_id.get(campaign.external_id, {})
+            impressions = int(m.get("impressions", 0))
+            clicks = int(m.get("clicks", 0))
+            spend = m.get("spend", 0.0)
+            revenue = m.get("revenue", 0.0)
+            campaign_rows.append(
+                PlatformCampaignRow(
+                    channel_label=label,
+                    name=campaign.name,
+                    status=campaign.effective_status or campaign.status or "—",
+                    spend=spend,
+                    impressions=impressions,
+                    clicks=clicks,
+                    ctr=round(clicks / impressions * 100, 2) if impressions else 0.0,
+                    conversions=int(m.get("conversions", 0)),
+                    revenue=revenue,
+                    roas=round(revenue / spend, 2) if spend else 0.0,
+                )
+            )
+
+        recs, _ = repo.list_recommendations(client.id, channel.value, status="open", limit=None)
+        for rec in recs:
+            issue_rows.append(
+                PlatformIssueRow(
+                    channel_label=label,
+                    kind="Recommendation",
+                    severity=rec.importance or "—",
+                    title=rec.title,
+                    detail=rec.message or "",
+                )
+            )
+
+        issues, _ = repo.list_delivery_issues(client.id, channel.value, status="open", limit=None)
+        for issue in issues:
+            issue_rows.append(
+                PlatformIssueRow(
+                    channel_label=label,
+                    kind="Delivery issue",
+                    severity=issue.severity,
+                    title=issue.reason.replace("_", " ").capitalize(),
+                    detail=f"{issue.entity_type} {issue.entity_id}",
+                )
+            )
+
+    return campaign_rows, issue_rows
 
 
 def _overlaps(campaign: Campaign, date_from: date, date_to: date) -> bool:

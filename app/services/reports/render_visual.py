@@ -13,7 +13,13 @@ from __future__ import annotations
 
 from html import escape
 
-from app.services.reports.content import CampaignRow, ChannelRow, ReportContent
+from app.services.reports.content import (
+    CampaignRow,
+    ChannelRow,
+    PlatformCampaignRow,
+    PlatformIssueRow,
+    ReportContent,
+)
 
 _LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
 
@@ -22,6 +28,8 @@ _SECTION_TITLES = {
     "ga_overview": "Channel Overview",
     "top_ads": "Top-Performing Campaigns",
     "went_wrong_right": "What Went Right / Wrong",
+    "platform_campaigns": "Live Campaigns",
+    "platform_recommendations": "Recommendations & Delivery Issues",
 }
 
 _STYLE = """
@@ -105,6 +113,54 @@ def _channel_table(rows: list[ChannelRow], totals) -> str:
     return f"<table><thead><tr>{header}</tr></thead><tbody>{''.join(body_rows)}</tbody></table>"
 
 
+def _platform_campaign_table(rows: list[PlatformCampaignRow]) -> str:
+    header = "".join(
+        f"<th>{h}</th>"
+        for h in [
+            "Channel",
+            "Campaign",
+            "Status",
+            "Impressions",
+            "Clicks",
+            "CTR %",
+            "Spend",
+            "Conv.",
+            "Revenue",
+            "ROAS",
+        ]
+    )
+    if not rows:
+        body = '<tr><td colspan="10">No live campaigns synced for the selected channels.</td></tr>'
+    else:
+        body = "".join(
+            "<tr>"
+            f"<td>{escape(r.channel_label)}</td><td>{escape(r.name)}</td><td>{escape(r.status)}</td>"
+            f"<td>{r.impressions}</td><td>{r.clicks}</td><td>{r.ctr:.1f}%</td>"
+            f"<td>${r.spend:,.2f}</td><td>{r.conversions}</td>"
+            f"<td>${r.revenue:,.2f}</td><td>{r.roas:.2f}x</td>"
+            "</tr>"
+            for r in rows
+        )
+    return f"<table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def _platform_issue_table(rows: list[PlatformIssueRow]) -> str:
+    header = "".join(
+        f"<th>{h}</th>" for h in ["Channel", "Type", "Severity/Importance", "Title", "Detail"]
+    )
+    if not rows:
+        body = '<tr><td colspan="5">Nothing open for the selected channels.</td></tr>'
+    else:
+        body = "".join(
+            "<tr>"
+            f"<td>{escape(r.channel_label)}</td><td>{escape(r.kind)}</td>"
+            f"<td>{escape(r.severity)}</td><td>{escape(r.title)}</td><td>{escape(r.detail)}</td>"
+            "</tr>"
+            for r in rows
+        )
+    return f"<table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
+
+
 def _build_html(content: ReportContent) -> str:
     sections_html = []
     for section in content.included_sections:
@@ -115,6 +171,10 @@ def _build_html(content: ReportContent) -> str:
             body = _campaign_table(content.top_campaigns)
         elif section == "ga_overview":
             body = _channel_table(content.channel_breakdown, content.totals)
+        elif section == "platform_campaigns":
+            body = _platform_campaign_table(content.platform_campaigns)
+        elif section == "platform_recommendations":
+            body = _platform_issue_table(content.platform_issues)
         else:  # went_wrong_right
             body = (
                 f'<p class="narrative"><b>What went right:</b> {escape(content.went_right)}</p>'

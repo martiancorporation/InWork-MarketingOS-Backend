@@ -20,13 +20,21 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from app.services.reports.content import CampaignRow, ChannelRow, ReportContent
+from app.services.reports.content import (
+    CampaignRow,
+    ChannelRow,
+    PlatformCampaignRow,
+    PlatformIssueRow,
+    ReportContent,
+)
 
 _SECTION_TITLES = {
     "campaign_performance": "Campaign Performance",
     "ga_overview": "Channel Overview",
     "top_ads": "Top-Performing Campaigns",
     "went_wrong_right": "What Went Right / Wrong",
+    "platform_campaigns": "Live Campaigns",
+    "platform_recommendations": "Recommendations & Delivery Issues",
 }
 
 _TABLE_STYLE = TableStyle(
@@ -111,6 +119,53 @@ def _channel_table(rows: list[ChannelRow], totals) -> Table:
     return table
 
 
+def _platform_campaign_table(rows: list[PlatformCampaignRow]) -> Table:
+    header = [
+        "Channel",
+        "Campaign",
+        "Status",
+        "Impr.",
+        "Clicks",
+        "CTR %",
+        "Spend",
+        "Conv.",
+        "Revenue",
+        "ROAS",
+    ]
+    if not rows:
+        data = [header, ["No live campaigns synced for the selected channels."] + [""] * 9]
+    else:
+        data = [header] + [
+            [
+                r.channel_label,
+                r.name,
+                r.status,
+                r.impressions,
+                r.clicks,
+                f"{r.ctr:.1f}%",
+                f"${r.spend:,.2f}",
+                r.conversions,
+                f"${r.revenue:,.2f}",
+                f"{r.roas:.2f}x",
+            ]
+            for r in rows
+        ]
+    table = Table(data, repeatRows=1)
+    table.setStyle(_TABLE_STYLE)
+    return table
+
+
+def _platform_issue_table(rows: list[PlatformIssueRow]) -> Table:
+    header = ["Channel", "Type", "Severity/Importance", "Title", "Detail"]
+    if not rows:
+        data = [header, ["Nothing open for the selected channels."] + [""] * 4]
+    else:
+        data = [header] + [[r.channel_label, r.kind, r.severity, r.title, r.detail] for r in rows]
+    table = Table(data, repeatRows=1)
+    table.setStyle(_TABLE_STYLE)
+    return table
+
+
 def render_pdf(content: ReportContent) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -149,6 +204,10 @@ def render_pdf(content: ReportContent) -> bytes:
             story.append(
                 Paragraph(f"<b>What went wrong:</b> {escape(content.went_wrong)}", styles["Normal"])
             )
+        elif section == "platform_campaigns":
+            story.append(_platform_campaign_table(content.platform_campaigns))
+        elif section == "platform_recommendations":
+            story.append(_platform_issue_table(content.platform_issues))
         story.append(Spacer(1, 0.3 * inch))
 
     doc.build(story)
