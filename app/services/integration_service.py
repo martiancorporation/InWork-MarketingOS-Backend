@@ -388,8 +388,8 @@ class IntegrationService:
         AnalyticsService(self.db).ingest(
             client_id, [AnalyticsDailyIn(platform=platform, **row) for row in rows]
         )
-        if key in _META_KEYS:
-            await self._sync_platform_insights(client_id, integration)
+        if key in _META_KEYS or key == IntegrationKey.google_ads:
+            await self._sync_platform_insights(client_id, key, integration)
         integration.status = IntegrationStatus.connected
         integration.last_sync_at = datetime.now(UTC)
         integration.last_error = None
@@ -397,7 +397,9 @@ class IntegrationService:
         self.db.refresh(integration)
         return integration
 
-    async def _sync_platform_insights(self, client_id: uuid.UUID, integration: Integration) -> None:
+    async def _sync_platform_insights(
+        self, client_id: uuid.UUID, key: IntegrationKey, integration: Integration
+    ) -> None:
         """Best-effort: pull the richer campaign/ad-set/ad/recommendation data
         into the Platform Insights tables. Additive to the core
         ``analytics_daily`` sync above, which has already succeeded by the
@@ -405,9 +407,19 @@ class IntegrationService:
         ``error`` (same reasoning as ``_try_sync_after_connect``)."""
         try:
             token = self.cipher.decrypt(integration.access_token_encrypted)
-            await PlatformInsightService(self.db).sync_meta(
-                client_id, self.meta_client, token, integration.external_account_id
-            )
+            service = PlatformInsightService(self.db)
+            if key == IntegrationKey.google_ads:
+                await service.sync_google_ads(
+                    client_id,
+                    self.google_ads,
+                    token,
+                    integration.external_account_id,
+                    login_customer_id=integration.login_customer_id,
+                )
+            else:
+                await service.sync_meta(
+                    client_id, self.meta_client, token, integration.external_account_id
+                )
         except Exception:
             logger.warning(
                 "Platform insights sync failed for client %s key %s",

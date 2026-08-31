@@ -69,10 +69,24 @@ def fake_google(monkeypatch):
         # this themselves.
         return []
 
+    async def no_hierarchy(self, access_token, customer_id, *, login_customer_id=None):
+        return {"campaigns": [], "ad_groups": [], "ads": []}
+
+    async def no_campaign_metrics(
+        self, access_token, customer_id, *, login_customer_id=None, days=90
+    ):
+        return []
+
+    async def no_recommendations(self, access_token, customer_id, *, login_customer_id=None):
+        return []
+
     monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(GoogleAdsClient, "list_accessible_customers", list_accessible_customers)
     monkeypatch.setattr(GoogleAdsClient, "list_customer_clients", no_linked_clients)
     monkeypatch.setattr(GoogleAdsClient, "fetch_daily_insights", no_insights_yet)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_hierarchy", no_hierarchy)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_metrics_daily", no_campaign_metrics)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_recommendations", no_recommendations)
 
 
 @pytest.fixture
@@ -91,10 +105,24 @@ def fake_google_multi(monkeypatch):
     async def no_insights_yet(self, access_token, customer_id, *, login_customer_id=None, days=90):
         return []
 
+    async def no_hierarchy(self, access_token, customer_id, *, login_customer_id=None):
+        return {"campaigns": [], "ad_groups": [], "ads": []}
+
+    async def no_campaign_metrics(
+        self, access_token, customer_id, *, login_customer_id=None, days=90
+    ):
+        return []
+
+    async def no_recommendations(self, access_token, customer_id, *, login_customer_id=None):
+        return []
+
     monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(GoogleAdsClient, "list_accessible_customers", list_accessible_customers)
     monkeypatch.setattr(GoogleAdsClient, "list_customer_clients", no_linked_clients)
     monkeypatch.setattr(GoogleAdsClient, "fetch_daily_insights", no_insights_yet)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_hierarchy", no_hierarchy)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_metrics_daily", no_campaign_metrics)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_recommendations", no_recommendations)
 
 
 def _state(client, admin_headers, cid):
@@ -354,9 +382,23 @@ def test_manager_linked_client_account_is_discoverable(
     async def no_insights_yet(self, access_token, customer_id, *, login_customer_id=None, days=90):
         return []
 
+    async def no_hierarchy(self, access_token, customer_id, *, login_customer_id=None):
+        return {"campaigns": [], "ad_groups": [], "ads": []}
+
+    async def no_campaign_metrics(
+        self, access_token, customer_id, *, login_customer_id=None, days=90
+    ):
+        return []
+
+    async def no_recommendations(self, access_token, customer_id, *, login_customer_id=None):
+        return []
+
     monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(GoogleAdsClient, "list_accessible_customers", list_accessible_customers)
     monkeypatch.setattr(GoogleAdsClient, "list_customer_clients", list_customer_clients)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_hierarchy", no_hierarchy)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_metrics_daily", no_campaign_metrics)
+    monkeypatch.setattr(GoogleAdsClient, "fetch_recommendations", no_recommendations)
     monkeypatch.setattr(GoogleAdsClient, "fetch_daily_insights", no_insights_yet)
 
     cid = _client_id(client, admin_headers)

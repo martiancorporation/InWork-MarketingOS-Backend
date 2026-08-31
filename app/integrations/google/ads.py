@@ -39,6 +39,39 @@ _CUSTOMER_CLIENT_GAQL = (
     "FROM customer_client WHERE customer_client.level > 0"
 )
 
+# Platform Insights hierarchy — mirrors what MetaClient.fetch_campaign_hierarchy
+# pulls (campaign -> ad group -> ad), raw GAQL rows returned verbatim;
+# normalization happens one layer up in platform_insight_service.py.
+_CAMPAIGN_GAQL = (
+    "SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, "
+    "campaign.primary_status, campaign.primary_status_reasons, "
+    "campaign.start_date, campaign.end_date, campaign_budget.amount_micros "
+    "FROM campaign"
+)
+_AD_GROUP_GAQL = (
+    "SELECT ad_group.id, ad_group.name, ad_group.campaign, ad_group.status, ad_group.type "
+    "FROM ad_group"
+)
+_AD_GROUP_AD_GAQL = (
+    "SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type, "
+    "ad_group_ad.ad_group, ad_group_ad.status, "
+    "ad_group_ad.policy_summary.approval_status, ad_group_ad.policy_summary.review_status, "
+    "ad_group_ad.policy_summary.policy_topic_entries "
+    "FROM ad_group_ad"
+)
+_CAMPAIGN_METRIC_GAQL = (
+    "SELECT campaign.id, segments.date, metrics.impressions, metrics.clicks, "
+    "metrics.cost_micros, metrics.conversions, metrics.conversions_value "
+    "FROM campaign WHERE segments.date BETWEEN '{start}' AND '{end}'"
+)
+# Only a fraction of recommendation types populate `impact` — selected best
+# effort; `dismissed` recommendations are excluded (nothing actionable there).
+_RECOMMENDATION_GAQL = (
+    "SELECT recommendation.resource_name, recommendation.type, recommendation.campaign, "
+    "recommendation.impact, recommendation.dismissed "
+    "FROM recommendation WHERE recommendation.dismissed = FALSE"
+)
+
 
 def _daily_gaql(days: int) -> str:
     """GAQL has no ``DURING LAST_N_DAYS`` for arbitrary N — only a fixed set of
@@ -82,33 +115,21 @@ class GoogleAdsClient:
         ``customer_client`` account-hierarchy pattern. Returns one dict per
         descendant: ``{"id", "name", "manager"}``."""
         mgr = manager_customer_id.replace("-", "")
-        url = (
-            f"{_BASE.format(version=self._s.google_ads_api_version)}"
-            f"/customers/{mgr}/googleAds:searchStream"
-        )
-        data = await self._request(
-            "POST",
-            url,
-            access_token,
-            login_customer_id=mgr,
-            json={"query": _CUSTOMER_CLIENT_GAQL},
-        )
-        batches = data.get("data") if isinstance(data.get("data"), list) else [data]
+        rows = await self._search(access_token, mgr, _CUSTOMER_CLIENT_GAQL, login_customer_id=mgr)
         out = []
-        for batch in batches or []:
-            for row in (batch or {}).get("results") or []:
-                cc = row.get("customerClient") or row.get("customer_client") or {}
-                resource = cc.get("clientCustomer") or cc.get("client_customer") or ""
-                cid = resource.split("/")[-1] if resource else None
-                if not cid:
-                    continue
-                out.append(
-                    {
-                        "id": cid,
-                        "name": cc.get("descriptiveName") or cc.get("descriptive_name"),
-                        "manager": bool(cc.get("manager")),
-                    }
-                )
+        for row in rows:
+            cc = row.get("customerClient") or row.get("customer_client") or {}
+            resource = cc.get("clientCustomer") or cc.get("client_customer") or ""
+            cid = resource.split("/")[-1] if resource else None
+            if not cid:
+                continue
+            out.append(
+                {
+                    "id": cid,
+                    "name": cc.get("descriptiveName") or cc.get("descriptive_name"),
+                    "manager": bool(cc.get("manager")),
+                }
+            )
         return out
 
     async def fetch_daily_insights(
@@ -136,6 +157,75 @@ class GoogleAdsClient:
             json={"query": _daily_gaql(days)},
         )
         return _normalize(data)
+
+    async def fetch_campaign_hierarchy(
+        self, access_token: str, customer_id: str, *, login_customer_id: str | None = None
+    ) -> dict:
+        """Every campaign, ad group, and ad currently on the account (raw GAQL
+        rows, verbatim — normalization happens one layer up), mirroring
+        ``MetaClient.fetch_campaign_hierarchy``."""
+        campaigns = await self._search(
+            access_token, customer_id, _CAMPAIGN_GAQL, login_customer_id=login_customer_id
+        )
+        ad_groups = await self._search(
+            access_token, customer_id, _AD_GROUP_GAQL, login_customer_id=login_customer_id
+        )
+        ads = await self._search(
+            access_token, customer_id, _AD_GROUP_AD_GAQL, login_customer_id=login_customer_id
+        )
+        return {"campaigns": campaigns, "ad_groups": ad_groups, "ads": ads}
+
+    async def fetch_campaign_metrics_daily(
+        self,
+        access_token: str,
+        customer_id: str,
+        *,
+        login_customer_id: str | None = None,
+        days: int = 90,
+    ) -> list[dict]:
+        """One row per (campaign, day) — mirrors
+        ``MetaClient.fetch_campaign_metrics_daily``."""
+        end = date.today()
+        start = end - timedelta(days=days - 1)
+        query = _CAMPAIGN_METRIC_GAQL.format(start=start.isoformat(), end=end.isoformat())
+        return await self._search(
+            access_token, customer_id, query, login_customer_id=login_customer_id
+        )
+
+    async def fetch_recommendations(
+        self, access_token: str, customer_id: str, *, login_customer_id: str | None = None
+    ) -> list[dict]:
+        """Google Ads' own account-level recommendations — a Google-computed
+        signal, not AI-generated, mirroring
+        ``MetaClient.fetch_recommendations``."""
+        return await self._search(
+            access_token,
+            customer_id,
+            _RECOMMENDATION_GAQL,
+            login_customer_id=login_customer_id,
+        )
+
+    async def _search(
+        self,
+        access_token: str,
+        customer_id: str,
+        query: str,
+        *,
+        login_customer_id: str | None,
+    ) -> list[dict]:
+        """Run a GAQL query via ``searchStream`` and return the flattened
+        ``results[]`` rows, verbatim (camelCase JSON keys, as Google returns
+        them)."""
+        cid = (customer_id or "").replace("-", "")
+        url = (
+            f"{_BASE.format(version=self._s.google_ads_api_version)}"
+            f"/customers/{cid}/googleAds:searchStream"
+        )
+        data = await self._request(
+            "POST", url, access_token, login_customer_id=login_customer_id, json={"query": query}
+        )
+        batches = data.get("data") if isinstance(data.get("data"), list) else [data]
+        return [row for batch in (batches or []) for row in (batch or {}).get("results") or []]
 
     async def _request(
         self,

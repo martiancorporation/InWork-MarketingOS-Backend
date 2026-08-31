@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppError, NotFoundError
 from app.core.pagination import PaginationParams
+from app.integrations.google.ads import GoogleAdsClient
 from app.integrations.meta.client import MetaClient
 from app.models.platform_insight import PlatformDeliveryIssue, PlatformRecommendation
 from app.repositories.platform_insight_repository import PlatformInsightRepository
@@ -38,6 +39,7 @@ from app.schemas.platform_insight import (
 logger = logging.getLogger("app.services.platform_insight_service")
 
 _META_KEY = "meta"
+_GOOGLE_ADS_KEY = "google_ads"
 
 
 @dataclass
@@ -94,6 +96,70 @@ class PlatformInsightService:
         )
         issues_count = self.repo.upsert_delivery_issues(
             client_id, _META_KEY, _derive_meta_delivery_issues(raw_campaigns, raw_ad_sets, raw_ads)
+        )
+        self.db.commit()
+        return PlatformSyncResult(
+            campaigns=len(campaign_ids),
+            ad_sets=len(ad_set_ids),
+            ads=ads_count,
+            metrics=metrics_count,
+            recommendations=recs_count,
+            delivery_issues=issues_count,
+        )
+
+    async def sync_google_ads(
+        self,
+        client_id: uuid.UUID,
+        google_ads_client: GoogleAdsClient,
+        access_token: str,
+        customer_id: str,
+        *,
+        login_customer_id: str | None = None,
+    ) -> PlatformSyncResult:
+        """Mirrors ``sync_meta`` — same normalize-then-upsert shape, Google Ads'
+        own campaign/ad-group/ad hierarchy, daily metrics, and recommendations."""
+        hierarchy = await google_ads_client.fetch_campaign_hierarchy(
+            access_token, customer_id, login_customer_id=login_customer_id
+        )
+        metric_rows = await google_ads_client.fetch_campaign_metrics_daily(
+            access_token, customer_id, login_customer_id=login_customer_id
+        )
+        try:
+            rec_rows = await google_ads_client.fetch_recommendations(
+                access_token, customer_id, login_customer_id=login_customer_id
+            )
+        except AppError:
+            # Not every account surfaces recommendations (e.g. too new, or too
+            # small); this is a bonus signal, not core sync data.
+            logger.info("Google Ads recommendations unavailable for customer %s", customer_id)
+            rec_rows = []
+
+        raw_campaigns = hierarchy["campaigns"]
+        raw_ad_groups = hierarchy["ad_groups"]
+        raw_ads = hierarchy["ads"]
+
+        campaign_ids = self.repo.upsert_campaigns(
+            client_id, _GOOGLE_ADS_KEY, [_normalize_google_campaign(c) for c in raw_campaigns]
+        )
+        ad_set_ids = self.repo.upsert_ad_sets(
+            client_id,
+            _GOOGLE_ADS_KEY,
+            [_normalize_google_ad_group(a) for a in raw_ad_groups],
+            campaign_ids,
+        )
+        ads_count = self.repo.upsert_ads(
+            client_id, _GOOGLE_ADS_KEY, [_normalize_google_ad(a) for a in raw_ads], ad_set_ids
+        )
+        metrics_count = self.repo.upsert_metrics_daily(
+            client_id, _GOOGLE_ADS_KEY, [_normalize_google_campaign_metric(r) for r in metric_rows]
+        )
+        recs_count = self.repo.upsert_recommendations(
+            client_id,
+            _GOOGLE_ADS_KEY,
+            [_normalize_google_recommendation(r, customer_id) for r in rec_rows],
+        )
+        issues_count = self.repo.upsert_delivery_issues(
+            client_id, _GOOGLE_ADS_KEY, _derive_google_delivery_issues(raw_campaigns, raw_ads)
         )
         self.db.commit()
         return PlatformSyncResult(
@@ -402,4 +468,192 @@ def _derive_meta_delivery_issues(
                         "rec_key": f"{entity_type}:{entity_id}:review_feedback",
                     }
                 )
+    return issues
+
+
+# ---- Google Ads normalizers ------------------------------------------------- #
+#
+# Google's REST JSON returns each selected GAQL resource as its own sub-object
+# keyed by resource name (e.g. "campaign", "campaignBudget", "adGroupAd"), with
+# field names camelCased from the snake_case GAQL path (advertising_channel_type
+# -> advertisingChannelType). int64 fields commonly arrive as JSON strings
+# ("impressions": "1000") — `int()`/`float()` parse those directly, same as
+# ``app.integrations.google.ads._normalize`` already relies on.
+
+
+def _last_segment(resource_name: str | None) -> str | None:
+    """``customers/123/campaigns/456`` -> ``456``."""
+    if not resource_name:
+        return None
+    return resource_name.rsplit("/", 1)[-1]
+
+
+def _micros(value) -> float | None:
+    """Google Ads amounts are reported in micros (1,000,000 micros = 1 unit)."""
+    if value in (None, ""):
+        return None
+    try:
+        return round(float(value) / 1_000_000, 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _google_date(value: str | None) -> datetime | None:
+    """``campaign.start_date``/``end_date`` are plain ``YYYY-MM-DD`` strings."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _normalize_google_campaign(row: dict) -> dict:
+    c = row.get("campaign") or {}
+    budget = row.get("campaignBudget") or row.get("campaign_budget") or {}
+    return {
+        "external_id": c.get("id"),
+        "name": c.get("name") or c.get("id"),
+        "objective": c.get("advertisingChannelType") or c.get("advertising_channel_type"),
+        "status": c.get("status"),
+        "effective_status": c.get("primaryStatus") or c.get("primary_status"),
+        "daily_budget": _micros(budget.get("amountMicros") or budget.get("amount_micros")),
+        "lifetime_budget": None,  # not exposed at this level — campaign budgets are daily here
+        "start_time": _google_date(c.get("startDate") or c.get("start_date")),
+        "stop_time": _google_date(c.get("endDate") or c.get("end_date")),
+        "raw_payload": row,
+    }
+
+
+def _normalize_google_ad_group(row: dict) -> dict:
+    ag = row.get("adGroup") or row.get("ad_group") or {}
+    return {
+        "external_id": ag.get("id"),
+        "campaign_external_id": _last_segment(ag.get("campaign")),
+        "name": ag.get("name") or ag.get("id"),
+        "status": ag.get("status"),
+        "effective_status": ag.get("status"),  # ad groups have no separate "effective" status
+        "daily_budget": None,  # budgets live on the campaign in Google Ads, not the ad group
+        "lifetime_budget": None,
+        "targeting_summary": {"type": ag.get("type")} if ag.get("type") else None,
+        "raw_payload": row,
+    }
+
+
+def _normalize_google_ad(row: dict) -> dict:
+    aga = row.get("adGroupAd") or row.get("ad_group_ad") or {}
+    ad = aga.get("ad") or {}
+    policy = aga.get("policySummary") or aga.get("policy_summary") or {}
+    approval = policy.get("approvalStatus") or policy.get("approval_status")
+    review = policy.get("reviewStatus") or policy.get("review_status")
+    return {
+        "external_id": ad.get("id"),
+        "ad_set_external_id": _last_segment(aga.get("adGroup") or aga.get("ad_group")),
+        "name": ad.get("name") or ad.get("id"),
+        "status": aga.get("status"),
+        "effective_status": approval or aga.get("status"),
+        "creative_summary": {"type": ad.get("type")} if ad.get("type") else None,
+        "issues_info": policy.get("policyTopicEntries") or policy.get("policy_topic_entries"),
+        "ad_review_feedback": {"review_status": review} if review else None,
+        "raw_payload": row,
+    }
+
+
+def _normalize_google_campaign_metric(row: dict) -> dict:
+    c = row.get("campaign") or {}
+    segments = row.get("segments") or {}
+    m = row.get("metrics") or {}
+    date_str = segments.get("date")
+    return {
+        "entity_type": "campaign",
+        "entity_id": c.get("id"),
+        "date": date.fromisoformat(date_str) if date_str else date.today(),
+        "impressions": int(m.get("impressions", 0) or 0),
+        "clicks": int(m.get("clicks", 0) or 0),
+        "spend": round(int(m.get("costMicros", m.get("cost_micros", 0)) or 0) / 1_000_000, 2),
+        # reach/frequency/cpm/cpc aren't part of this metric set — Google Ads
+        # exposes them per-campaign only via separate, higher-quota resources.
+        "reach": 0,
+        "frequency": 0.0,
+        "cpm": 0.0,
+        "cpc": 0.0,
+        "conversions": int(float(m.get("conversions", 0) or 0)),
+        "revenue": round(float(m.get("conversionsValue", m.get("conversions_value", 0)) or 0), 2),
+        "actions": None,
+        "cost_per_action_type": None,
+        "breakdowns": None,
+    }
+
+
+def _normalize_google_recommendation(row: dict, customer_id: str) -> dict:
+    rec = row.get("recommendation") or {}
+    rec_type = rec.get("type") or "RECOMMENDATION"
+    campaign_ref = rec.get("campaign")
+    resource_name = rec.get("resourceName") or rec.get("resource_name") or ""
+    entity_type = "campaign" if campaign_ref else "account"
+    entity_id = _last_segment(campaign_ref) or customer_id
+    return {
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "code": rec_type,
+        "title": rec_type.replace("_", " ").title(),
+        "message": None,
+        "importance": None,
+        "status": "open",
+        "rec_key": f"{entity_type}:{entity_id}:{rec_type}:{resource_name}"[:160],
+        "raw_payload": row,
+    }
+
+
+# Campaign primary_status values that represent a genuine delivery problem —
+# excludes user-driven, non-error states (PAUSED, REMOVED, ENDED, ELIGIBLE).
+_ISSUE_CAMPAIGN_STATUSES = {"LIMITED", "MISCONFIGURED", "NOT_ELIGIBLE", "PENDING"}
+_HIGH_SEVERITY_STATUSES = {"MISCONFIGURED", "NOT_ELIGIBLE"}
+_OK_APPROVAL_STATUSES = {"APPROVED", "APPROVED_LIMITED"}
+
+
+def _derive_google_delivery_issues(campaigns: list[dict], ads: list[dict]) -> list[dict]:
+    """Not fetched — computed: a campaign whose ``primary_status`` signals a
+    real delivery problem, and any ad Google's policy review disapproved or
+    is still reviewing."""
+    issues: list[dict] = []
+    for row in campaigns:
+        c = row.get("campaign") or {}
+        primary = c.get("primaryStatus") or c.get("primary_status")
+        if primary in _ISSUE_CAMPAIGN_STATUSES:
+            reasons = c.get("primaryStatusReasons") or c.get("primary_status_reasons")
+            issues.append(
+                {
+                    "entity_type": "campaign",
+                    "entity_id": c.get("id"),
+                    "severity": "high" if primary in _HIGH_SEVERITY_STATUSES else "medium",
+                    "reason": f"primary_status_{primary.lower()}",
+                    "detail": {"primary_status": primary, "reasons": reasons},
+                    "status": "open",
+                    "rec_key": f"campaign:{c.get('id')}:primary_status",
+                }
+            )
+    for row in ads:
+        aga = row.get("adGroupAd") or row.get("ad_group_ad") or {}
+        ad = aga.get("ad") or {}
+        policy = aga.get("policySummary") or aga.get("policy_summary") or {}
+        approval = policy.get("approvalStatus") or policy.get("approval_status")
+        if approval and approval not in _OK_APPROVAL_STATUSES:
+            issues.append(
+                {
+                    "entity_type": "ad",
+                    "entity_id": ad.get("id"),
+                    "severity": "high" if approval == "DISAPPROVED" else "medium",
+                    "reason": "policy_disapproved"
+                    if approval == "DISAPPROVED"
+                    else "policy_under_review",
+                    "detail": {
+                        "approval_status": approval,
+                        "policy_topic_entries": policy.get("policyTopicEntries")
+                        or policy.get("policy_topic_entries"),
+                    },
+                    "status": "open",
+                    "rec_key": f"ad:{ad.get('id')}:policy",
+                }
+            )
     return issues
