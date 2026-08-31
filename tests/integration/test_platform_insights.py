@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.integrations.google.ads import GoogleAdsClient
+from app.integrations.google.lsa import LsaClient
 from app.integrations.google.oauth import GoogleOAuthClient
 from app.integrations.meta.client import MetaClient
 from app.integrations.meta.oauth import MetaOAuthClient
@@ -526,3 +527,122 @@ def test_list_google_ads_campaign_via_api(
     body = listed.json()
     assert body["total"] == 1
     assert body["items"][0]["external_id"] == "cmp_1"
+
+
+# ---- Google LSA (campaigns only — no ad-group/ad tier) --------------------- #
+
+
+@pytest.fixture
+def fake_google_lsa_full(monkeypatch):
+    """Connect flow + a realistic LSA campaign/metrics/recommendation payload.
+    LSA has no ad-group/ad hierarchy (no keywords or creatives), so the
+    hierarchy fixture only returns campaigns."""
+
+    async def exchange_code(self, code):
+        return {"access_token": "g-access", "refresh_token": "g-refresh", "expires_in": 3600}
+
+    async def list_accessible_customers(self, token):
+        return ["2336702039"]
+
+    async def no_linked_clients(self, token, manager_customer_id):
+        return []
+
+    async def no_insights_yet(self, access_token, customer_id, *, days=90):
+        return []
+
+    async def hierarchy(self, access_token, customer_id):
+        assert access_token == "g-access" and customer_id == "2336702039"
+        return {
+            "campaigns": [
+                {
+                    "campaign": {
+                        "id": "lsa_cmp_1",
+                        "name": "Tampa Bay LSA",
+                        "status": "ENABLED",
+                        "advertisingChannelType": "LOCAL_SERVICES",
+                        "primaryStatus": "ELIGIBLE",
+                        "primaryStatusReasons": [],
+                        "startDate": "2026-02-01",
+                        "endDate": "",
+                    },
+                    "campaignBudget": {"amountMicros": "8000000"},
+                }
+            ],
+            "ad_groups": [],
+            "ads": [],
+        }
+
+    async def campaign_metrics(self, access_token, customer_id, *, days=90):
+        return [
+            {
+                "campaign": {"id": "lsa_cmp_1"},
+                "segments": {"date": "2026-08-01"},
+                "metrics": {
+                    "impressions": "500",
+                    "clicks": "20",
+                    "costMicros": "80000000",
+                    "conversions": 4.0,
+                    "conversionsValue": 0.0,
+                },
+            }
+        ]
+
+    async def recommendations(self, access_token, customer_id):
+        return []
+
+    monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
+    monkeypatch.setattr(LsaClient, "list_accessible_customers", list_accessible_customers)
+    monkeypatch.setattr(LsaClient, "list_customer_clients", no_linked_clients)
+    monkeypatch.setattr(LsaClient, "fetch_daily_insights", no_insights_yet)
+    monkeypatch.setattr(LsaClient, "fetch_campaign_hierarchy", hierarchy)
+    monkeypatch.setattr(LsaClient, "fetch_campaign_metrics_daily", campaign_metrics)
+    monkeypatch.setattr(LsaClient, "fetch_recommendations", recommendations)
+
+
+def test_connect_syncs_google_lsa_platform_insights(
+    client, admin_headers: dict, db_session: Session, google_configured, fake_google_lsa_full
+):
+    cid = _client_id(client, admin_headers)
+    start = client.post(
+        f"{API}/clients/{cid}/integrations/google_lsa/oauth/start", headers=admin_headers
+    ).json()
+    resp = client.post(
+        f"{API}/clients/{cid}/integrations/google_lsa/oauth/complete",
+        headers=admin_headers,
+        json={"code": "g-auth-code", "state": start["state"], "ad_account_id": "2336702039"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "connected"
+
+    client_uuid = uuid.UUID(cid)
+
+    campaign = db_session.scalar(
+        select(PlatformCampaign).where(
+            PlatformCampaign.client_id == client_uuid,
+            PlatformCampaign.integration_key == "google_lsa",
+        )
+    )
+    assert campaign is not None
+    assert campaign.external_id == "lsa_cmp_1"
+    assert campaign.name == "Tampa Bay LSA"
+    assert float(campaign.daily_budget) == 8.0
+
+    # No ad-group/ad rows for LSA.
+    assert (
+        db_session.scalar(
+            select(PlatformAdSet).where(PlatformAdSet.client_id == client_uuid)
+        )
+        is None
+    )
+
+    metric = db_session.scalar(
+        select(PlatformMetricDaily).where(
+            PlatformMetricDaily.client_id == client_uuid,
+            PlatformMetricDaily.integration_key == "google_lsa",
+        )
+    )
+    assert metric is not None
+    assert metric.entity_id == "lsa_cmp_1"
+    assert metric.impressions == 500
+    assert float(metric.spend) == 80.0
+    assert metric.conversions == 4

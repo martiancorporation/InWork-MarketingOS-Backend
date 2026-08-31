@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import AppError, NotFoundError
 from app.core.pagination import PaginationParams
 from app.integrations.google.ads import GoogleAdsClient
+from app.integrations.google.lsa import LsaClient
 from app.integrations.meta.client import MetaClient
 from app.models.platform_insight import PlatformDeliveryIssue, PlatformRecommendation
 from app.repositories.platform_insight_repository import PlatformInsightRepository
@@ -40,6 +41,7 @@ logger = logging.getLogger("app.services.platform_insight_service")
 
 _META_KEY = "meta"
 _GOOGLE_ADS_KEY = "google_ads"
+_GOOGLE_LSA_KEY = "google_lsa"
 
 
 @dataclass
@@ -166,6 +168,47 @@ class PlatformInsightService:
             campaigns=len(campaign_ids),
             ad_sets=len(ad_set_ids),
             ads=ads_count,
+            metrics=metrics_count,
+            recommendations=recs_count,
+            delivery_issues=issues_count,
+        )
+
+    async def sync_google_lsa(
+        self, client_id: uuid.UUID, lsa_client: LsaClient, access_token: str, customer_id: str
+    ) -> PlatformSyncResult:
+        """LSA campaigns only — no ad-group/ad tier (LSA has no keywords or
+        creatives to manage; see ``LsaClient`` module docstring). Reuses the
+        Google Ads normalizers verbatim: an LSA campaign is a normal
+        ``campaign`` resource (channel type LOCAL_SERVICES), same field shape."""
+        hierarchy = await lsa_client.fetch_campaign_hierarchy(access_token, customer_id)
+        metric_rows = await lsa_client.fetch_campaign_metrics_daily(access_token, customer_id)
+        try:
+            rec_rows = await lsa_client.fetch_recommendations(access_token, customer_id)
+        except AppError:
+            logger.info("Google LSA recommendations unavailable for customer %s", customer_id)
+            rec_rows = []
+
+        raw_campaigns = hierarchy["campaigns"]
+
+        campaign_ids = self.repo.upsert_campaigns(
+            client_id, _GOOGLE_LSA_KEY, [_normalize_google_campaign(c) for c in raw_campaigns]
+        )
+        metrics_count = self.repo.upsert_metrics_daily(
+            client_id, _GOOGLE_LSA_KEY, [_normalize_google_campaign_metric(r) for r in metric_rows]
+        )
+        recs_count = self.repo.upsert_recommendations(
+            client_id,
+            _GOOGLE_LSA_KEY,
+            [_normalize_google_recommendation(r, customer_id) for r in rec_rows],
+        )
+        issues_count = self.repo.upsert_delivery_issues(
+            client_id, _GOOGLE_LSA_KEY, _derive_google_delivery_issues(raw_campaigns, [])
+        )
+        self.db.commit()
+        return PlatformSyncResult(
+            campaigns=len(campaign_ids),
+            ad_sets=0,
+            ads=0,
             metrics=metrics_count,
             recommendations=recs_count,
             delivery_issues=issues_count,

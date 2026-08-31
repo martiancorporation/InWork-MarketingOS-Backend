@@ -9,6 +9,7 @@ from app.api.v1.routers import (
     ai_usage,
     alerts,
     analytics,
+    analytics_breakdowns,
     assignments,
     assistant,
     audit,
@@ -52,6 +53,7 @@ api_router.include_router(reports.router)
 api_router.include_router(compliance.router)
 api_router.include_router(content.router)
 api_router.include_router(analytics.router)
+api_router.include_router(analytics_breakdowns.router)
 api_router.include_router(campaigns.router)
 api_router.include_router(alerts.router)
 api_router.include_router(integrations.router)

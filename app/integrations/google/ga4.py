@@ -23,6 +23,17 @@ _TIMEOUT = 30.0
 # Metric order matters — the response rows align to this request order.
 _METRICS = ("screenPageViews", "sessions", "conversions", "totalRevenue")
 
+# Breakdown reports (Platform Insights' Analytics Breakdown) — one GA4
+# dimension each, ranked by its lead metric, top 10 only. Order matters here
+# too — normalization zips these against the response's metricValues.
+_BREAKDOWN_METRICS = ("sessions", "screenPageViews", "conversions", "totalRevenue")
+_BREAKDOWNS = {
+    "top_page": "pagePath",
+    "channel": "sessionDefaultChannelGroup",
+    "device": "deviceCategory",
+}
+_BREAKDOWN_LIMIT = 10
+
 
 class Ga4Client:
     def __init__(self, settings=None) -> None:
@@ -55,6 +66,30 @@ class Ga4Client:
         }
         data = await self._request("POST", url, access_token, json=body)
         return [_normalize(row) for row in (data.get("rows") or [])]
+
+    async def fetch_breakdowns(
+        self, access_token: str, property_id: str, *, days: int = 90
+    ) -> dict[str, list[dict]]:
+        """Top pages, traffic channels, and device categories over the last
+        ``days`` days — a dimensional slice, not a daily series (see
+        ``app/models/analytics_breakdown.py`` for why this is a separate
+        concept from the daily trend above)."""
+        pid = (property_id or "").removeprefix("properties/")
+        url = f"{_DATA}/properties/{pid}:runReport"
+        out: dict[str, list[dict]] = {}
+        for breakdown_type, dimension in _BREAKDOWNS.items():
+            body = {
+                "dateRanges": [{"startDate": f"{days}daysAgo", "endDate": "today"}],
+                "dimensions": [{"name": dimension}],
+                "metrics": [{"name": m} for m in _BREAKDOWN_METRICS],
+                "orderBys": [{"metric": {"metricName": "sessions"}, "desc": True}],
+                "limit": _BREAKDOWN_LIMIT,
+            }
+            data = await self._request("POST", url, access_token, json=body)
+            out[breakdown_type] = [
+                _normalize_breakdown_row(row) for row in (data.get("rows") or [])
+            ]
+        return out
 
     async def _request(
         self, method: str, url: str, access_token: str, json: dict | None = None
@@ -102,6 +137,25 @@ def _normalize(row: dict) -> dict:
         "conversions": conversions,
         "leads": conversions,
         "revenue": round(float(by_metric.get("totalRevenue", 0) or 0), 2),
+    }
+
+
+def _normalize_breakdown_row(row: dict) -> dict:
+    """One breakdown row -> ``{"dimension", "metrics"}`` (rank comes from
+    response order, assigned by the caller)."""
+    dim_values = row.get("dimensionValues") or []
+    dimension = (dim_values[0].get("value") if dim_values else None) or "(not set)"
+    metric_values = row.get("metricValues") or []
+    values = [v.get("value", 0) for v in metric_values]
+    by_metric = dict(zip(_BREAKDOWN_METRICS, values))
+    return {
+        "dimension": dimension,
+        "metrics": {
+            "sessions": int(float(by_metric.get("sessions", 0) or 0)),
+            "page_views": int(float(by_metric.get("screenPageViews", 0) or 0)),
+            "conversions": int(float(by_metric.get("conversions", 0) or 0)),
+            "revenue": round(float(by_metric.get("totalRevenue", 0) or 0), 2),
+        },
     }
 
 

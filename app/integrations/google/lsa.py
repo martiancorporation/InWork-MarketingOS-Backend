@@ -68,23 +68,100 @@ def _date_range(days: int) -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
+_CUSTOMER_CLIENT_GAQL = (
+    "SELECT customer_client.client_customer, customer_client.level, "
+    "customer_client.manager, customer_client.descriptive_name "
+    "FROM customer_client WHERE customer_client.level > 0"
+)
+
+# Platform Insights — LSA campaigns are a normal ``campaign`` resource (channel
+# type LOCAL_SERVICES), so this row shape deliberately matches
+# ``app.integrations.google.ads._CAMPAIGN_GAQL`` / ``_CAMPAIGN_METRIC_GAQL``
+# field-for-field: platform_insight_service.py reuses the same Google Ads
+# normalizers rather than duplicating them. LSA has no ad-group/ad hierarchy
+# (no keywords or creatives to manage), so there's no equivalent of
+# ``_AD_GROUP_GAQL``/``_AD_GROUP_AD_GAQL`` here.
+_CAMPAIGN_DETAIL_GAQL = (
+    "SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, "
+    "campaign.primary_status, campaign.primary_status_reasons, "
+    "campaign.start_date, campaign.end_date, campaign_budget.amount_micros "
+    "FROM campaign WHERE campaign.advertising_channel_type = 'LOCAL_SERVICES'"
+)
+_CAMPAIGN_DETAIL_METRIC_GAQL = (
+    "SELECT campaign.id, segments.date, metrics.impressions, metrics.clicks, "
+    "metrics.cost_micros, metrics.conversions, metrics.conversions_value "
+    "FROM campaign "
+    "WHERE campaign.advertising_channel_type = 'LOCAL_SERVICES' "
+    "AND segments.date BETWEEN '{start}' AND '{end}'"
+)
+_RECOMMENDATION_GAQL = (
+    "SELECT recommendation.resource_name, recommendation.type, recommendation.campaign, "
+    "recommendation.impact, recommendation.dismissed "
+    "FROM recommendation WHERE recommendation.dismissed = FALSE"
+)
+
+
 class LsaClient:
     def __init__(self, settings=None) -> None:
         self._s = settings or get_settings().integrations
 
-    def _headers(self, access_token: str) -> dict:
-        return {
+    def _headers(self, access_token: str, login_customer_id: str | None = None) -> dict:
+        headers = {
             "Authorization": f"Bearer {access_token}",
             "developer-token": self._s.google_developer_token or "",
             "Content-Type": "application/json",
         }
+        if login_customer_id:
+            headers["login-customer-id"] = login_customer_id.replace("-", "")
+        return headers
 
     async def list_accessible_customers(self, access_token: str) -> list[str]:
         """Customer ids (digits) this token can access — same discovery path
-        as regular Google Ads; an LSA account is just a customer id."""
+        as regular Google Ads; an LSA account is just a customer id. Only
+        accounts the OAuth user has *direct* access to — a manager account's
+        linked clients are NOT included here (see ``list_customer_clients``)."""
         url = f"{_BASE.format(version=self._s.google_ads_api_version)}/customers:listAccessibleCustomers"
         data = await self._request("GET", url, access_token)
         return [rn.split("/")[-1] for rn in (data.get("resourceNames") or [])]
+
+    async def list_customer_clients(
+        self, access_token: str, manager_customer_id: str
+    ) -> list[dict]:
+        """Client accounts linked under a manager (MCC) account — not returned
+        by ``list_accessible_customers``. Queried *through* the manager
+        (``login-customer-id`` set to its own id, for this discovery call
+        only — ``fetch_daily_insights`` still never sends it, per Debanjan's
+        explicit instruction that none of the client LSA accounts are queried
+        *through* a manager). Mirrors ``GoogleAdsClient.list_customer_clients``."""
+        mgr = manager_customer_id.replace("-", "")
+        url = (
+            f"{_BASE.format(version=self._s.google_ads_api_version)}"
+            f"/customers/{mgr}/googleAds:searchStream"
+        )
+        data = await self._request(
+            "POST",
+            url,
+            access_token,
+            json={"query": _CUSTOMER_CLIENT_GAQL},
+            login_customer_id=mgr,
+        )
+        batches = data.get("data") if isinstance(data.get("data"), list) else [data]
+        out = []
+        for batch in batches or []:
+            for row in (batch or {}).get("results") or []:
+                cc = row.get("customerClient") or row.get("customer_client") or {}
+                resource = cc.get("clientCustomer") or cc.get("client_customer") or ""
+                cid = resource.split("/")[-1] if resource else None
+                if not cid:
+                    continue
+                out.append(
+                    {
+                        "id": cid,
+                        "name": cc.get("descriptiveName") or cc.get("descriptive_name"),
+                        "manager": bool(cc.get("manager")),
+                    }
+                )
+        return out
 
     async def fetch_daily_insights(
         self, access_token: str, customer_id: str, *, days: int = 90
@@ -102,13 +179,50 @@ class LsaClient:
         )
         return _normalize(campaign_data, leads_data)
 
+    async def fetch_campaign_hierarchy(self, access_token: str, customer_id: str) -> dict:
+        """LSA campaigns only — no ad-group/ad tier (see module docstring)."""
+        campaigns = await self._search(access_token, customer_id, _CAMPAIGN_DETAIL_GAQL)
+        return {"campaigns": campaigns, "ad_groups": [], "ads": []}
+
+    async def fetch_campaign_metrics_daily(
+        self, access_token: str, customer_id: str, *, days: int = 90
+    ) -> list[dict]:
+        """One row per (campaign, day) — mirrors
+        ``GoogleAdsClient.fetch_campaign_metrics_daily``."""
+        start, end = _date_range(days)
+        query = _CAMPAIGN_DETAIL_METRIC_GAQL.format(start=start, end=end)
+        return await self._search(access_token, customer_id, query)
+
+    async def fetch_recommendations(self, access_token: str, customer_id: str) -> list[dict]:
+        """Google Ads' own account-level recommendations for this LSA customer."""
+        return await self._search(access_token, customer_id, _RECOMMENDATION_GAQL)
+
+    async def _search(self, access_token: str, customer_id: str, query: str) -> list[dict]:
+        """Run a GAQL query via ``searchStream`` and return the flattened
+        ``results[]`` rows, verbatim. Never sends ``login-customer-id`` — same
+        rule as ``fetch_daily_insights`` (see module docstring)."""
+        cid = (customer_id or "").replace("-", "")
+        url = (
+            f"{_BASE.format(version=self._s.google_ads_api_version)}"
+            f"/customers/{cid}/googleAds:searchStream"
+        )
+        data = await self._request("POST", url, access_token, json={"query": query})
+        batches = data.get("data") if isinstance(data.get("data"), list) else [data]
+        return [row for batch in (batches or []) for row in (batch or {}).get("results") or []]
+
     async def _request(
-        self, method: str, url: str, access_token: str, json: dict | None = None
+        self,
+        method: str,
+        url: str,
+        access_token: str,
+        json: dict | None = None,
+        *,
+        login_customer_id: str | None = None,
     ) -> dict:
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as http:
                 resp = await http.request(
-                    method, url, headers=self._headers(access_token), json=json
+                    method, url, headers=self._headers(access_token, login_customer_id), json=json
                 )
         except httpx.HTTPError as exc:
             raise AppError(

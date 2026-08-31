@@ -49,6 +49,7 @@ from app.schemas.integration import (
     IntegrationListResponse,
     IntegrationRead,
 )
+from app.services.analytics_breakdown_service import AnalyticsBreakdownService
 from app.services.analytics_service import AnalyticsService
 from app.services.platform_insight_service import PlatformInsightService
 
@@ -388,8 +389,10 @@ class IntegrationService:
         AnalyticsService(self.db).ingest(
             client_id, [AnalyticsDailyIn(platform=platform, **row) for row in rows]
         )
-        if key in _META_KEYS or key == IntegrationKey.google_ads:
+        if key in _META_KEYS or key in (IntegrationKey.google_ads, IntegrationKey.google_lsa):
             await self._sync_platform_insights(client_id, key, integration)
+        elif key in (IntegrationKey.ga4, IntegrationKey.search_console):
+            await self._sync_analytics_breakdowns(client_id, key, integration)
         integration.status = IntegrationStatus.connected
         integration.last_sync_at = datetime.now(UTC)
         integration.last_error = None
@@ -416,6 +419,10 @@ class IntegrationService:
                     integration.external_account_id,
                     login_customer_id=integration.login_customer_id,
                 )
+            elif key == IntegrationKey.google_lsa:
+                await service.sync_google_lsa(
+                    client_id, self.lsa_client, token, integration.external_account_id
+                )
             else:
                 await service.sync_meta(
                     client_id, self.meta_client, token, integration.external_account_id
@@ -423,6 +430,32 @@ class IntegrationService:
         except Exception:
             logger.warning(
                 "Platform insights sync failed for client %s key %s",
+                client_id,
+                integration.key.value,
+                exc_info=True,
+            )
+
+    async def _sync_analytics_breakdowns(
+        self, client_id: uuid.UUID, key: IntegrationKey, integration: Integration
+    ) -> None:
+        """Best-effort: pull GA4/Search Console's own dimensional breakdowns
+        (top pages, channels, devices, queries) — additive to the core
+        ``analytics_daily`` sync above, same non-fatal-failure reasoning as
+        ``_sync_platform_insights``."""
+        try:
+            token = self.cipher.decrypt(integration.access_token_encrypted)
+            service = AnalyticsBreakdownService(self.db)
+            if key == IntegrationKey.ga4:
+                await service.sync_ga4(
+                    client_id, self.ga4_client, token, integration.external_account_id
+                )
+            else:
+                await service.sync_search_console(
+                    client_id, self.search_console, token, integration.external_account_id
+                )
+        except Exception:
+            logger.warning(
+                "Analytics breakdown sync failed for client %s key %s",
                 client_id,
                 integration.key.value,
                 exc_info=True,
@@ -534,28 +567,32 @@ class IntegrationService:
         """Every account/property/site the token can read for ``key`` — no
         picking here, see ``_select_google_account``."""
         if key == IntegrationKey.google_ads:
-            return await self._list_google_ads_customers(access)
+            return await self._list_ads_family_customers(self.google_ads, access)
         if key == IntegrationKey.google_lsa:
-            return await self.lsa_client.list_accessible_customers(access)
+            return await self._list_ads_family_customers(self.lsa_client, access)
         if key == IntegrationKey.ga4:
             return await self.ga4_client.list_properties(access)
         if key == IntegrationKey.search_console:
             return await self.search_console.list_sites(access)
         return []  # pragma: no cover - guarded by _require_real
 
-    async def _list_google_ads_customers(self, access: str) -> list[str]:
-        """``listAccessibleCustomers`` only returns accounts the OAuth user has
-        *direct* access to — a manager account's linked clients (e.g. a client
-        account we were invited into via the Google Ads UI, not via user-level
-        access) don't show up there at all. Expand every directly-accessible
-        account through ``customer_client`` so a manager-linked client account
-        is selectable too, not just the manager account itself."""
-        direct = await self.google_ads.list_accessible_customers(access)
+    async def _list_ads_family_customers(
+        self, ads_api_client: GoogleAdsClient | LsaClient, access: str
+    ) -> list[str]:
+        """Shared by Google Ads and LSA — both ride the same underlying Ads
+        API account model. ``listAccessibleCustomers`` only returns accounts
+        the OAuth user has *direct* access to — a manager account's linked
+        clients (e.g. a client account we were invited into via the Google
+        Ads UI, not via user-level access) don't show up there at all. Expand
+        every directly-accessible account through ``customer_client`` so a
+        manager-linked client account is selectable too, not just the manager
+        account itself."""
+        direct = await ads_api_client.list_accessible_customers(access)
         ids = list(direct)
         seen = set(direct)
         for manager_id in direct:
             try:
-                children = await self.google_ads.list_customer_clients(access, manager_id)
+                children = await ads_api_client.list_customer_clients(access, manager_id)
             except AppError:
                 # Not every accessible account is a manager — a permission or
                 # query error here just means this one has no linked clients.

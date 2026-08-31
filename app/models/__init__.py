@@ -9,6 +9,7 @@ from app.models.ai import AiChat, AiChatMessage, AiChatSource, AiSource
 from app.models.ai_usage import AiUsageEvent
 from app.models.alert import Alert
 from app.models.analytics import AnalyticsDaily, StrategyVisual
+from app.models.analytics_breakdown import AnalyticsBreakdown
 from app.models.assignment import ClientAssignment
 from app.models.audit import AuditLog
 from app.models.brand_job import BrandJob
@@ -66,6 +67,7 @@ __all__ = [
     "AiSource",
     "AiUsageEvent",
     "Alert",
+    "AnalyticsBreakdown",
     "AnalyticsDaily",
     "AuditLog",
     "BrandJob",

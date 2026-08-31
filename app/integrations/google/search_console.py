@@ -21,6 +21,8 @@ from app.core.exceptions import AppError
 
 _BASE = "https://searchconsole.googleapis.com/webmasters/v3"
 _TIMEOUT = 30.0
+_BREAKDOWNS = {"top_query": "query", "top_page": "page", "device": "device"}
+_BREAKDOWN_LIMIT = 10
 
 
 class SearchConsoleClient:
@@ -50,6 +52,31 @@ class SearchConsoleClient:
         }
         data = await self._request("POST", url, access_token, json=body)
         return [_normalize(row) for row in (data.get("rows") or [])]
+
+    async def fetch_breakdowns(
+        self, access_token: str, site_url: str, *, days: int = 90
+    ) -> dict[str, list[dict]]:
+        """Top search queries, top pages, and device breakdown over the last
+        ``days`` days — a dimensional slice, not a daily series (see
+        ``app/models/analytics_breakdown.py``). The Search Analytics API has
+        no server-side ``orderBy``, so rows are sorted by clicks here."""
+        today = date.today()
+        start = today - timedelta(days=days)
+        out: dict[str, list[dict]] = {}
+        for breakdown_type, dimension in _BREAKDOWNS.items():
+            url = f"{_BASE}/sites/{quote(site_url, safe='')}/searchAnalytics/query"
+            body = {
+                "startDate": start.isoformat(),
+                "endDate": today.isoformat(),
+                "dimensions": [dimension],
+                "rowLimit": 250,  # over-fetch; we sort and trim to the real top N ourselves
+            }
+            data = await self._request("POST", url, access_token, json=body)
+            rows = sorted(
+                (data.get("rows") or []), key=lambda r: r.get("clicks", 0) or 0, reverse=True
+            )
+            out[breakdown_type] = [_normalize_breakdown_row(row) for row in rows[:_BREAKDOWN_LIMIT]]
+        return out
 
     async def _request(
         self, method: str, url: str, access_token: str, json: dict | None = None
@@ -92,6 +119,22 @@ def _normalize(row: dict) -> dict:
         "conversions": 0,
         "leads": 0,
         "revenue": 0.0,
+    }
+
+
+def _normalize_breakdown_row(row: dict) -> dict:
+    """One search-analytics row -> ``{"dimension", "metrics"}`` (rank comes
+    from response order, assigned by the caller)."""
+    keys = row.get("keys") or []
+    dimension = keys[0] if keys else "(not set)"
+    return {
+        "dimension": dimension,
+        "metrics": {
+            "clicks": int(float(row.get("clicks", 0) or 0)),
+            "impressions": int(float(row.get("impressions", 0) or 0)),
+            "ctr": round(float(row.get("ctr", 0) or 0), 4),
+            "position": round(float(row.get("position", 0) or 0), 1),
+        },
     }
 
 

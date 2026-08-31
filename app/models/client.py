@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from app.models.ai import AiChat, AiSource
     from app.models.alert import Alert
     from app.models.analytics import AnalyticsDaily, StrategyVisual
+    from app.models.analytics_breakdown import AnalyticsBreakdown
     from app.models.assignment import ClientAssignment
     from app.models.campaign import Campaign
     from app.models.compliance import ComplianceDoc, ComplianceEntry
@@ -166,6 +167,9 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="client", cascade="all, delete-orphan"
     )
     platform_delivery_issues: Mapped[list[PlatformDeliveryIssue]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+    analytics_breakdowns: Mapped[list[AnalyticsBreakdown]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
     report_email_logs: Mapped[list[ReportEmailLog]] = relationship(
