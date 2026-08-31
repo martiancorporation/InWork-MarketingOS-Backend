@@ -367,6 +367,20 @@ class NotificationLevel(str, enum.Enum):
     critical = "critical"
 
 
+class ReportEmailStatus(str, enum.Enum):
+    """Outcome of one daily-report-email delivery attempt.
+
+    Stored as a plain indexed String column (the Alert/Campaign-status
+    precedent), not a native PG enum, so this operational set can grow
+    without a migration.
+    """
+
+    sent = "sent"
+    failed = "failed"
+    skipped_no_recipients = "skipped_no_recipients"
+    skipped_not_configured = "skipped_not_configured"
+
+
 class ConsistencyLevel(str, enum.Enum):
     """Severity of an onboarding cross-field consistency finding.
 

@@ -32,6 +32,8 @@ from app.schemas.automation import (
     AlertBrief,
     ClientDigest,
     ClientSweepRow,
+    DailyReportSweepResult,
+    DailyReportSweepRow,
     DigestList,
     SyncSweepResult,
     SyncSweepRow,
@@ -40,6 +42,8 @@ from app.schemas.automation import (
 from app.services.alert_service import AlertService
 from app.services.integration_service import _REAL_KEYS, IntegrationService
 from app.services.notification_service import NotificationService
+from app.services.report_email.service import ReportEmailService
+from app.services.report_email.timing import due_report_dates
 
 logger = logging.getLogger("app.scheduler")
 
@@ -195,6 +199,62 @@ class SchedulerService:
             connected_integrations=connected,
             pending_integrations=pending,
             generated_at=datetime.now(UTC),
+        )
+
+    # ---- daily report email sweep -------------------------------------- #
+
+    async def send_daily_reports_sweep(self) -> DailyReportSweepResult:
+        """Send the daily report email to every active client whose local
+        23:30 threshold has passed and hasn't been sent yet today (or, as a
+        bounded catch-up, yesterday). Isolated per client/date exactly like
+        ``sync_integrations_sweep`` — one client's failure never aborts the
+        sweep."""
+        rows: list[DailyReportSweepRow] = []
+        sent = skipped = failed = 0
+        now_utc = datetime.now(UTC)
+        for client in self._active_clients():
+            for report_date in due_report_dates(client.timezone, now_utc):
+                try:
+                    log = await ReportEmailService(self.db).send_daily_report(client, report_date)
+                except Exception as exc:  # isolate per-client/date failures
+                    logger.warning(
+                        "Daily report sweep failed: client=%s date=%s",
+                        client.id,
+                        report_date,
+                        exc_info=True,
+                    )
+                    failed += 1
+                    rows.append(
+                        DailyReportSweepRow(
+                            client_id=client.id,
+                            client_name=client.name,
+                            report_date=report_date.isoformat(),
+                            status="error",
+                            error=str(exc)[:300],
+                        )
+                    )
+                    continue
+                if log.status == "sent":
+                    sent += 1
+                elif log.status == "failed":
+                    failed += 1
+                else:
+                    skipped += 1
+                rows.append(
+                    DailyReportSweepRow(
+                        client_id=client.id,
+                        client_name=client.name,
+                        report_date=report_date.isoformat(),
+                        status=log.status,
+                        error=log.error,
+                    )
+                )
+        return DailyReportSweepResult(
+            clients=len(self._active_clients()),
+            sent=sent,
+            skipped=skipped,
+            failed=failed,
+            details=rows,
         )
 
 

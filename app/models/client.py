@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     )
     from app.models.recommendation import RecommendationAction
     from app.models.report import Report
+    from app.models.report_email_log import ReportEmailLog
     from app.models.strategy import Strategy
 
 
@@ -165,6 +166,9 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="client", cascade="all, delete-orphan"
     )
     platform_delivery_issues: Mapped[list[PlatformDeliveryIssue]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+    report_email_logs: Mapped[list[ReportEmailLog]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
 

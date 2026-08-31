@@ -44,6 +44,11 @@ class Integration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     account_label: Mapped[str | None] = mapped_column(String(200))
     external_account_id: Mapped[str | None] = mapped_column(String(160))
+    # Google Ads only: the manager (MCC) customer id to query *through*, for
+    # the accounts that need one — operator-entered at connect time (which
+    # real accounts need this is client-specific and not derivable from the
+    # API, so it isn't hardcoded anywhere). Unused by every other provider.
+    login_customer_id: Mapped[str | None] = mapped_column(String(40))
     scopes: Mapped[str | None] = mapped_column(Text)  # comma-separated OAuth scopes
     access_token_encrypted: Mapped[str | None] = mapped_column(Text)
     refresh_token_encrypted: Mapped[str | None] = mapped_column(Text)

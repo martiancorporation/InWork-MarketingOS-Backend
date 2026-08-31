@@ -6,6 +6,7 @@ from app.core.config.scheduler import SchedulerSettings
 from app.tasks.scheduler import (
     DIGEST_JOB,
     INTEGRATION_SYNC_JOB,
+    REPORT_EMAIL_JOB,
     SESSION_PURGE_JOB,
     WATCHDOG_JOB,
     build_jobs,
@@ -18,6 +19,7 @@ def test_defaults():
     assert jobs[INTEGRATION_SYNC_JOB].interval_seconds == 360 * 60
     assert jobs[DIGEST_JOB].interval_seconds == 1440 * 60
     assert jobs[SESSION_PURGE_JOB].interval_seconds == 60 * 60
+    assert jobs[REPORT_EMAIL_JOB].interval_seconds == 10 * 60
 
 
 def test_custom_intervals_are_honored():
@@ -25,14 +27,22 @@ def test_custom_intervals_are_honored():
         watchdog_interval_minutes=30,
         integration_sync_interval_minutes=120,
         digest_interval_minutes=720,
+        report_email_check_interval_minutes=5,
     )
     jobs = {j.name: j for j in build_jobs(s)}
     assert jobs[WATCHDOG_JOB].interval_seconds == 30 * 60  # 30-min loop
     assert jobs[INTEGRATION_SYNC_JOB].interval_seconds == 120 * 60
     assert jobs[DIGEST_JOB].interval_seconds == 720 * 60
+    assert jobs[REPORT_EMAIL_JOB].interval_seconds == 5 * 60
 
 
 def test_digest_can_be_disabled():
     jobs = {j.name for j in build_jobs(SchedulerSettings(digest_enabled=False))}
     assert DIGEST_JOB not in jobs
+    assert WATCHDOG_JOB in jobs
+
+
+def test_report_email_can_be_disabled():
+    jobs = {j.name for j in build_jobs(SchedulerSettings(report_email_enabled=False))}
+    assert REPORT_EMAIL_JOB not in jobs
     assert WATCHDOG_JOB in jobs

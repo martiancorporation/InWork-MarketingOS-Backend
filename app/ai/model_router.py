@@ -43,6 +43,7 @@ MID_TIER_FEATURES = frozenset(
         AiFeature.RECOMMENDATION,
         AiFeature.OPPORTUNITY,
         AiFeature.CONTENT_REVIEW,
+        AiFeature.REPORT_NARRATIVE,
     }
 )
 

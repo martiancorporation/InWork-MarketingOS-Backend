@@ -21,6 +21,7 @@ WATCHDOG_JOB = "kpi_watchdog"
 INTEGRATION_SYNC_JOB = "integration_sync"
 DIGEST_JOB = "daily_digest"
 SESSION_PURGE_JOB = "session_purge"
+REPORT_EMAIL_JOB = "daily_report_email"
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,14 @@ def build_jobs(settings: SchedulerSettings | None = None) -> list[ScheduledJob]:
                 "Build the per-client daily digest",
             )
         )
+    if s.report_email_enabled:
+        jobs.append(
+            ScheduledJob(
+                REPORT_EMAIL_JOB,
+                s.report_email_check_interval_minutes * 60,
+                "Send the daily report email to clients whose local 23:30 has passed",
+            )
+        )
     return jobs
 
 
@@ -93,6 +102,15 @@ async def run_job(name: str) -> None:
         elif name == SESSION_PURGE_JOB:
             deleted = service.purge_expired_sessions()
             logger.info("session purge: deleted %d expired session(s)", deleted)
+        elif name == REPORT_EMAIL_JOB:
+            sweep = await service.send_daily_reports_sweep()
+            logger.info(
+                "daily report email sweep: clients=%d sent=%d skipped=%d failed=%d",
+                sweep.clients,
+                sweep.sent,
+                sweep.skipped,
+                sweep.failed,
+            )
         else:
             logger.warning("Unknown scheduled job: %s", name)
     finally:

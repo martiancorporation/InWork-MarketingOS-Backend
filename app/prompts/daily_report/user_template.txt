@@ -1,0 +1,7 @@
+Client: {client_name}
+Report date: {report_date}
+
+Known facts:
+{facts}
+
+Return the daily report narrative JSON now.

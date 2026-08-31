@@ -26,6 +26,11 @@ anthropic==0.116.0
 # HTTP client — website scrape fallback for brand extraction (also the test client)
 httpx==0.28.1
 
+# IANA timezone database for zoneinfo — pinned so the daily-report-email
+# scheduler resolves Client.timezone correctly regardless of the host OS's
+# system tz database (slim Docker images often lack one).
+tzdata==2026.3
+
 # Object storage — Amazon S3 backend for the global file-upload system.
 boto3==1.43.46
 # Multipart form parsing — required by FastAPI for the proxied file-upload route.

@@ -15,6 +15,7 @@ from pydantic_settings import BaseSettings
 
 from app.core.config.ai import AISettings
 from app.core.config.app_settings import AppSettings
+from app.core.config.brevo import BrevoSettings
 from app.core.config.database import DatabaseSettings
 from app.core.config.demo import DemoSettings
 from app.core.config.integrations import IntegrationsSettings
@@ -27,6 +28,7 @@ from app.core.config.storage import StorageSettings
 
 class Settings(BaseSettings):
     app: AppSettings = Field(default_factory=AppSettings)
+    brevo: BrevoSettings = Field(default_factory=BrevoSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     ai: AISettings = Field(default_factory=AISettings)

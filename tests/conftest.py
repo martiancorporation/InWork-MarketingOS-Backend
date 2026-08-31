@@ -31,6 +31,10 @@ os.environ["META_REDIRECT_URI"] = ""
 os.environ["GOOGLE_CLIENT_ID"] = ""
 os.environ["GOOGLE_CLIENT_SECRET"] = ""
 os.environ["GOOGLE_REDIRECT_URI"] = ""
+# Brevo off so the daily-report-email suite never attempts a real network call;
+# tests that exercise the "configured" branch inject a fake BrevoClient instead.
+os.environ["BREVO_API_KEY"] = ""
+os.environ["BREVO_SENDER_EMAIL"] = ""
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-must-be-at-least-32-bytes-long-00")
 os.environ.setdefault("DATABASE_URL", "sqlite://")

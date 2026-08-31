@@ -29,7 +29,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.exceptions import BadRequestError, NotFoundError
+from app.core.exceptions import AppError, BadRequestError, NotFoundError
 from app.integrations.crypto import TokenCipher
 from app.integrations.google.ads import GoogleAdsClient
 from app.integrations.google.ga4 import Ga4Client
@@ -105,6 +105,23 @@ def _select_ad_account(accounts: list[dict], requested: str | None) -> dict | No
     if not accounts:
         return {}
     return None
+
+
+def _select_google_account(accounts: list[str], requested: str | None) -> str | None:
+    """Pick which Google account (Ads customer id / GA4 property / Search
+    Console site) to bind — same "never auto-bind" contract as
+    ``_select_ad_account``, just over a plain id list instead of dicts (Google's
+    discovery calls don't return display names).
+    """
+    if requested:
+        want = requested.replace("-", "")
+        for acc in accounts:
+            if acc.replace("-", "") == want:
+                return acc
+        raise BadRequestError(
+            "The requested Google account isn't accessible to the authorized user."
+        )
+    return None  # zero accounts, or one-or-more unpicked — always ask
 
 
 class IntegrationService:
@@ -229,13 +246,16 @@ class IntegrationService:
         state: str,
         *,
         ad_account_id: str | None = None,
+        login_customer_id: str | None = None,
     ) -> tuple[Integration, list[dict]]:
         """Finish OAuth: exchange the code, store the client's own token(s) encrypted.
 
         Returns ``(integration, pending_accounts)`` — ``pending_accounts`` is
-        non-empty only for Meta when several ad accounts were found and none
-        was picked yet; the connection still succeeds (no account bound), and
-        the caller should finish with ``select_account``.
+        non-empty when Meta or a Google-family provider found one or more
+        accounts and none was picked yet (never auto-bound, even when there's
+        only one — see ``_select_ad_account``/``_select_google_account``); the
+        connection still succeeds (no account bound), and the caller should
+        finish with ``select_account``.
         """
         self._require_real(key)
         if not self._verify_state(state, client_id, key):
@@ -249,7 +269,13 @@ class IntegrationService:
         elif key in _LINKEDIN_KEYS:
             await self._complete_linkedin(integration, code)
         else:
-            await self._complete_google(integration, key, code)
+            pending_accounts = await self._complete_google(
+                integration,
+                key,
+                code,
+                ad_account_id=ad_account_id,
+                login_customer_id=login_customer_id,
+            )
         integration.status = IntegrationStatus.connected
         integration.last_error = None
         self.db.commit()
@@ -262,27 +288,46 @@ class IntegrationService:
         return integration, pending_accounts
 
     async def select_account(
-        self, client_id: uuid.UUID, key: IntegrationKey, ad_account_id: str
+        self,
+        client_id: uuid.UUID,
+        key: IntegrationKey,
+        ad_account_id: str,
+        *,
+        login_customer_id: str | None = None,
     ) -> Integration:
-        """Finish binding a Meta ad account after ``oauth_complete`` came back
-        ambiguous. Uses the already-stored token — no new OAuth round-trip."""
-        if key not in _META_KEYS:
-            raise BadRequestError("Ad account selection is only needed for Meta.")
+        """Finish binding an ad account/property/site after ``oauth_complete``
+        came back ambiguous. Uses the already-stored token — no new OAuth
+        round-trip (the provider's ``code`` is single-use)."""
+        if key not in _META_KEYS and key not in _GOOGLE_KEYS:
+            raise BadRequestError("Ad account selection is not available for this provider.")
         integration = self.get(client_id, key)  # 404 if never configured
         if (
             integration.status != IntegrationStatus.connected
             or not integration.access_token_encrypted
         ):
             raise BadRequestError("Integration is not connected — run OAuth first.")
-        token = self.cipher.decrypt(integration.access_token_encrypted)
-        accounts = await self.meta_oauth.list_ad_accounts(token)
-        account = _select_ad_account(accounts, ad_account_id)
-        if not account:
-            raise BadRequestError(
-                "The requested Meta ad account isn't accessible to the authorized user."
-            )
-        integration.external_account_id = account.get("account_id") or account.get("id")
-        integration.account_label = account.get("name")
+        if key in _META_KEYS:
+            token = self.cipher.decrypt(integration.access_token_encrypted)
+            accounts = await self.meta_oauth.list_ad_accounts(token)
+            account = _select_ad_account(accounts, ad_account_id)
+            if not account:
+                raise BadRequestError(
+                    "The requested Meta ad account isn't accessible to the authorized user."
+                )
+            integration.external_account_id = account.get("account_id") or account.get("id")
+            integration.account_label = account.get("name")
+        else:
+            access = await self._google_access_token(integration)
+            accounts = await self._list_google_accounts(key, access)
+            account_id = _select_google_account(accounts, ad_account_id)
+            if account_id is None:
+                raise BadRequestError(
+                    "The requested Google account isn't accessible to the authorized user."
+                )
+            integration.external_account_id = account_id
+            integration.account_label = account_id
+            if key == IntegrationKey.google_ads:
+                integration.login_customer_id = login_customer_id
         self.db.commit()
         self.db.refresh(integration)
         # The account is only known now — this is the first point a sync can
@@ -324,11 +369,11 @@ class IntegrationService:
             or not integration.access_token_encrypted
         ):
             raise BadRequestError("Integration is not connected — run OAuth first.")
-        if key in _META_KEYS and not integration.external_account_id:
+        if (key in _META_KEYS or key in _GOOGLE_KEYS) and not integration.external_account_id:
             # Connected (token stored), but the ambiguous-accounts case was
             # never finished with select_account — nothing bound to query yet.
             raise BadRequestError(
-                "No ad account is bound yet — finish account selection before syncing."
+                "No account is bound yet — finish account selection before syncing."
             )
         try:
             rows, platform = await self._fetch_insights(integration, key)
@@ -393,7 +438,9 @@ class IntegrationService:
         # each pulling its own day-by-day series.
         access = await self._google_access_token(integration)
         if key == IntegrationKey.google_ads:
-            rows = await self.google_ads.fetch_daily_insights(access, account)
+            rows = await self.google_ads.fetch_daily_insights(
+                access, account, login_customer_id=integration.login_customer_id
+            )
         elif key == IntegrationKey.google_lsa:
             rows = await self.lsa_client.fetch_daily_insights(access, account)
         elif key == IntegrationKey.ga4:
@@ -433,36 +480,81 @@ class IntegrationService:
         return []
 
     async def _complete_google(
-        self, integration: Integration, key: IntegrationKey, code: str
-    ) -> None:
+        self,
+        integration: Integration,
+        key: IntegrationKey,
+        code: str,
+        *,
+        ad_account_id: str | None = None,
+        login_customer_id: str | None = None,
+    ) -> list[dict]:
+        """Returns the accounts list when ambiguous (see
+        ``_select_google_account``), else ``[]`` — the account (if any) is
+        already bound on ``integration``. Same "never auto-bind" contract as
+        ``_complete_meta``."""
         tokens = await self.google_oauth.exchange_code(code)
         access = tokens.get("access_token")
         if not access:
             raise BadRequestError("Google did not return an access token.")
         refresh = tokens.get("refresh_token")
-        account_id = await self._discover_google_account(key, access)
+        accounts = await self._list_google_accounts(key, access)
+        account_id = _select_google_account(accounts, ad_account_id)
         integration.access_token_encrypted = self.cipher.encrypt(access)
         integration.refresh_token_encrypted = (
             self.cipher.encrypt(refresh) if refresh else integration.refresh_token_encrypted
         )
         integration.token_expires_at = self._expiry(tokens.get("expires_in"))
+        integration.scopes = _GOOGLE_SCOPES[key]
+        if account_id is None:
+            integration.external_account_id = None
+            integration.account_label = None
+            return [{"id": a, "name": a} for a in accounts]
         integration.external_account_id = account_id
         integration.account_label = account_id
-        integration.scopes = _GOOGLE_SCOPES[key]
-
-    async def _discover_google_account(self, key: IntegrationKey, access: str) -> str | None:
-        """Bind the first account/property/site the token can read for ``key``."""
+        # Google Ads only: the operator supplies this per real account (which
+        # accounts sit under an MCC is client-specific, not derivable via the
+        # API) — see app/models/integration.py.
         if key == IntegrationKey.google_ads:
-            found = await self.google_ads.list_accessible_customers(access)
-        elif key == IntegrationKey.google_lsa:
-            found = await self.lsa_client.list_accessible_customers(access)
-        elif key == IntegrationKey.ga4:
-            found = await self.ga4_client.list_properties(access)
-        elif key == IntegrationKey.search_console:
-            found = await self.search_console.list_sites(access)
-        else:  # pragma: no cover - guarded by _require_real
-            found = []
-        return found[0] if found else None
+            integration.login_customer_id = login_customer_id
+        return []
+
+    async def _list_google_accounts(self, key: IntegrationKey, access: str) -> list[str]:
+        """Every account/property/site the token can read for ``key`` — no
+        picking here, see ``_select_google_account``."""
+        if key == IntegrationKey.google_ads:
+            return await self._list_google_ads_customers(access)
+        if key == IntegrationKey.google_lsa:
+            return await self.lsa_client.list_accessible_customers(access)
+        if key == IntegrationKey.ga4:
+            return await self.ga4_client.list_properties(access)
+        if key == IntegrationKey.search_console:
+            return await self.search_console.list_sites(access)
+        return []  # pragma: no cover - guarded by _require_real
+
+    async def _list_google_ads_customers(self, access: str) -> list[str]:
+        """``listAccessibleCustomers`` only returns accounts the OAuth user has
+        *direct* access to — a manager account's linked clients (e.g. a client
+        account we were invited into via the Google Ads UI, not via user-level
+        access) don't show up there at all. Expand every directly-accessible
+        account through ``customer_client`` so a manager-linked client account
+        is selectable too, not just the manager account itself."""
+        direct = await self.google_ads.list_accessible_customers(access)
+        ids = list(direct)
+        seen = set(direct)
+        for manager_id in direct:
+            try:
+                children = await self.google_ads.list_customer_clients(access, manager_id)
+            except AppError:
+                # Not every accessible account is a manager — a permission or
+                # query error here just means this one has no linked clients.
+                logger.info("No linked client accounts under %s (or not a manager).", manager_id)
+                continue
+            for child in children:
+                cid = child.get("id")
+                if cid and cid not in seen:
+                    seen.add(cid)
+                    ids.append(cid)
+        return ids
 
     async def _complete_linkedin(self, integration: Integration, code: str) -> None:
         tokens = await self.linkedin_oauth.exchange_code(code)

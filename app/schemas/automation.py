@@ -78,3 +78,22 @@ class ClientDigest(BaseModel):
 class DigestList(BaseModel):
     items: list[ClientDigest]
     total: int
+
+
+# ---- daily report email sweep ---- #
+
+
+class DailyReportSweepRow(BaseModel):
+    client_id: uuid.UUID
+    client_name: str
+    report_date: str
+    status: str
+    error: str | None = None
+
+
+class DailyReportSweepResult(BaseModel):
+    clients: int
+    sent: int
+    skipped: int
+    failed: int
+    details: list[DailyReportSweepRow] = []

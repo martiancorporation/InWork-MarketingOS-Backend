@@ -19,10 +19,11 @@ class IntegrationsSettings(BaseSettings):
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str | None = None
-    # Google Ads-specific: developer token (Google-approved) + manager (MCC) id.
+    # Google Ads-specific: developer token (Google-approved). The manager
+    # (MCC) id to send as login-customer-id is per-account, not global — see
+    # app/integrations/google/account_structure.py.
     google_developer_token: str | None = None
-    google_login_customer_id: str | None = None  # MCC customer id, digits only
-    google_ads_api_version: str = "v18"
+    google_ads_api_version: str = "v22"
 
     @property
     def google_configured(self) -> bool:

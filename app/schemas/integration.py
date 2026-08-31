@@ -27,29 +27,39 @@ class OAuthStartResponse(BaseModel):
 class OAuthCompleteRequest(StrictModel):
     """The ``code`` + ``state`` the provider redirected back with (via the SPA).
 
-    For Meta, optionally pin which **ad account** to bind (the one you collected
-    from the client, e.g. ``act_1234567890``). If omitted, the connection still
-    succeeds but comes back with ``available_accounts`` populated and no account
-    bound yet — never auto-picked, even when there's only one, since the
-    authorized user may have access to more than a single OAuth call surfaces.
-    Call ``oauth/select-account`` to finish picking one.
+    Optionally pin which **ad account / property / site** to bind (Meta:
+    ``act_1234567890``; Google: a customer id / property id / site url). If
+    omitted, the connection still succeeds but comes back with
+    ``available_accounts`` populated and no account bound yet — never
+    auto-picked, even when there's only one, since the authorized user may
+    have access to more than a single OAuth call surfaces. Call
+    ``oauth/select-account`` to finish picking one.
     """
 
     code: str = Field(min_length=1, max_length=2048)
     state: str = Field(min_length=1, max_length=1024)
-    ad_account_id: str | None = Field(None, max_length=160)  # Meta: which ad account
+    ad_account_id: str | None = Field(None, max_length=160)
+    # Google Ads only: the manager (MCC) customer id this account is queried
+    # through, when it needs one (the operator knows this per real client
+    # account — see the client's own account map, not derivable via the API).
+    login_customer_id: str | None = Field(None, max_length=40)
 
 
 class SelectAccountRequest(StrictModel):
-    """Finish binding a Meta ad account after ``oauth/complete`` came back
-    ambiguous (``available_accounts`` non-empty). Uses the already-stored
-    token — no new OAuth round-trip (the provider's ``code`` is single-use)."""
+    """Finish binding an ad account/property/site after ``oauth/complete``
+    came back ambiguous (``available_accounts`` non-empty). Uses the
+    already-stored token — no new OAuth round-trip (the provider's ``code``
+    is single-use)."""
 
     ad_account_id: str = Field(min_length=1, max_length=160)
+    # Google Ads only — see OAuthCompleteRequest.login_customer_id.
+    login_customer_id: str | None = Field(None, max_length=40)
 
 
-class MetaAdAccountOption(BaseModel):
-    """One ad account the authorized user could bind — offered when there's more than one."""
+class AdAccountOption(BaseModel):
+    """One ad account / property / site the authorized user could bind —
+    offered when there's more than one (or, per the never-auto-bind rule,
+    even when there's exactly one)."""
 
     id: str
     name: str | None = None
@@ -80,14 +90,15 @@ class IntegrationRead(ORMModel):
     status: IntegrationStatus
     account_label: str | None = None
     external_account_id: str | None = None
+    login_customer_id: str | None = None
     scopes: str | None = None
     last_sync_at: datetime | None = None
     last_error: str | None = None
     created_at: datetime
     updated_at: datetime
     # Populated only by oauth/complete when the authorized user has several
-    # Meta ad accounts and none was picked yet — see SelectAccountRequest.
-    available_accounts: list[MetaAdAccountOption] | None = None
+    # accounts and none was picked yet — see SelectAccountRequest.
+    available_accounts: list[AdAccountOption] | None = None
 
 
 class IntegrationListResponse(BaseModel):

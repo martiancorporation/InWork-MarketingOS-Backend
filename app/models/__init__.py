@@ -53,6 +53,7 @@ from app.models.platform_insight import (
 )
 from app.models.recommendation import RecommendationAction
 from app.models.report import Report
+from app.models.report_email_log import ReportEmailLog
 from app.models.strategy import Strategy
 from app.models.support_ticket import SupportTicket, SupportTicketAttachment, SupportTicketReply
 from app.models.upload import Upload
@@ -104,6 +105,7 @@ __all__ = [
     "PlatformRecommendation",
     "RecommendationAction",
     "Report",
+    "ReportEmailLog",
     "Strategy",
     "StrategyVisual",
     "SupportTicket",

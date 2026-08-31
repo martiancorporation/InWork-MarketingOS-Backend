@@ -87,6 +87,19 @@ class ExecutiveBrief(BaseModel):
     pending_actions: list[str] = []
 
 
+# ---- daily report narrative ---- #
+
+
+class DailyReportNarrative(BaseModel):
+    """The AI-written layer on top of the daily report's deterministic
+    numbers — never a source of numbers itself, only commentary on them."""
+
+    headline: str
+    highlights: list[str] = []
+    watch_outs: list[str] = []
+    recommended_actions: list[str] = []
+
+
 # ---- watchdog ---- #
 
 

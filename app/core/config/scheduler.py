@@ -37,3 +37,9 @@ class SchedulerSettings(BaseSettings):
 
     # Delete expired `user_sessions` rows (nothing else ever cleans them up).
     session_purge_interval_minutes: int = 60  # SCHEDULER_SESSION_PURGE_INTERVAL_MINUTES
+
+    # Daily report email — checks every client's local time against 23:30 and
+    # sends via Brevo once per client per day. Runs on a short interval (not a
+    # true cron) since this scheduler is tick-based; see app/services/report_email/timing.py.
+    report_email_enabled: bool = True  # SCHEDULER_REPORT_EMAIL_ENABLED
+    report_email_check_interval_minutes: int = 10  # SCHEDULER_REPORT_EMAIL_CHECK_INTERVAL_MINUTES

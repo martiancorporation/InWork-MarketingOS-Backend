@@ -19,17 +19,26 @@ Trade-off: this path does not expose star rating, review count, phone
 responsiveness rate, or ZIP-level breakdown — those live only in the Local
 Services API (the dead end above) or the separate Business Profile API (needs
 its own Google-side manual access approval).
+
+Never sends ``login-customer-id``: confirmed with the client that none of
+their LSA accounts are queried through an MCC (client GM Debanjan Dey,
+2026-08-25 email) — unlike ``GoogleAdsClient``, which does need it for a
+couple of specific real sub-accounts (operator-entered per connection, see
+``Integration.login_customer_id``).
 """
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import httpx
 
 from app.core.config import get_settings
 from app.core.exceptions import AppError
+
+logger = logging.getLogger("app.integrations.google.lsa")
 
 _BASE = "https://googleads.googleapis.com/{version}"
 _TIMEOUT = 30.0
@@ -37,7 +46,7 @@ _CAMPAIGN_GAQL = (
     "SELECT segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros "
     "FROM campaign "
     "WHERE campaign.advertising_channel_type = 'LOCAL_SERVICES' "
-    "AND segments.date DURING LAST_90_DAYS"
+    "AND segments.date BETWEEN '{start}' AND '{end}'"
 )
 # lead_charged=true — a lead InWork's client was actually billed for, as
 # opposed to a declined/disputed one that never counted as a real lead.
@@ -46,8 +55,17 @@ _LEADS_GAQL = (
     "local_services_lead.lead_charged, local_services_lead.lead_status, "
     "local_services_lead.creation_date_time "
     "FROM local_services_lead "
-    "WHERE segments.date DURING LAST_90_DAYS"
+    "WHERE segments.date BETWEEN '{start}' AND '{end}'"
 )
+
+
+def _date_range(days: int) -> tuple[str, str]:
+    """GAQL has no ``DURING LAST_N_DAYS`` for arbitrary N — only a fixed set of
+    named ranges. An explicit BETWEEN range is the only way to honor a
+    caller-supplied day count."""
+    end = date.today()
+    start = end - timedelta(days=days - 1)
+    return start.isoformat(), end.isoformat()
 
 
 class LsaClient:
@@ -55,14 +73,11 @@ class LsaClient:
         self._s = settings or get_settings().integrations
 
     def _headers(self, access_token: str) -> dict:
-        headers = {
+        return {
             "Authorization": f"Bearer {access_token}",
             "developer-token": self._s.google_developer_token or "",
             "Content-Type": "application/json",
         }
-        if self._s.google_login_customer_id:
-            headers["login-customer-id"] = self._s.google_login_customer_id
-        return headers
 
     async def list_accessible_customers(self, access_token: str) -> list[str]:
         """Customer ids (digits) this token can access — same discovery path
@@ -78,10 +93,13 @@ class LsaClient:
         dashboard chart needs, not a single rolled-up total."""
         cid = (customer_id or "").replace("-", "")
         base = f"{_BASE.format(version=self._s.google_ads_api_version)}/customers/{cid}/googleAds:searchStream"
+        start, end = _date_range(days)
         campaign_data = await self._request(
-            "POST", base, access_token, json={"query": _CAMPAIGN_GAQL}
+            "POST", base, access_token, json={"query": _CAMPAIGN_GAQL.format(start=start, end=end)}
         )
-        leads_data = await self._request("POST", base, access_token, json={"query": _LEADS_GAQL})
+        leads_data = await self._request(
+            "POST", base, access_token, json={"query": _LEADS_GAQL.format(start=start, end=end)}
+        )
         return _normalize(campaign_data, leads_data)
 
     async def _request(
@@ -102,6 +120,7 @@ class LsaClient:
         if resp.status_code >= 400 or (isinstance(payload, dict) and "error" in payload):
             err = payload.get("error") if isinstance(payload, dict) else None
             message = (err or {}).get("message") if isinstance(err, dict) else resp.text[:200]
+            logger.warning("Google Ads API (LSA) rejected %s %s: %s", method, url, payload)
             raise AppError(
                 f"Google Ads rejected the request: {message}",
                 code="lsa_error",
