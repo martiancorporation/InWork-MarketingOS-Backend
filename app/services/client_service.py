@@ -8,6 +8,7 @@ leaks.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -26,7 +27,7 @@ from app.schemas.document import DocumentListResponse, DocumentRead
 from app.services.audit_service import field_changes
 
 
-def _audit_value(value):
+def _audit_value(value: Any) -> Any:
     """JSON-safe representation of a field value for the audit diff."""
     return getattr(value, "value", value)
 

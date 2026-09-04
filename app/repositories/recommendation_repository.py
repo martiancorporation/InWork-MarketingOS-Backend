@@ -50,7 +50,22 @@ class RecommendationRepository(BaseRepository[RecommendationAction]):
         return list(rows), int(total)
 
     def latest_by_rec_key(self, client_id: uuid.UUID) -> dict[str, RecommendationAction]:
-        """Map each rec_key → its most recent decision for this client."""
+        """Map each rec_key → its most recent decision for this client.
+
+        On Postgres this is a single ``DISTINCT ON`` query instead of loading
+        the client's entire decision history into memory — the history is
+        append-only and grows forever, so scanning all of it on every
+        dashboard build doesn't stay cheap. SQLite (tests/tooling) has no
+        ``DISTINCT ON``, so it keeps the original in-memory approach.
+        """
+        if self.db.get_bind().dialect.name == "postgresql":
+            rows = self.db.scalars(
+                select(RecommendationAction)
+                .where(RecommendationAction.client_id == client_id)
+                .distinct(RecommendationAction.rec_key)
+                .order_by(RecommendationAction.rec_key, RecommendationAction.created_at.desc())
+            ).all()
+            return {row.rec_key: row for row in rows}
         latest: dict[str, RecommendationAction] = {}
         # rows come newest-first, so the first seen per rec_key is the latest.
         for row in self.list_for_client(client_id):

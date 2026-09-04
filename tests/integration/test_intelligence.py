@@ -61,10 +61,13 @@ def test_full_build_creates_profile_directives_and_flags(
     assert intel["status"] == "ready"
     assert intel["version"] == 1
     assert intel["profile"]["summary_md"]
-    # The "no AI-generated text" rule became a deterministic capability flag...
-    assert intel["profile"]["capability_flags"].get("ai_text_generation") is False
-    # ...and a mandatory directive.
-    assert any(d["tier"] == "mandatory" for d in intel["directives"])
+    # A newly-extracted mandatory (must/must_not) directive is held at
+    # pending_review — neither its capability flag nor the directive itself
+    # is active until an admin approves it (see test_intelligence.py's
+    # companion test for the post-approval state).
+    assert intel["profile"]["capability_flags"].get("ai_text_generation") is None
+    mandatory = [d for d in intel["directives"] if d["tier"] == "mandatory"]
+    assert mandatory and all(d["status"] == "pending_review" for d in mandatory)
 
     status = client.get(f"{API}/clients/{cid}/intelligence/status", headers=admin_headers)
     assert status.json()["status"] == "ready"
@@ -81,9 +84,82 @@ def test_context_endpoint_exposes_rules_and_retrieval(
         headers=admin_headers,
         params={"query": "what is the brand voice and tone"},
     ).json()
+    # The mandatory directive is pending_review, so it's excluded from both
+    # the enforced preamble and the capability-flag merge until approved.
+    assert "HARD RULES" not in ctx["preamble"]
+    assert ctx["capability_flags"].get("ai_text_generation") is None
+    assert len(ctx["retrieved"]) > 0  # RAG chunks were embedded + retrieved
+
+
+def test_approving_a_pending_directive_activates_its_capability_flag(
+    client: TestClient, admin_headers, db_session: Session
+) -> None:
+    cid = _onboard(client, admin_headers)
+    _build(db_session, cid)
+    intel = client.get(f"{API}/clients/{cid}/intelligence", headers=admin_headers).json()
+    pending = next(d for d in intel["directives"] if d["status"] == "pending_review")
+
+    resp = client.post(
+        f"{API}/clients/{cid}/directives/{pending['id']}/resolve",
+        headers=admin_headers,
+        params={"activate": "true"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "active"
+
+    ctx = client.get(f"{API}/clients/{cid}/context", headers=admin_headers).json()
     assert "HARD RULES" in ctx["preamble"]
     assert ctx["capability_flags"].get("ai_text_generation") is False
-    assert len(ctx["retrieved"]) > 0  # RAG chunks were embedded + retrieved
+
+
+def test_approved_directive_survives_a_rebuild(
+    client: TestClient, admin_headers, db_session: Session
+) -> None:
+    """An approved restriction must keep being enforced across rebuilds.
+
+    Rebuilds fire on routine edits (an onboarding autosave, a compliance
+    note). If the review gate re-gated an already-approved rule every time,
+    a client's "never generate AI text for us" would silently stop being
+    enforced until someone noticed and re-approved it — failing open in
+    exactly the direction that matters.
+    """
+    cid = _onboard(client, admin_headers)
+    _build(db_session, cid)  # v1
+    intel = client.get(f"{API}/clients/{cid}/intelligence", headers=admin_headers).json()
+    pending = next(d for d in intel["directives"] if d["status"] == "pending_review")
+    client.post(
+        f"{API}/clients/{cid}/directives/{pending['id']}/resolve",
+        headers=admin_headers,
+        params={"activate": "true"},
+    )
+
+    _build(db_session, cid, job_type="incremental")  # v2
+
+    ctx = client.get(f"{API}/clients/{cid}/context", headers=admin_headers).json()
+    assert "HARD RULES" in ctx["preamble"], "approved rule was dropped by the rebuild"
+    assert ctx["capability_flags"].get("ai_text_generation") is False
+
+
+def test_dismissed_directive_is_re_gated_not_silently_restored(
+    client: TestClient, admin_headers, db_session: Session
+) -> None:
+    """The mirror case: a directive an admin *dismissed* must not come back
+    as active on the next rebuild — it returns for a fresh decision."""
+    cid = _onboard(client, admin_headers)
+    _build(db_session, cid)
+    intel = client.get(f"{API}/clients/{cid}/intelligence", headers=admin_headers).json()
+    pending = next(d for d in intel["directives"] if d["status"] == "pending_review")
+    client.post(
+        f"{API}/clients/{cid}/directives/{pending['id']}/resolve",
+        headers=admin_headers,
+        params={"activate": "false"},
+    )
+
+    _build(db_session, cid, job_type="incremental")
+
+    intel2 = client.get(f"{API}/clients/{cid}/intelligence", headers=admin_headers).json()
+    mandatory = [d for d in intel2["directives"] if d["tier"] == "mandatory"]
+    assert mandatory and all(d["status"] != "active" for d in mandatory)
 
 
 # ---- incremental / versioning ----
@@ -156,7 +232,7 @@ def test_intelligence_requires_access(
 ) -> None:
     cid = _onboard(client, admin_headers)
     _build(db_session, cid)
-    _, outsider = make_user(email="outsider@test.com", password="passwordX1")
+    _, outsider = make_user(email="outsider@test.com", password="passwordX12345")
     # Unassigned non-admin cannot see the client → 404 (not 403).
     assert client.get(f"{API}/clients/{cid}/intelligence", headers=outsider).status_code == 404
 

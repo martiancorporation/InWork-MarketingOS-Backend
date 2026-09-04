@@ -58,8 +58,9 @@ Follow the existing vertical slice (model → migration → schema → repositor
 - The hermetic suite pins `APP_ENV=test` and disables audit, ai-usage, and rate limiting in
   `tests/conftest.py`. Keep new global side-effects behind an env flag so tests stay hermetic.
 - `SECRET_KEY` must be ≥32 chars and `CORS_ORIGINS` may not be `*` — config validation rejects both.
-- Token revocation is **not** implemented; JWTs are stateless until expiry. `UserSession` is unused
-  scaffolding — don't assume logout works.
+- Token revocation **is** implemented: login mints a `jti` + a matching `UserSession` row,
+  `POST /auth/logout` deletes it, and `get_current_user` rejects a `jti` whose session is gone.
+  A scheduled job purges expired sessions. See `app/services/auth_service.py`.
 
 ## Do not
 - Do not commit real secrets or point non-prod env files at the production database.

@@ -21,6 +21,11 @@ redacted) so a write is never logged with an empty ``changes``.
 ``settings.app.max_request_body_bytes`` before it reaches routing/parsing —
 defense in depth so a client can't force the app to buffer an arbitrarily large
 body in memory just by omitting or lying about ``Content-Length``.
+
+``SecurityHeadersMiddleware`` stamps HSTS / ``X-Content-Type-Options`` /
+``Referrer-Policy`` / ``X-Frame-Options`` onto every response. It is registered
+outermost so those headers are present even on responses generated above the
+app (the 413 above, and Starlette's own 500 handler).
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ import uuid
 import jwt
 from sqlalchemy.orm import Session
 from starlette.requests import Request
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.request_context import (
     begin_audit_changes,
@@ -300,6 +305,51 @@ def _changes_from_body(body: bytes) -> dict | None:
         for key, value in data.items()
     }
     return created_changes(safe)
+
+
+_SECURITY_HEADERS: list[tuple[bytes, bytes]] = [
+    (b"strict-transport-security", b"max-age=63072000; includeSubDomains"),
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"x-frame-options", b"DENY"),
+]
+
+
+class SecurityHeadersMiddleware:
+    """Add a fixed set of security response headers to every HTTP response.
+
+    This is a JSON API with no auth gate in front of `/docs`/`/openapi.json`
+    besides being disabled in production, so these are cheap, standard
+    defenses rather than a response to a specific attack: HSTS (protocol
+    downgrade), `X-Content-Type-Options` (MIME-sniffing on file-download
+    redirects), `Referrer-Policy`, and `X-Frame-Options`.
+
+    Registered outermost (``app/main.py``) so the headers are also present on
+    responses the inner layers never produce — Starlette's own 500 handler and
+    ``BodySizeLimitMiddleware``'s 413. Existing headers are preserved and only
+    added when absent, so a proxy that already sets a policy still wins.
+
+    HSTS is emitted unconditionally; per RFC 6797 §7.2 a browser ignores it
+    over plain HTTP, so local dev is unaffected.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def _send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                present = {name.lower() for name, _ in headers}
+                headers.extend((n, v) for n, v in _SECURITY_HEADERS if n not in present)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, _send)
 
 
 class _BodyTooLarge(Exception):

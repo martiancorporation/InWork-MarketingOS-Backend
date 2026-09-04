@@ -33,9 +33,9 @@ venv:  ## create the .venv virtualenv (Python 3.11+)
 	$(BOOTSTRAP_PYTHON) -m venv .venv
 	@echo "Created .venv using $(BOOTSTRAP_PYTHON)"
 
-install: venv  ## create the venv (if needed) and install dependencies
+install: venv  ## create the venv (if needed) and install dependencies (incl. dev/test)
 	$(VENV_BIN)/python -m pip install --upgrade pip
-	$(VENV_BIN)/python -m pip install -r requirements.txt
+	$(VENV_BIN)/python -m pip install -r requirements-dev.txt
 
 migration:  ## create a migration: make migration m="add users table"
 	$(ALEMBIC) revision --autogenerate -m "$(m)"

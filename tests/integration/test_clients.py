@@ -211,6 +211,28 @@ def test_list_pagination(client: TestClient, admin_headers: dict):
     assert body["page_size"] == 1
 
 
+def test_list_pagination_rejects_page_zero(client: TestClient, admin_headers: dict):
+    resp = client.get(f"{API}/clients?page=0&page_size=20", headers=admin_headers)
+    assert resp.status_code == 422
+
+
+def test_list_pagination_rejects_page_size_zero(client: TestClient, admin_headers: dict):
+    resp = client.get(f"{API}/clients?page=1&page_size=0", headers=admin_headers)
+    assert resp.status_code == 422
+
+
+def test_list_pagination_rejects_page_size_over_100(client: TestClient, admin_headers: dict):
+    resp = client.get(f"{API}/clients?page=1&page_size=101", headers=admin_headers)
+    assert resp.status_code == 422
+
+
+def test_list_pagination_empty_result_set_shape(client: TestClient, admin_headers: dict):
+    resp = client.get(f"{API}/clients?page=1&page_size=20", headers=admin_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"items": [], "total": 0, "page": 1, "page_size": 20}
+
+
 def test_list_search_and_status_filter(client: TestClient, admin_headers: dict):
     _onboard(client, admin_headers, name="Acme Co", industry="Home & Garden")
     _onboard(client, admin_headers, name="Northwind", industry="DevTools")

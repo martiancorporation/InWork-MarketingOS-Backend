@@ -32,7 +32,7 @@ def test_full_rbac_process_flow(client: TestClient, admin_headers: dict):
         json={
             "name": "Team User",
             "email": "user@inwork.com",
-            "password": "userPass1",
+            "password": "userPass1234",
             "role": "user",
         },
     )
@@ -46,7 +46,7 @@ def test_full_rbac_process_flow(client: TestClient, admin_headers: dict):
 
     # 4. User logs in.
     login = client.post(
-        f"{API}/auth/login", json={"email": "user@inwork.com", "password": "userPass1"}
+        f"{API}/auth/login", json={"email": "user@inwork.com", "password": "userPass1234"}
     )
     assert login.status_code == 200
     user = _auth(login.json()["access_token"])

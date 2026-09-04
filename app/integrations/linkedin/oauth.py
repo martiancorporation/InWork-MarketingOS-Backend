@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app.core.config import get_settings
-from app.core.exceptions import AppError, ServiceUnavailableError
+from app.core.exceptions import AppError, ProviderAuthError, ServiceUnavailableError
 
 _AUTH = "https://www.linkedin.com/oauth/v2/authorization"
 _TOKEN = "https://www.linkedin.com/oauth/v2/accessToken"  # noqa: S105 - endpoint, not a secret
@@ -93,11 +93,9 @@ class LinkedInOAuthClient:
         payload = _safe_json(resp)
         if resp.status_code >= 400 or "error" in payload:
             message = payload.get("error_description") or payload.get("error") or resp.text[:200]
-            raise AppError(
-                f"LinkedIn rejected the token request: {message}",
-                code="linkedin_oauth_error",
-                status_code=400,
-            )
+            # Any failure on the token endpoint means the auth code or refresh
+            # token itself was rejected — always a reconnect, never transient.
+            raise ProviderAuthError(f"LinkedIn rejected the token request: {message}")
         return payload
 
 

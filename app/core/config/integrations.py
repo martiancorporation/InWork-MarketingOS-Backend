@@ -45,7 +45,11 @@ class IntegrationsSettings(BaseSettings):
     linkedin_client_secret: str | None = None
     linkedin_redirect_uri: str | None = None
     # LinkedIn Marketing API version (monthly, YYYYMM) + ads OAuth scopes.
-    linkedin_api_version: str = "202401"
+    # LinkedIn only supports each monthly version for ~1 year — this default
+    # rots; verify it against LinkedIn's currently-supported versions
+    # (https://learn.microsoft.com/linkedin/marketing/versioning) rather than
+    # trusting it blindly, and bump it periodically either way.
+    linkedin_api_version: str = "202506"
     linkedin_scopes: str = "r_ads,r_ads_reporting"
 
     @property

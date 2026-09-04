@@ -22,7 +22,9 @@ from app.models.enums import IntegrationKey
 from app.schemas.analytics_breakdown import AnalyticsBreakdownListResponse
 from app.services.analytics_breakdown_service import AnalyticsBreakdownService
 
-router = APIRouter(prefix="/clients/{client_id}/analytics-breakdowns", tags=["analytics-breakdowns"])
+router = APIRouter(
+    prefix="/clients/{client_id}/analytics-breakdowns", tags=["analytics-breakdowns"]
+)
 
 
 @router.get(

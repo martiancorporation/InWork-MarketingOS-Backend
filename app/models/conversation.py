@@ -107,7 +107,7 @@ class MessageAttachment(UUIDPrimaryKeyMixin, Base):
         GUID, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True
     )
     document_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+        GUID, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     message: Mapped[Message] = relationship(back_populates="attachments")

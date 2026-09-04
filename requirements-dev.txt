@@ -1,0 +1,14 @@
+# Dev/test-only dependencies — never installed into the production image
+# (Dockerfile installs only requirements.txt). Layered on top of it so a
+# single `pip install -r requirements-dev.txt` gets both.
+#
+# Pinned for the same reason runtime deps are: an unpinned `ruff` can turn CI
+# red on unchanged code the day it releases (its formatter output is
+# version-sensitive), which is indistinguishable from a real regression.
+-r requirements.txt
+
+pytest==9.1.1
+pytest-cov==7.1.0          # `pytest --cov=app` (config in pyproject.toml)
+ruff==0.15.21              # lint + format — CI runs `ruff format --check`
+mypy==2.3.0                # advisory type check (see pyproject.toml)
+pip-audit==2.10.1          # dependency vulnerability scan

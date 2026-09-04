@@ -122,13 +122,13 @@ def admin_headers(client: TestClient, db_session: Session) -> dict[str, str]:
         User(
             email="admin@test.com",
             name="Admin",
-            password_hash=hash_password("adminPass1"),
+            password_hash=hash_password("adminPass1234"),
             role=UserRole.admin,
         )
     )
     db_session.commit()
     resp = client.post(
-        f"{API}/auth/login", json={"email": "admin@test.com", "password": "adminPass1"}
+        f"{API}/auth/login", json={"email": "admin@test.com", "password": "adminPass1234"}
     )
     assert resp.status_code == 200, resp.text
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
@@ -142,7 +142,7 @@ def make_user(
 
     def _make(
         email: str = "user@test.com",
-        password: str = "userPass1",
+        password: str = "userPass1234",
         role: str = "user",
         name: str = "Normal User",
     ) -> tuple[dict, dict]:

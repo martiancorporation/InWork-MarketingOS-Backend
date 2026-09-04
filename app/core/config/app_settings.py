@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ipaddress
+from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.config.env import ENV_FILES
@@ -29,10 +31,13 @@ class AppSettings(BaseSettings):
     # cost). Disabled in the hermetic test suite (recorder uses a real session).
     ai_usage_enabled: bool = True
     # In-process rate limiting on sensitive routes (login, paid-AI). Disabled in
-    # the test suite so repeated logins don't trip it. NOTE: limits are
-    # per-process — with multiple workers, use a shared store (Redis) for exact
-    # global limits; this is a per-worker first line of defense.
+    # the test suite so repeated logins don't trip it. Per-worker by default
+    # (RATE_LIMIT_BACKEND=memory) — with multiple gunicorn workers that's an
+    # effective limit of times*workers, not times. Set RATE_LIMIT_BACKEND=redis
+    # + REDIS_URL for an exact, shared-across-workers limit.
     rate_limit_enabled: bool = True
+    rate_limit_backend: Literal["memory", "redis"] = "memory"
+    redis_url: str = ""  # required when rate_limit_backend=redis
     # Comma-separated CIDR blocks of proxies/load-balancers allowed to set
     # X-Forwarded-For (e.g. your ALB/nginx subnet). Empty (the default) means no
     # hop is trusted, so the rate limiter always keys on the raw socket peer —
@@ -78,3 +83,25 @@ class AppSettings(BaseSettings):
         except ValueError:
             return False
         return any(addr in net for net in self.trusted_proxy_networks)
+
+    @model_validator(mode="after")
+    def _require_redis_url_for_redis_backend(self) -> AppSettings:
+        """Fail at startup, not on the first login.
+
+        Selecting the Redis limiter without a URL (or without the optional
+        `redis` package installed) would otherwise raise inside the limiter on
+        every request to `/auth/login` and the paid-AI routes — a 500 on the
+        auth path, discovered in production.
+        """
+        if self.rate_limit_backend != "redis":
+            return self
+        if not self.redis_url.strip():
+            raise ValueError("REDIS_URL is required when RATE_LIMIT_BACKEND=redis.")
+        try:
+            import redis  # noqa: F401
+        except ImportError as exc:  # pragma: no cover - depends on the install
+            raise ValueError(
+                "RATE_LIMIT_BACKEND=redis requires the 'redis' package — "
+                "uncomment it in requirements.txt and reinstall."
+            ) from exc
+        return self

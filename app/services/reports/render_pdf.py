@@ -21,21 +21,15 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.services.reports.content import (
+    SECTION_TITLES as _SECTION_TITLES,
+)
+from app.services.reports.content import (
     CampaignRow,
     ChannelRow,
     PlatformCampaignRow,
     PlatformIssueRow,
     ReportContent,
 )
-
-_SECTION_TITLES = {
-    "campaign_performance": "Campaign Performance",
-    "ga_overview": "Channel Overview",
-    "top_ads": "Top-Performing Campaigns",
-    "went_wrong_right": "What Went Right / Wrong",
-    "platform_campaigns": "Live Campaigns",
-    "platform_recommendations": "Recommendations & Delivery Issues",
-}
 
 _TABLE_STYLE = TableStyle(
     [

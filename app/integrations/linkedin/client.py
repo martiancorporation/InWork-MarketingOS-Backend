@@ -14,7 +14,7 @@ from datetime import date, timedelta
 import httpx
 
 from app.core.config import get_settings
-from app.core.exceptions import AppError
+from app.core.exceptions import AppError, ProviderAuthError
 
 _REST = "https://api.linkedin.com/rest"
 _TIMEOUT = 30.0
@@ -79,6 +79,10 @@ class LinkedInClient:
         payload = _safe_json(resp)
         if resp.status_code >= 400 or "error" in payload or "serviceErrorCode" in payload:
             message = payload.get("message") or resp.text[:200]
+            # 401/403 means the token is dead or the ad account was un-shared
+            # — a reconnect, not a retry. See ProviderAuthError.
+            if resp.status_code in (401, 403):
+                raise ProviderAuthError(f"LinkedIn rejected our credentials: {message}")
             raise AppError(
                 f"LinkedIn rejected the request: {message}",
                 code="linkedin_error",

@@ -34,7 +34,7 @@ def test_logout_requires_authentication(client: TestClient):
 
 def test_logout_only_revokes_that_session(client: TestClient, admin_headers: dict):
     # A second, independent login for the same user (admin_headers created one).
-    token2 = _login(client, "admin@test.com", "adminPass1")
+    token2 = _login(client, "admin@test.com", "adminPass1234")
     headers2 = {"Authorization": f"Bearer {token2}"}
 
     # Revoke the first session.

@@ -22,6 +22,7 @@ INTEGRATION_SYNC_JOB = "integration_sync"
 DIGEST_JOB = "daily_digest"
 SESSION_PURGE_JOB = "session_purge"
 REPORT_EMAIL_JOB = "daily_report_email"
+AUDIT_LOG_PURGE_JOB = "audit_log_purge"
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,11 @@ def build_jobs(settings: SchedulerSettings | None = None) -> list[ScheduledJob]:
             SESSION_PURGE_JOB,
             s.session_purge_interval_minutes * 60,
             "Delete expired auth sessions (user_sessions)",
+        ),
+        ScheduledJob(
+            AUDIT_LOG_PURGE_JOB,
+            s.audit_log_purge_interval_minutes * 60,
+            "Delete audit_log rows past the retention window",
         ),
     ]
     if s.digest_enabled:
@@ -80,7 +86,7 @@ async def run_job(name: str) -> None:
     try:
         service = SchedulerService(session)
         if name == WATCHDOG_JOB:
-            result = service.run_watchdog_sweep()
+            result = await service.run_watchdog_sweep()
             logger.info(
                 "watchdog sweep: clients=%d opened=%d updated=%d resolved=%d",
                 result.clients,
@@ -102,6 +108,9 @@ async def run_job(name: str) -> None:
         elif name == SESSION_PURGE_JOB:
             deleted = service.purge_expired_sessions()
             logger.info("session purge: deleted %d expired session(s)", deleted)
+        elif name == AUDIT_LOG_PURGE_JOB:
+            deleted = service.purge_expired_audit_logs()
+            logger.info("audit log purge: deleted %d row(s) past retention", deleted)
         elif name == REPORT_EMAIL_JOB:
             sweep = await service.send_daily_reports_sweep()
             logger.info(

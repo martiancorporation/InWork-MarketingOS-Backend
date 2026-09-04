@@ -21,17 +21,17 @@ from app.ai.features import AiFeature
 from app.core.config import get_settings
 
 # Data-gathering / extraction / classification steps — negligible quality risk
-# on the cheap tier. "intelligence.build" is the shared usage label
-# SummaryAgent + DirectivesAgent already use (app/services/intelligence/orchestrator.py).
+# on the cheap tier. CLIENT_SUMMARY / CLIENT_DIRECTIVES are the two steps of
+# the intelligence build (app/services/intelligence/orchestrator.py).
 CHEAP_TIER_FEATURES = frozenset(
     {
         AiFeature.BRAND_EXTRACTION,
         AiFeature.CONSISTENCY_CHECK,
         AiFeature.MISSING_INFO,
         AiFeature.CLIENT_SUMMARY,
+        AiFeature.CLIENT_DIRECTIVES,
         AiFeature.WATCHDOG,
         AiFeature.HEALTH_SCORE,
-        "intelligence.build",
     }
 )
 

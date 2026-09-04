@@ -8,7 +8,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, computed_field, field_validator
 
 from app.models.enums import ClientPipelineStage, ClientStatus, ContactSide
-from app.schemas.common import ORMModel, validate_timezone
+from app.schemas.common import MAX_LONG_LINE, ORMModel, StrictModel, validate_timezone
 from app.utils.download_link import key_permalink, upload_permalink
 
 # Total wizard steps — mirrors ``OnboardingService.FINAL_STEP``. Kept here so the
@@ -81,22 +81,22 @@ class ClientListResponse(BaseModel):
     page_size: int
 
 
-class ClientUpdate(BaseModel):
+class ClientUpdate(StrictModel):
     """Partial client update (admin) — change status or basic profile fields.
 
     Only the fields present in the request body are applied.
     """
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    business_type: str | None = None
-    industry: str | None = None
-    website: str | None = None
-    location: str | None = None
-    language: str | None = None
+    business_type: str | None = Field(default=None, max_length=120)
+    industry: str | None = Field(default=None, max_length=120)
+    website: str | None = Field(default=None, max_length=255)
+    location: str | None = Field(default=None, max_length=160)
+    language: str | None = Field(default=None, max_length=60)
     #: IANA zone (e.g. ``America/New_York``). Reporting is bucketed by the
     #: client's local day, so this is editable after onboarding too.
-    timezone: str | None = None
-    markets: str | None = None
+    timezone: str | None = Field(default=None, max_length=60)
+    markets: str | None = Field(default=None, max_length=MAX_LONG_LINE)
     status: ClientStatus | None = None
 
     @field_validator("timezone")

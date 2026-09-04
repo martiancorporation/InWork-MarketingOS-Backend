@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app.core.config import get_settings
-from app.core.exceptions import AppError, ServiceUnavailableError
+from app.core.exceptions import AppError, ProviderAuthError, ServiceUnavailableError
 
 _AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN = "https://oauth2.googleapis.com/token"  # noqa: S105 - endpoint URL, not a secret
@@ -89,11 +89,10 @@ class GoogleOAuthClient:
         payload = _safe_json(resp)
         if resp.status_code >= 400 or "error" in payload:
             message = payload.get("error_description") or payload.get("error") or resp.text[:200]
-            raise AppError(
-                f"Google rejected the token request: {message}",
-                code="google_oauth_error",
-                status_code=400,
-            )
+            # Any failure on the token endpoint means the grant itself (auth
+            # code or refresh token) was rejected — e.g. "invalid_grant" after
+            # the user revoked access. Always a reconnect, never transient.
+            raise ProviderAuthError(f"Google rejected the token request: {message}")
         return payload
 
 

@@ -24,11 +24,18 @@ SDK is imported lazily so the app runs without it installed / without a key.
 from __future__ import annotations
 
 import time
+from functools import partial
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+
+import anyio
 
 from app.ai.usage import AiUsageContext, record_usage, usage_from_message
 from app.core.config import get_settings
 from app.core.exceptions import ServiceUnavailableError
+
+if TYPE_CHECKING:  # the SDK itself is imported lazily at runtime — see _new_client
+    from anthropic import AsyncAnthropic
 
 # Latest web-fetch server tool (Opus 4.8/4.7/4.6, Sonnet 5/4.6). No beta header.
 _WEB_FETCH_TOOL_TYPE = "web_fetch_20260209"
@@ -40,12 +47,23 @@ class AnthropicClient:
     def __init__(self, context: AiUsageContext | None = None) -> None:
         self._settings = get_settings().ai
         self._context = context  # optional instance-wide attribution default
+        self._client: AsyncAnthropic | None = None  # lazily built, then reused — see _new_client
 
     @property
     def is_configured(self) -> bool:
         return self._settings.is_configured
 
     def _new_client(self):
+        """Return this instance's ``AsyncAnthropic``, building it once.
+
+        Every ``app/ai/*`` caller constructs its own ``AnthropicClient`` per
+        request/agent instance, so instance-level caching (rather than a
+        process-global singleton) is enough to stop paying a fresh TCP/TLS
+        handshake on every single Messages call within that instance's
+        lifetime.
+        """
+        if self._client is not None:
+            return self._client
         if not self.is_configured:
             raise ServiceUnavailableError("AI provider is not configured.")
         try:
@@ -54,17 +72,22 @@ class AnthropicClient:
             raise ServiceUnavailableError("Anthropic SDK is not installed.") from exc
         # timeout bounds each request; max_retries lets the SDK retry transient
         # 429/5xx with exponential backoff (no unbounded hangs, no manual loop).
-        return AsyncAnthropic(
+        self._client = AsyncAnthropic(
             api_key=self._settings.api_key,
             timeout=self._settings.timeout_seconds,
             max_retries=self._settings.max_retries,
         )
+        return self._client
 
     async def _invoke(self, create_kwargs: dict, *, operation: str, context: AiUsageContext | None):
         """Run one Messages call and record its token usage + cost.
 
         Records on success (with real usage) and on failure (status=error, zero
-        usage) so every attempt is accounted for.
+        usage) so every attempt is accounted for. ``record_usage`` does a
+        synchronous DB commit, so it's offloaded to a worker thread
+        (``anyio.to_thread.run_sync``) rather than called directly — every
+        caller of this method is ``async``, and calling it inline would block
+        the event loop on every single AI call, platform-wide.
         """
         client = self._new_client()
         ctx = context or self._context
@@ -73,26 +96,38 @@ class AnthropicClient:
         try:
             message = await client.messages.create(**create_kwargs)
         except Exception as exc:
-            record_usage(
+            await anyio.to_thread.run_sync(
+                partial(
+                    record_usage,
+                    context=ctx,
+                    provider=_PROVIDER,
+                    model=model,
+                    operation=operation,
+                    usage=None,
+                    status="error",
+                    error=str(exc)[:500],
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                )
+            )
+            # Translate to a typed error rather than leaking the raw Anthropic
+            # SDK exception type past this client — every current caller
+            # already wraps this in a broad `except Exception` and degrades
+            # gracefully, so this is a safety net for the contract, not a
+            # behavior change: one missed `except Exception` would otherwise
+            # surface an unhandled SDK exception as a raw 500.
+            raise ServiceUnavailableError(f"AI provider request failed: {exc}") from exc
+        await anyio.to_thread.run_sync(
+            partial(
+                record_usage,
                 context=ctx,
                 provider=_PROVIDER,
                 model=model,
                 operation=operation,
-                usage=None,
-                status="error",
-                error=str(exc)[:500],
+                usage=usage_from_message(message),
+                status="success",
+                request_id=getattr(message, "id", None),
                 duration_ms=int((time.perf_counter() - started) * 1000),
             )
-            raise
-        record_usage(
-            context=ctx,
-            provider=_PROVIDER,
-            model=model,
-            operation=operation,
-            usage=usage_from_message(message),
-            status="success",
-            request_id=getattr(message, "id", None),
-            duration_ms=int((time.perf_counter() - started) * 1000),
         )
         return message
 

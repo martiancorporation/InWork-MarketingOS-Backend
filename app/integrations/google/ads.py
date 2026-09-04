@@ -20,7 +20,7 @@ from datetime import date, timedelta
 import httpx
 
 from app.core.config import get_settings
-from app.core.exceptions import AppError
+from app.core.exceptions import AppError, ProviderAuthError
 
 logger = logging.getLogger("app.integrations.google.ads")
 
@@ -261,6 +261,10 @@ class GoogleAdsClient:
             # CUSTOMER_NOT_ENABLED). Log the full body so a real failure is
             # diagnosable from the server logs, not by guessing.
             logger.warning("Google Ads API rejected %s %s: %s", method, url, payload)
+            # 401/403 here means the access token is dead or the account was
+            # un-shared — a reconnect, not a retry. See ProviderAuthError.
+            if resp.status_code in (401, 403):
+                raise ProviderAuthError(f"Google Ads rejected our credentials: {message}")
             raise AppError(
                 f"Google Ads rejected the request: {message}",
                 code="google_ads_error",

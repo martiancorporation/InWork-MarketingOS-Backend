@@ -100,6 +100,7 @@ Key design properties:
 | `app/prompts/` | Versioned prompt templates, grouped by feature. |
 | `app/db/` | Engine, session factory, declarative base, mixins, portable column types. |
 | `app/worker.py` | Standalone intelligence worker (`python -m app.worker`). |
+| `app/scheduler.py` | Standalone scheduler process (`python -m app.scheduler`) — drives the platform-wide sweeps in `app/tasks/scheduler.py` on a fixed cadence. |
 | `migrations/` | Alembic migrations. |
 | `tests/` | `unit/` and `integration/` suites + `conftest.py`. |
 | `scripts/` | Operational scripts (local startup, seeding, docker entrypoint). |
@@ -157,7 +158,7 @@ and launches the server at http://localhost:8000/docs. Idempotent.
 ```bash
 cd Backend
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt                        # or: make install
+pip install -r requirements-dev.txt                    # or: make install
 
 cp .env.local.example .env.local
 python -c "import secrets; print(secrets.token_urlsafe(48))"   # paste into SECRET_KEY
@@ -174,7 +175,7 @@ Open **http://localhost:8000/docs** (Swagger UI) or `GET /health` for liveness.
 # Log in as the seeded admin (returns an access token)
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@inwork.com","password":"12345678"}'
+  -d '{"email":"admin@inwork.com","password":"ChangeMe123456"}'
 
 # List clients (paginated)
 curl "http://localhost:8000/api/v1/clients?page=1&page_size=20" \
@@ -231,9 +232,13 @@ default 20) and return `{ items, total, page, page_size }`. Large collections
 (calendar, analytics series) that previously returned everything are now
 bounded — request larger `page_size` or page through.
 
-**Rate limiting:** in-process sliding-window limiter on `/auth/login` and the
-paid-AI routes (`RATE_LIMIT_ENABLED=true`). It is **per-worker** — for exact
-global limits behind multiple workers, back it with a shared store (Redis).
+**Rate limiting:** sliding-window limiter on `/auth/login` and the paid-AI
+routes (`RATE_LIMIT_ENABLED=true`), plus a per-account backstop on login that
+counts failed attempts only. It is **per-worker by default**
+(`RATE_LIMIT_BACKEND=memory`), so behind N gunicorn workers the effective limit
+is `times × N`; set `RATE_LIMIT_BACKEND=redis` + `REDIS_URL` (and uncomment
+`redis` in `requirements.txt`) for one exact limit shared across every worker
+and replica.
 
 ---
 
@@ -242,7 +247,11 @@ global limits behind multiple workers, back it with a shared store (Redis).
 - **Authentication:** JWT bearer tokens (HS256), issued by `POST /auth/login`.
   Passwords are hashed with **SHA-256 pre-hash → bcrypt** (avoids bcrypt's
   72-byte truncation). Login returns a generic error for both unknown email and
-  wrong password (no user enumeration).
+  wrong password, and runs the bcrypt compare either way (against a fixed dummy
+  hash for an unknown email) so the response time doesn't leak which one it was
+  (no user enumeration, by response content *or* timing). Login mints a unique
+  `jti` + a matching `UserSession` row so the token is revocable server-side;
+  `POST /auth/logout` deletes it, and a scheduled job purges expired sessions.
 - **Roles:** `admin`, `manager`, `user`.
 - **Object-level authorization (anti-IDOR):** admins see everything; non-admins
   see only clients **assigned** to them. An inaccessible client returns **404,
@@ -256,10 +265,6 @@ global limits behind multiple workers, back it with a shared store (Redis).
   traversal defeated), private objects + short-lived presigned URLs, SSE-at-rest.
 - **Auditing:** the `AuditMiddleware` records every API request (actor, action,
   status, duration, ip) on its own session; failures never break the request.
-
-> **Not yet implemented:** server-side token revocation / logout. Tokens are
-> stateless until expiry (`ACCESS_TOKEN_EXPIRE_MINUTES`). The `UserSession` model
-> exists as scaffolding for a future refresh-token/revocation flow.
 
 ---
 
@@ -401,6 +406,7 @@ docker run --env-file .env.production -e RUN_MIGRATIONS=1 -p 8000:8000 inwork-ap
 | `make lint` / `make format` | Ruff check / format |
 | `make seed` | Create the initial admin (idempotent) |
 | `python -m app.worker` | Run the intelligence worker |
+| `python -m app.scheduler` | Run the platform-wide sweep scheduler |
 
 All commands accept `APP_ENV=<env>`.
 

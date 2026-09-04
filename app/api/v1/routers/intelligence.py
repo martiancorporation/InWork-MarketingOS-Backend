@@ -5,7 +5,7 @@
 - ``GET  /clients/{id}/intelligence/versions``   — version history
 - ``GET  /clients/{id}/intelligence/versions/{v}`` — a specific version
 - ``POST /clients/{id}/intelligence/rebuild``    — force a full rebuild (admin)
-- ``POST /clients/{id}/directives/{did}/resolve``— resolve a conflict (admin)
+- ``POST /clients/{id}/directives/{did}/resolve``— approve/dismiss a directive (admin)
 - ``GET  /clients/{id}/context``                 — debug: what agents receive
 
 Every route is client-access-scoped (admin or assigned user); an inaccessible
@@ -90,7 +90,7 @@ def rebuild(
 @router.post(
     "/{client_id}/directives/{directive_id}/resolve",
     response_model=DirectiveRead,
-    summary="Resolve a conflicted directive (admin)",
+    summary="Approve or dismiss a directive awaiting review, or resolve a conflict (admin)",
 )
 def resolve_directive(
     client_id: uuid.UUID,
@@ -98,8 +98,16 @@ def resolve_directive(
     admin: AdminUser,
     db: DbSession,
     client: RequireClient,
-    activate: bool = Query(True, description="Keep active (true) or dismiss (false)"),
+    activate: bool = Query(True, description="Activate (true) or dismiss (false)"),
 ) -> DirectiveRead:
+    """Decide a directive that isn't being enforced yet.
+
+    Two cases land here: a ``pending_review`` rule (a newly-extracted hard
+    rule or capability flag awaiting sign-off — see
+    ``IntelligenceOrchestrator._gate_new_restrictions``) and a ``conflicted``
+    one (two opposing rules). Activating makes it binding and recompiles the
+    profile's capability flags; dismissing supersedes it.
+    """
     return IntelligenceService(db).resolve_directive(client, directive_id, activate)
 
 

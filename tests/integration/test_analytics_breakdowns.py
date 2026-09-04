@@ -143,9 +143,7 @@ def test_connect_syncs_ga4_breakdowns(
     assert by_type["channel"][0].dimension == "Organic Search"
     assert by_type["device"][0].dimension == "mobile"
 
-    listed = client.get(
-        f"{API}/clients/{cid}/analytics-breakdowns/ga4", headers=admin_headers
-    )
+    listed = client.get(f"{API}/clients/{cid}/analytics-breakdowns/ga4", headers=admin_headers)
     assert listed.status_code == 200, listed.text
     assert listed.json()["total"] == 4  # 2 top_page + 1 channel + 1 device
 
@@ -159,9 +157,7 @@ def test_connect_syncs_search_console_breakdowns(
     client, admin_headers: dict, db_session: Session, google_configured, fake_search_console_full
 ):
     cid = _client_id(client, admin_headers)
-    _connect(
-        client, admin_headers, cid, "search_console", "https://tonysgarageinc.com/"
-    )
+    _connect(client, admin_headers, cid, "search_console", "https://tonysgarageinc.com/")
 
     client_uuid = uuid.UUID(cid)
     rows = db_session.scalars(
@@ -197,3 +193,20 @@ def test_resync_replaces_not_duplicates(
         select(AnalyticsBreakdown).where(AnalyticsBreakdown.client_id == client_uuid)
     ).all()
     assert len(rows) == 4  # re-synced in place, not duplicated
+
+
+def test_unassigned_user_gets_404(client, admin_headers: dict, make_user):
+    cid = _client_id(client, admin_headers)
+    _user, user_headers = make_user()
+    resp = client.get(f"{API}/clients/{cid}/analytics-breakdowns/ga4", headers=user_headers)
+    assert resp.status_code == 404
+
+
+def test_assigned_user_can_read(client, admin_headers: dict, make_user):
+    cid = _client_id(client, admin_headers)
+    user, user_headers = make_user()
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
+    resp = client.get(f"{API}/clients/{cid}/analytics-breakdowns/ga4", headers=user_headers)
+    assert resp.status_code == 200, resp.text

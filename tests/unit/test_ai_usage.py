@@ -126,9 +126,13 @@ def test_complete_records_usage(monkeypatch):
 
 
 def test_failed_call_records_error_event(monkeypatch):
+    from app.core.exceptions import ServiceUnavailableError
+
     captured: list[dict] = []
     c = _make_client(monkeypatch, captured, raise_exc=RuntimeError("boom"))
-    with pytest.raises(RuntimeError):
+    # The raw SDK exception is translated to a typed error rather than
+    # leaking past the client — see AnthropicClient._invoke.
+    with pytest.raises(ServiceUnavailableError, match="boom"):
         asyncio.run(
             c.complete(system="s", prompt="p", context=AiUsageContext(feature="test.feature"))
         )

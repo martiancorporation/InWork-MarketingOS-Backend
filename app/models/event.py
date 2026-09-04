@@ -131,7 +131,7 @@ class EventAsset(UUIDPrimaryKeyMixin, Base):
         GUID, ForeignKey("marketing_events.id", ondelete="CASCADE"), nullable=False, index=True
     )
     document_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+        GUID, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

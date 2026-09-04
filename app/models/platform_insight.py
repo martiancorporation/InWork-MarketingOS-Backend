@@ -134,9 +134,7 @@ class PlatformMetricDaily(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "platform_metrics_daily"
     __table_args__ = (
-        UniqueConstraint(
-            "client_id", "integration_key", "entity_type", "entity_id", "date"
-        ),
+        UniqueConstraint("client_id", "integration_key", "entity_type", "entity_id", "date"),
         Index("ix_platform_metrics_daily_client_date", "client_id", "date"),
     )
 

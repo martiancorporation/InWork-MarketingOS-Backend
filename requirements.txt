@@ -19,6 +19,13 @@ psycopg[binary]==3.3.4
 PyJWT==2.13.0
 bcrypt==5.0.0
 email-validator==2.3.0
+# Fernet (AES-128-CBC + HMAC) encryption for stored OAuth tokens at rest.
+cryptography==50.0.0
+# Shared rate-limit store (OPTIONAL — the in-process default needs no
+# dependency). Uncomment + pin to enable RATE_LIMIT_BACKEND=redis, which gives
+# every gunicorn worker/replica the same exact limit instead of each
+# enforcing it independently (see app/core/rate_limit.py).
+# redis==5.2.1
 
 # AI (optional at runtime — the app degrades gracefully without it)
 anthropic==0.116.0
@@ -42,7 +49,7 @@ pgvector==0.5.0
 # Not pinned/installed by default; uncomment and pin to enable Voyage retrieval.
 # voyageai==0.3.6
 # Document text extraction (optional per type — each degrades gracefully).
-pypdf==6.14.2
+pypdf==6.16.1
 python-docx==1.2.0
 python-pptx==1.0.2
 openpyxl==3.1.5
@@ -53,7 +60,3 @@ reportlab==5.0.0
 # `playwright install chromium` (run_local.sh and the Dockerfile handle this);
 # without the browser the app degrades gracefully to the httpx scrape.
 playwright==1.61.0
-
-# Testing
-pytest==9.1.1
-cryptography==49.0.0

@@ -1,7 +1,11 @@
 # app/utils/
 
-Small, generic, dependency-free helpers usable across the app (datetime
-formatting, slug generation, pagination helpers).
+Small, generic helpers usable across the app: `slug.py` (slug generation),
+`download_link.py` (HMAC-signed upload links), `streaming.py` (SSE helpers),
+and the two SSRF-guarded fetchers — `web.py` (httpx scrape) and `render.py`
+(headless-Chromium render).
 
-If a helper needs config, the database, or an external service, it probably
-belongs in `services/` or `core/` — not here.
+Most of these are dependency-free; the fetchers deliberately are not (httpx,
+Playwright, and a settings read), because the SSRF guard has to live with the
+code that makes the request. If a helper needs the database or orchestrates
+business rules, it belongs in `services/` — not here.

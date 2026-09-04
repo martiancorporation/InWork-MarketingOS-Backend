@@ -19,7 +19,7 @@ from app.core.security import hash_password
 from app.integrations.brevo.client import BrevoSendError
 from app.models.assignment import ClientAssignment
 from app.models.client import Client
-from app.models.enums import ReportEmailStatus, UserRole
+from app.models.enums import ClientStatus, ReportEmailStatus, UserRole
 from app.models.report_email_log import ReportEmailLog
 from app.models.user import User
 from app.services.report_email.service import ReportEmailService
@@ -64,6 +64,43 @@ def _user_row(db: Session, *, role: UserRole = UserRole.user, active: bool = Tru
     db.commit()
     db.refresh(u)
     return u
+
+
+def test_send_daily_reports_sweep_isolates_per_client_failure(
+    db_session: Session, monkeypatch
+) -> None:
+    """One client's ``send_daily_report`` raising unexpectedly must not abort
+    the sweep for every other active client — the scenario the scheduler's
+    ``send_daily_reports_sweep`` docstring claims but was never actually
+    exercised."""
+    from app.services.scheduler_service import SchedulerService
+
+    good = _client_row(db_session)
+    good.status = ClientStatus.active.value
+    bad = _client_row(db_session)
+    bad.status = ClientStatus.active.value
+    db_session.commit()
+
+    original = ReportEmailService.send_daily_report
+
+    async def flaky(self, client, report_date):
+        if client.id == bad.id:
+            raise RuntimeError("simulated crash")
+        return await original(self, client, report_date)
+
+    monkeypatch.setattr(ReportEmailService, "send_daily_report", flaky)
+
+    result = asyncio.run(SchedulerService(db_session).send_daily_reports_sweep())
+
+    bad_rows = [r for r in result.details if r.client_id == bad.id]
+    good_rows = [r for r in result.details if r.client_id == good.id]
+    assert bad_rows, "the failing client should still get a result row"
+    assert all(r.status == "error" and "simulated crash" in r.error for r in bad_rows)
+    assert result.failed >= len(bad_rows)
+    # The other client's own report was still attempted — not skipped because
+    # of the first client's crash.
+    assert good_rows
+    assert all(r.status != "error" for r in good_rows)
 
 
 def test_no_recipients_is_skipped_not_failed(db_session: Session):

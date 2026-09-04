@@ -14,7 +14,7 @@ def test_admin_creates_user(client: TestClient, admin_headers: dict):
         json={
             "name": "Manager",
             "email": "mgr@test.com",
-            "password": "mgrPass123",
+            "password": "mgrPass123456",
             "role": "manager",
         },
     )
@@ -27,7 +27,7 @@ def test_create_user_defaults_to_role_user(client: TestClient, admin_headers: di
     resp = client.post(
         f"{API}/users",
         headers=admin_headers,
-        json={"name": "Plain", "email": "plain@test.com", "password": "plainPass1"},
+        json={"name": "Plain", "email": "plain@test.com", "password": "plainPass1234"},
     )
     assert resp.status_code == 201
     assert resp.json()["role"] == "user"
@@ -38,7 +38,7 @@ def test_create_duplicate_email_409(client: TestClient, admin_headers: dict, mak
     resp = client.post(
         f"{API}/users",
         headers=admin_headers,
-        json={"name": "Dup", "email": "dup@test.com", "password": "dupPass123"},
+        json={"name": "Dup", "email": "dup@test.com", "password": "dupPass123456"},
     )
     assert resp.status_code == 409
 
@@ -58,7 +58,7 @@ def test_create_user_weak_password_422(client: TestClient, admin_headers: dict):
         client.post(
             f"{API}/users",
             headers=admin_headers,
-            json={"name": "A", "email": "b@test.com", "password": "onlyletters"},
+            json={"name": "A", "email": "b@test.com", "password": "onlylettersnodigits"},
         ).status_code
         == 422
     )
@@ -69,7 +69,7 @@ def test_create_user_invalid_email_422(client: TestClient, admin_headers: dict):
         client.post(
             f"{API}/users",
             headers=admin_headers,
-            json={"name": "A", "email": "not-an-email", "password": "goodPass1"},
+            json={"name": "A", "email": "not-an-email", "password": "goodPass1234"},
         ).status_code
         == 422
     )
@@ -82,7 +82,7 @@ def test_create_user_invalid_role_422(client: TestClient, admin_headers: dict):
         json={
             "name": "Bad",
             "email": "bad@test.com",
-            "password": "badPass123",
+            "password": "badPass123456",
             "role": "superuser",
         },
     )
@@ -125,7 +125,7 @@ def test_non_admin_cannot_manage_users(client: TestClient, make_user):
         client.post(
             f"{API}/users",
             headers=user_headers,
-            json={"name": "X", "email": "x@test.com", "password": "xPass1234"},
+            json={"name": "X", "email": "x@test.com", "password": "xPass12345678"},
         ).status_code
         == 403
     )

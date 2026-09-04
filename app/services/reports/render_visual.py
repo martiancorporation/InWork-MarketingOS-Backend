@@ -11,8 +11,12 @@ it's just correctness against a stray ``<``/``&`` in a client or campaign name.
 
 from __future__ import annotations
 
+import asyncio
 from html import escape
 
+from app.services.reports.content import (
+    SECTION_TITLES as _SECTION_TITLES,
+)
 from app.services.reports.content import (
     CampaignRow,
     ChannelRow,
@@ -22,15 +26,6 @@ from app.services.reports.content import (
 )
 
 _LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
-
-_SECTION_TITLES = {
-    "campaign_performance": "Campaign Performance",
-    "ga_overview": "Channel Overview",
-    "top_ads": "Top-Performing Campaigns",
-    "went_wrong_right": "What Went Right / Wrong",
-    "platform_campaigns": "Live Campaigns",
-    "platform_recommendations": "Recommendations & Delivery Issues",
-}
 
 _STYLE = """
 body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #18181B; margin: 32px; }
@@ -192,11 +187,18 @@ def _build_html(content: ReportContent) -> str:
 </body></html>"""
 
 
+# Bounds how many Chromium processes this can spawn at once — each launch is
+# a genuine OS process (~100+MB RSS, a few hundred ms to start), so concurrent
+# visual-report requests with no cap would spin up an unbounded number of them.
+_MAX_CONCURRENT_BROWSERS = 3
+_browser_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_BROWSERS)
+
+
 async def render_visual(content: ReportContent) -> bytes:
     from playwright.async_api import async_playwright
 
     html = _build_html(content)
-    async with async_playwright() as pw:
+    async with _browser_semaphore, async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True, args=_LAUNCH_ARGS)
         try:
             page = await browser.new_page(viewport={"width": 1000, "height": 800})

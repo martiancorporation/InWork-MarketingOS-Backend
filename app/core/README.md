@@ -7,8 +7,9 @@ single feature.
 - `security.py` — password hashing & token helpers.
 - `logging.py` — logging setup.
 - `exceptions.py` — custom exception types + FastAPI error handlers.
-- `middleware.py` — app-wide middleware registration.
-- `dependencies.py` — shared FastAPI dependencies (e.g. current user, DB session).
-- `constants.py` — fixed, non-secret constants (enums, defaults).
+- `middleware.py` — app-wide middleware (audit trail, request body cap, security headers).
+- `request_context.py` — per-request context (request id, audit change set).
+- `rate_limit.py` — sliding-window limiter (in-memory or Redis-backed).
+- `pagination.py` — the shared `Pagination` dependency for list endpoints.
 
 Rule: never hardcode a secret or environment value here — read it via `config`.

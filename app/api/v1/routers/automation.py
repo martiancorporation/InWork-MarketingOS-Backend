@@ -10,6 +10,14 @@
 These are platform-wide operations, so they require an administrator. The same
 service methods are driven on a cadence by the scheduler process
 (``python -m app.scheduler``).
+
+Each sweep processes up to ``SCHEDULER_SWEEP_CONCURRENCY`` clients at once
+(``SchedulerService``), which keeps these requests well under gunicorn's
+graceful timeout at realistic client counts. If the active-client count grows
+enough that even bounded-concurrency sweeps risk that timeout, convert these
+routes to return ``202 Accepted`` and run the sweep via ``BackgroundTasks``
+(mirroring the existing async ``BrandJob`` pattern) rather than raising the
+concurrency further.
 """
 
 from __future__ import annotations
@@ -18,10 +26,11 @@ import uuid
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api.deps import AdminUser, DbSession
 from app.core.exceptions import NotFoundError
+from app.core.rate_limit import RateLimit
 from app.models.client import Client
 from app.schemas.automation import (
     ClientDigest,
@@ -35,18 +44,26 @@ from app.services.scheduler_service import SchedulerService
 
 router = APIRouter(prefix="/automation", tags=["automation"])
 
+# These sweeps are the most expensive routes in the app — the report-email
+# one makes an Anthropic call *and* sends real email per client. Admin-only
+# is an authorization control, not a cost control: a retry loop or a
+# double-click shouldn't be able to bill twice or double-send to clients.
+_SWEEP_RATE_LIMIT = RateLimit("automation_sweep", times=2, seconds=300)
+
 
 @router.post(
     "/watchdog/run",
+    dependencies=[Depends(_SWEEP_RATE_LIMIT)],
     response_model=WatchdogSweepResult,
     summary="Run the KPI watchdog across all active clients (admin)",
 )
-def run_watchdog(admin: AdminUser, db: DbSession) -> WatchdogSweepResult:
-    return SchedulerService(db).run_watchdog_sweep()
+async def run_watchdog(admin: AdminUser, db: DbSession) -> WatchdogSweepResult:
+    return await SchedulerService(db).run_watchdog_sweep()
 
 
 @router.post(
     "/integrations/sync",
+    dependencies=[Depends(_SWEEP_RATE_LIMIT)],
     response_model=SyncSweepResult,
     summary="Sync every connected integration across active clients (admin)",
 )
@@ -72,6 +89,7 @@ def client_digest(client_id: uuid.UUID, admin: AdminUser, db: DbSession) -> Clie
 
 @router.post(
     "/report-email/run",
+    dependencies=[Depends(_SWEEP_RATE_LIMIT)],
     response_model=DailyReportSweepResult,
     summary="Run the daily report email sweep across all active clients now (admin)",
 )

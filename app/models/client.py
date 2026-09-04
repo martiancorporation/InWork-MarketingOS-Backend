@@ -94,6 +94,16 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL")
     )
 
+    # ---- Relationships -------------------------------------------------
+    # Almost everything else in this schema hangs off Client and cascades on
+    # delete (ondelete="CASCADE") down this whole block: reports, campaigns,
+    # conversations, analytics, AI chats, the dashboard snapshot — a client's
+    # entire history. No client-delete feature exists today, so this cascade
+    # is presently unreachable except via a direct DB/admin action. If one is
+    # ever added: do NOT wire it straight to `db.delete(client)`. There is no
+    # soft-delete convention anywhere in this schema, so a hard delete here is
+    # a single irreversible action with zero recovery path — require a
+    # soft-delete/archive flag or a mandatory data export first.
     brand_colors: Mapped[list[ClientBrandColor]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )

@@ -42,7 +42,7 @@ class OAuthCompleteRequest(StrictModel):
     # Google Ads only: the manager (MCC) customer id this account is queried
     # through, when it needs one (the operator knows this per real client
     # account — see the client's own account map, not derivable via the API).
-    login_customer_id: str | None = Field(None, max_length=40)
+    login_customer_id: str | None = Field(None, max_length=40, pattern=r"^[0-9-]+$")
 
 
 class SelectAccountRequest(StrictModel):
@@ -53,7 +53,7 @@ class SelectAccountRequest(StrictModel):
 
     ad_account_id: str = Field(min_length=1, max_length=160)
     # Google Ads only — see OAuthCompleteRequest.login_customer_id.
-    login_customer_id: str | None = Field(None, max_length=40)
+    login_customer_id: str | None = Field(None, max_length=40, pattern=r"^[0-9-]+$")
 
 
 class AdAccountOption(BaseModel):

@@ -88,7 +88,7 @@ class SupportTicketAttachment(UUIDPrimaryKeyMixin, Base):
     )
     # The global upload system (app/models/upload.py) — not a per-feature copy.
     upload_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("uploads.id", ondelete="CASCADE"), nullable=False
+        GUID, ForeignKey("uploads.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     ticket: Mapped[SupportTicket] = relationship(back_populates="attachments")

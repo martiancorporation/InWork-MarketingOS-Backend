@@ -20,7 +20,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.ai.dashboard_signals import DashboardSignals, GoalMetric
 from app.ai.executive_brief import ExecutiveBriefAgent
@@ -309,6 +309,24 @@ class DashboardService:
                 rec.decision = RecommendationDecisionRead.model_validate(action)
 
     def _signals(self, client: Client) -> DashboardSignals:
+        # Eager-load the 4 collections this method reads instead of letting
+        # each one lazy-load individually on first touch below — `client` is
+        # already in this session's identity map (fetched by the router's
+        # ClientService.get_client), so this re-fetch populates the same
+        # object rather than creating a duplicate.
+        client = (
+            self.db.scalars(
+                select(Client)
+                .where(Client.id == client.id)
+                .options(
+                    selectinload(Client.integrations),
+                    selectinload(Client.compliance_entries),
+                    selectinload(Client.campaigns),
+                    selectinload(Client.platforms),
+                )
+            ).first()
+            or client
+        )
         integrations = list(client.integrations)
         connected = sum(1 for i in integrations if i.status == IntegrationStatus.connected)
         pending = len(integrations) - connected

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.sql import Select
 
 from app.models.audit import AuditLog
@@ -43,3 +44,18 @@ class AuditRepository(BaseRepository[AuditLog]):
             ).all()
         )
         return rows, total
+
+    def purge_older_than(self, cutoff: datetime) -> int:
+        """Bulk-delete every audit-log row older than ``cutoff``. Caller
+        commits. This table is append-only and grows one row per API request
+        forever with no other cleanup path — see
+        ``SchedulerService.purge_expired_audit_logs``."""
+        stmt = (
+            delete(AuditLog)
+            .where(AuditLog.created_at < cutoff)
+            .execution_options(synchronize_session=False)
+        )
+        result = self.db.execute(stmt)
+        # `rowcount` is on CursorResult, which a DML execute() returns, but
+        # the stubs type this as the base Result — hence the narrow ignore.
+        return result.rowcount or 0  # type: ignore[attr-defined]

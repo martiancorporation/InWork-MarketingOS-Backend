@@ -10,13 +10,16 @@ cost) — it summarizes what already exists.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+import anyio
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.exceptions import NotFoundError
 from app.models.client import Client
 from app.models.enums import (
@@ -26,8 +29,10 @@ from app.models.enums import (
     NotificationLevel,
 )
 from app.repositories.alert_repository import AlertRepository
+from app.repositories.audit_repository import AuditRepository
 from app.repositories.campaign_repository import CampaignRepository
 from app.repositories.session_repository import SessionRepository
+from app.schemas.alert import AlertEvaluateResult
 from app.schemas.automation import (
     AlertBrief,
     ClientDigest,
@@ -64,82 +69,145 @@ class SchedulerService:
             ).all()
         )
 
+    def _new_session(self) -> Session:
+        """A fresh, independent ``Session`` on the same engine as ``self.db``.
+
+        Used by the concurrent sweeps below so each in-flight client gets its
+        own session — a ``Session`` must never be shared across concurrently
+        running tasks. Binding to ``self.db``'s own engine (rather than a
+        separate ``get_session_factory()``) means this works identically in
+        production (the real app engine) and in tests (the per-test SQLite
+        engine the ``db_session`` fixture creates) — the same pattern
+        ``tests/integration/test_worker.py`` uses for the intelligence worker.
+        """
+        return Session(bind=self.db.get_bind())
+
+    def _sweep_semaphore(self) -> asyncio.Semaphore:
+        """Bounds how many clients a sweep processes at once.
+
+        Postgres only. Every sweep gives each in-flight client its own
+        ``Session``, which on SQLite all share one StaticPool connection —
+        interleaving transactions on a single DBAPI connection (and, for the
+        watchdog, from several OS threads). Only a real connection pool
+        supports that, so tests and local tooling run these strictly
+        sequentially.
+        """
+        concurrency = (
+            get_settings().scheduler.sweep_concurrency
+            if self.db.get_bind().dialect.name == "postgresql"
+            else 1
+        )
+        return asyncio.Semaphore(concurrency)
+
     # ---- KPI watchdog sweep ------------------------------------------- #
 
-    def run_watchdog_sweep(self) -> WatchdogSweepResult:
-        rows: list[ClientSweepRow] = []
-        opened = updated = resolved = 0
-        for client in self._active_clients():
+    async def run_watchdog_sweep(self) -> WatchdogSweepResult:
+        """Evaluate every active client's alerts, ``sweep_concurrency`` at a time.
+
+        Each concurrent unit of work opens its own DB session — a SQLAlchemy
+        ``Session`` is not safe to share across concurrently-running tasks, even
+        on a single-threaded event loop, since two tasks could otherwise
+        interleave mid-flush. ``AlertService.evaluate`` is itself synchronous
+        (DB-bound, not network-bound), so it runs in a worker thread via
+        ``anyio.to_thread.run_sync`` — that's what actually lets N clients'
+        evaluations overlap instead of blocking the loop one at a time.
+        """
+        clients = self._active_clients()
+        semaphore = self._sweep_semaphore()
+
+        def _evaluate_one(client_id: uuid.UUID, client_name: str) -> AlertEvaluateResult | None:
+            """Returns ``None`` if this client failed — logged here, in the
+            worker thread, where the traceback is still live."""
+            session = self._new_session()
             try:
-                result = AlertService(self.db).evaluate(client.id)  # commits per client
-            except Exception:
-                logger.warning("Watchdog failed for client %s", client.id, exc_info=True)
-                continue
-            opened += result.opened
-            updated += result.updated
-            resolved += result.auto_resolved
-            if result.opened or result.updated:
-                # Surface it to the people tagged to this project (the "red dot").
-                open_count = result.opened + result.updated
-                NotificationService(self.db).notify_client_team(
-                    client.id,
-                    kind="alert",
-                    level=NotificationLevel.warning,
-                    title=f"{client.name}: {open_count} KPI alert(s) need attention",
-                    body="Open the alerts view to acknowledge or resolve them.",
-                    link=f"/clients/{client.id}/alerts",
-                    rec_key=f"watchdog:{client.id}",
-                )
-            rows.append(
-                ClientSweepRow(
-                    client_id=client.id,
-                    client_name=client.name,
-                    opened=result.opened,
-                    updated=result.updated,
-                    auto_resolved=result.auto_resolved,
-                )
+                result = AlertService(session).evaluate(client_id)  # commits per client
+                if result.opened or result.updated:
+                    open_count = result.opened + result.updated
+                    NotificationService(session).notify_client_team(
+                        client_id,
+                        kind="alert",
+                        level=NotificationLevel.warning,
+                        title=f"{client_name}: {open_count} KPI alert(s) need attention",
+                        body="Open the alerts view to acknowledge or resolve them.",
+                        link=f"/clients/{client_id}/alerts",
+                        rec_key=f"watchdog:{client_id}",
+                    )
+                return result
+            except Exception:  # isolate per-client failures
+                logger.warning("Watchdog failed for client %s", client_id, exc_info=True)
+                return None
+            finally:
+                session.close()
+
+        async def _one(client: Client) -> ClientSweepRow | None:
+            async with semaphore:
+                result = await anyio.to_thread.run_sync(_evaluate_one, client.id, client.name)
+            if result is None:
+                return None
+            return ClientSweepRow(
+                client_id=client.id,
+                client_name=client.name,
+                opened=result.opened,
+                updated=result.updated,
+                auto_resolved=result.auto_resolved,
             )
+
+        results = await asyncio.gather(*(_one(c) for c in clients))
+        rows = [r for r in results if r is not None]
         return WatchdogSweepResult(
             clients=len(rows),
-            opened=opened,
-            updated=updated,
-            auto_resolved=resolved,
+            opened=sum(r.opened for r in rows),
+            updated=sum(r.updated for r in rows),
+            auto_resolved=sum(r.auto_resolved for r in rows),
             per_client=rows,
         )
 
     # ---- integration sync sweep --------------------------------------- #
 
     async def sync_integrations_sweep(self) -> SyncSweepResult:
-        details: list[SyncSweepRow] = []
-        synced = failed = 0
-        for client in self._active_clients():
-            service = IntegrationService(self.db)
-            listing = service.list(client.id)
-            for item in listing.items:
-                if item.status != IntegrationStatus.connected or item.key not in _REAL_KEYS:
-                    continue
+        """Sync every connected integration, ``sweep_concurrency`` clients at a
+        time. Each concurrent client gets its own DB session (see
+        ``run_watchdog_sweep`` for why); per-integration failures are still
+        isolated exactly as before."""
+        clients = self._active_clients()
+        semaphore = self._sweep_semaphore()
+
+        async def _one(client: Client) -> list[SyncSweepRow]:
+            rows: list[SyncSweepRow] = []
+            async with semaphore:
+                session = self._new_session()
                 try:
-                    await service.sync(client.id, item.key)
-                    synced += 1
-                    ok, err = True, None
-                except Exception as exc:  # isolate per-integration failures
-                    logger.warning(
-                        "Sync failed: client=%s key=%s", client.id, item.key, exc_info=True
-                    )
-                    failed += 1
-                    ok, err = False, str(exc)[:300]
-                details.append(
-                    SyncSweepRow(
-                        client_id=client.id,
-                        client_name=client.name,
-                        key=item.key.value,
-                        ok=ok,
-                        error=err,
-                    )
-                )
-        return SyncSweepResult(
-            clients=len(self._active_clients()), synced=synced, failed=failed, details=details
-        )
+                    service = IntegrationService(session)
+                    listing = service.list(client.id)
+                    for item in listing.items:
+                        if item.status != IntegrationStatus.connected or item.key not in _REAL_KEYS:
+                            continue
+                        try:
+                            await service.sync(client.id, item.key)
+                            ok, err = True, None
+                        except Exception as exc:  # isolate per-integration failures
+                            logger.warning(
+                                "Sync failed: client=%s key=%s", client.id, item.key, exc_info=True
+                            )
+                            ok, err = False, str(exc)[:300]
+                        rows.append(
+                            SyncSweepRow(
+                                client_id=client.id,
+                                client_name=client.name,
+                                key=item.key.value,
+                                ok=ok,
+                                error=err,
+                            )
+                        )
+                finally:
+                    session.close()
+            return rows
+
+        results = await asyncio.gather(*(_one(c) for c in clients))
+        details = [row for rows in results for row in rows]
+        synced = sum(1 for row in details if row.ok)
+        failed = sum(1 for row in details if not row.ok)
+        return SyncSweepResult(clients=len(clients), synced=synced, failed=failed, details=details)
 
     # ---- expired session purge ---------------------------------------- #
 
@@ -148,6 +216,19 @@ class SchedulerService:
         cleans this table up (logout deletes one row; expiry alone never did),
         so left unswept it grows by one row per login forever."""
         deleted = SessionRepository(self.db).purge_expired(now=datetime.now(UTC))
+        if deleted:
+            self.db.commit()
+        return deleted
+
+    # ---- audit-log retention -------------------------------------------- #
+
+    def purge_expired_audit_logs(self) -> int:
+        """Delete ``audit_log`` rows older than the configured retention
+        window. Every API request is logged here with no other cleanup path,
+        so left unswept it grows forever."""
+        retention_days = get_settings().scheduler.audit_log_retention_days
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+        deleted = AuditRepository(self.db).purge_older_than(cutoff)
         if deleted:
             self.db.commit()
         return deleted
@@ -207,50 +288,67 @@ class SchedulerService:
         """Send the daily report email to every active client whose local
         23:30 threshold has passed and hasn't been sent yet today (or, as a
         bounded catch-up, yesterday). Isolated per client/date exactly like
-        ``sync_integrations_sweep`` — one client's failure never aborts the
-        sweep."""
-        rows: list[DailyReportSweepRow] = []
-        sent = skipped = failed = 0
+        ``sync_integrations_sweep``, and ``sweep_concurrency`` clients run at
+        once — each on its own DB session, since sending involves a real
+        Anthropic call plus a Brevo send per client/date and shouldn't
+        serialize across the whole client base."""
+        clients = self._active_clients()
+        semaphore = self._sweep_semaphore()
         now_utc = datetime.now(UTC)
-        for client in self._active_clients():
-            for report_date in due_report_dates(client.timezone, now_utc):
+
+        async def _one(client: Client) -> list[DailyReportSweepRow]:
+            rows: list[DailyReportSweepRow] = []
+            due_dates = due_report_dates(client.timezone, now_utc)
+            if not due_dates:
+                return rows
+            async with semaphore:
+                session = self._new_session()
                 try:
-                    log = await ReportEmailService(self.db).send_daily_report(client, report_date)
-                except Exception as exc:  # isolate per-client/date failures
-                    logger.warning(
-                        "Daily report sweep failed: client=%s date=%s",
-                        client.id,
-                        report_date,
-                        exc_info=True,
-                    )
-                    failed += 1
-                    rows.append(
-                        DailyReportSweepRow(
-                            client_id=client.id,
-                            client_name=client.name,
-                            report_date=report_date.isoformat(),
-                            status="error",
-                            error=str(exc)[:300],
+                    fresh_client = session.get(Client, client.id)
+                    if fresh_client is None:
+                        return rows
+                    for report_date in due_dates:
+                        try:
+                            log = await ReportEmailService(session).send_daily_report(
+                                fresh_client, report_date
+                            )
+                        except Exception as exc:  # isolate per-client/date failures
+                            logger.warning(
+                                "Daily report sweep failed: client=%s date=%s",
+                                client.id,
+                                report_date,
+                                exc_info=True,
+                            )
+                            rows.append(
+                                DailyReportSweepRow(
+                                    client_id=client.id,
+                                    client_name=client.name,
+                                    report_date=report_date.isoformat(),
+                                    status="error",
+                                    error=str(exc)[:300],
+                                )
+                            )
+                            continue
+                        rows.append(
+                            DailyReportSweepRow(
+                                client_id=client.id,
+                                client_name=client.name,
+                                report_date=report_date.isoformat(),
+                                status=log.status,
+                                error=log.error,
+                            )
                         )
-                    )
-                    continue
-                if log.status == "sent":
-                    sent += 1
-                elif log.status == "failed":
-                    failed += 1
-                else:
-                    skipped += 1
-                rows.append(
-                    DailyReportSweepRow(
-                        client_id=client.id,
-                        client_name=client.name,
-                        report_date=report_date.isoformat(),
-                        status=log.status,
-                        error=log.error,
-                    )
-                )
+                finally:
+                    session.close()
+            return rows
+
+        results = await asyncio.gather(*(_one(c) for c in clients))
+        rows = [row for client_rows in results for row in client_rows]
+        sent = sum(1 for row in rows if row.status == "sent")
+        failed = sum(1 for row in rows if row.status in ("error", "failed"))
+        skipped = len(rows) - sent - failed
         return DailyReportSweepResult(
-            clients=len(self._active_clients()),
+            clients=len(clients),
             sent=sent,
             skipped=skipped,
             failed=failed,

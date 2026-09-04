@@ -90,6 +90,24 @@ class ServiceUnavailableError(AppError):
     code = "service_unavailable"
 
 
+class ProviderAuthError(AppError):
+    """An upstream provider rejected our *credentials* — the OAuth grant is
+    dead (revoked/expired token, ``invalid_grant``, HTTP 401/403), as opposed
+    to a transient outage or an ordinary bad request.
+
+    The distinction is the point: it tells ``IntegrationService.sync`` to mark
+    the integration ``needs_reauth`` ("reconnect this account") instead of
+    ``error`` ("retry later"). Raised by the provider clients, which are the
+    only place that can read each vendor's own error taxonomy. Carrying it in
+    the exception *type* rather than in ``AppError.details`` keeps that
+    internal signal out of the public error envelope, which serializes
+    ``details`` straight to the caller.
+    """
+
+    status_code = status.HTTP_400_BAD_REQUEST
+    code = "provider_auth_error"
+
+
 def _envelope(code: str, message: str, details: Any | None = None) -> dict:
     body: dict[str, Any] = {"error": {"code": code, "message": message}}
     if details is not None:
