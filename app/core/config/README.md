@@ -11,7 +11,7 @@ Split by concern so no single settings file grows large:
 - `app_settings.py` — server/app-level settings (name, env, debug, prefixes).
 - `database.py` — database connection settings (`DATABASE_*`).
 - `security.py` — auth/JWT/CORS settings.
-- `ai.py` — Anthropic model + key settings (`ANTHROPIC_*`).
+- `ai.py` — OpenRouter (LLM provider) model + key settings (`OPENROUTER_*`).
 - `integrations.py` — OAuth client ids/secrets for Google, Meta, LinkedIn.
 
 ## Environments

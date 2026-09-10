@@ -272,7 +272,7 @@ def test_brand_extraction_fallback_without_api_key(
     )
     assert resp.status_code == 200
     body = resp.json()
-    # No ANTHROPIC_API_KEY in tests -> deterministic fallback, but measured
+    # No OPENROUTER_API_KEY in tests -> deterministic fallback, but measured
     # colors/fonts are still returned.
     assert body["ai_generated"] is False
     assert body["colors"] == ["#0D6EFD"]
@@ -283,7 +283,7 @@ def test_brand_extraction_render_plus_vision(client: TestClient, admin_headers: 
     # The render supplies measured colors/fonts + a screenshot; one vision call
     # supplies the prose fields (plus anything the model observed). Merge keeps
     # measured values first.
-    from app.integrations.anthropic.client import AnthropicClient
+    from app.integrations.llm.openrouter import OpenRouterClient
     from app.utils.render import RenderedPage
 
     async def fake_complete_with_image(
@@ -301,8 +301,8 @@ def test_brand_extraction_render_plus_vision(client: TestClient, admin_headers: 
         assert "site text" in prompt  # so did the rendered text
         return '{"summary":"Warm DTC brand","colors":["#AABBCC"],"fonts":["Lora"],"tone":"warm","imagery":"bright"}'
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "complete_with_image", fake_complete_with_image)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "complete_with_image", fake_complete_with_image)
     _mock_render(
         monkeypatch,
         RenderedPage(text="site text", colors=["#112233"], fonts=["Inter"], screenshot=b"jpg"),
@@ -327,15 +327,15 @@ def test_brand_extraction_scrape_fallback_when_render_unavailable(
 ):
     # No headless browser -> plain httpx scrape supplies text/colors/fonts and
     # the model call is text-only. The request still succeeds.
-    from app.integrations.anthropic.client import AnthropicClient
+    from app.integrations.llm.openrouter import OpenRouterClient
     from app.utils.web import PageContent
 
     async def fake_complete(self, *, system, prompt, max_tokens=None, model=None, context=None):
         assert "site text" in prompt  # scraped text was passed as reference
         return '{"summary":"From scraped text","colors":[],"fonts":[],"tone":"plain","imagery":"minimal"}'
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "complete", fake_complete)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "complete", fake_complete)
     _mock_render(monkeypatch, None)
     monkeypatch.setattr(
         "app.ai.brand_extraction.fetch_page",
@@ -358,7 +358,7 @@ def test_brand_extraction_model_failure_degrades_to_measured_values(
     client: TestClient, admin_headers: dict, monkeypatch
 ):
     # Model call blows up -> deterministic response with measured colors/fonts.
-    from app.integrations.anthropic.client import AnthropicClient
+    from app.integrations.llm.openrouter import OpenRouterClient
     from app.utils.render import RenderedPage
 
     async def broken_vision(
@@ -366,8 +366,8 @@ def test_brand_extraction_model_failure_degrades_to_measured_values(
     ):
         raise RuntimeError("model unavailable")
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "complete_with_image", broken_vision)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "complete_with_image", broken_vision)
     _mock_render(
         monkeypatch,
         RenderedPage(text="site text", colors=["#112233"], fonts=["Inter"], screenshot=b"jpg"),
@@ -441,7 +441,7 @@ def test_brand_extraction_from_document_text(client: TestClient, admin_headers: 
     # Uploaded document path: file bytes are parsed to text and fed to the model.
     import uuid
 
-    from app.integrations.anthropic.client import AnthropicClient
+    from app.integrations.llm.openrouter import OpenRouterClient
     from app.services.upload_service import UploadService
 
     monkeypatch.setattr(
@@ -458,8 +458,8 @@ def test_brand_extraction_from_document_text(client: TestClient, admin_headers: 
         assert "Acme brand guide" in prompt  # the document text reached the model
         return '{"summary":"Bold and confident.","colors":["#001F5B"],"fonts":["Poppins"]}'
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "complete", fake_complete)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "complete", fake_complete)
 
     resp = client.post(
         f"{API}/clients/onboarding/extract-brand",
@@ -476,10 +476,10 @@ def test_brand_extraction_from_document_text(client: TestClient, admin_headers: 
 def test_brand_extraction_from_image_uses_vision(
     client: TestClient, admin_headers: dict, monkeypatch
 ):
-    # Image document → Claude vision, with the right media_type threaded through.
+    # Image document → AI provider vision, with the right media_type threaded through.
     import uuid
 
-    from app.integrations.anthropic.client import AnthropicClient
+    from app.integrations.llm.openrouter import OpenRouterClient
     from app.services.upload_service import UploadService
 
     monkeypatch.setattr(
@@ -495,8 +495,8 @@ def test_brand_extraction_from_image_uses_vision(
         seen["media_type"] = media_type
         return '{"summary":"Logo-derived theme.","colors":["#FF5722"],"fonts":[]}'
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "complete_with_image", fake_vision)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "complete_with_image", fake_vision)
 
     resp = client.post(
         f"{API}/clients/onboarding/extract-brand",
@@ -511,7 +511,7 @@ def test_brand_extraction_from_image_uses_vision(
 def test_brand_extraction_from_document_fallback(
     client: TestClient, admin_headers: dict, monkeypatch
 ):
-    # Document path with Claude unconfigured → deterministic, provisional result.
+    # Document path with the AI provider unconfigured → deterministic, provisional result.
     import uuid
 
     from app.services.upload_service import UploadService

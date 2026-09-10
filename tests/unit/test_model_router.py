@@ -1,4 +1,4 @@
-"""Unit tests: per-feature Anthropic model routing (app/ai/model_router.py)."""
+"""Unit tests: per-feature LLM model routing (app/ai/model_router.py)."""
 
 from __future__ import annotations
 

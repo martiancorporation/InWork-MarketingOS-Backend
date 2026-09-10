@@ -1,14 +1,18 @@
 """Model pricing + a pure cost calculator.
 
 Rates are USD **per 1,000,000 tokens**, split into input / output / cache-write
-/ cache-read (Anthropic prices prompt-cache writes above and reads far below the
-base input rate). Cost is computed once, at call time, and stored on the usage
-row — so changing these rates never rewrites history.
+/ cache-read (some vendors price prompt-cache writes above and reads far below
+the base input rate). Cost is computed once, at call time, and stored on the
+usage row — so changing these rates never rewrites history.
 
-⚠️ PLACEHOLDER RATES — verify each number against your official Anthropic
-pricing / negotiated contract before trusting the dollar figures. Override at
-runtime with the ``AI_PRICING_JSON`` env var (JSON: ``{"model": {"input":..,
-"output":.., "cache_write":.., "cache_read":..}}``, values per 1M tokens).
+Keyed by the exact OpenRouter model id string (e.g. ``"anthropic/claude-opus-4-8"``)
+passed to the API — see ``app/integrations/llm/``.
+
+⚠️ PLACEHOLDER RATES — verify each number against OpenRouter's published
+per-model pricing (or your negotiated contract) before trusting the dollar
+figures. Override at runtime with the ``AI_PRICING_JSON`` env var (JSON:
+``{"model": {"input":.., "output":.., "cache_write":.., "cache_read":..}}``,
+values per 1M tokens).
 """
 
 from __future__ import annotations
@@ -38,12 +42,12 @@ def _rate(inp: str, out: str, cw: str, cr: str) -> ModelRate:
     return ModelRate(Decimal(inp), Decimal(out), Decimal(cw), Decimal(cr))
 
 
-# PLACEHOLDER defaults — confirm against real pricing.
+# PLACEHOLDER defaults — confirm against real OpenRouter pricing.
 _DEFAULT_PRICING: dict[str, ModelRate] = {
-    "claude-opus-4-8": _rate("15", "75", "18.75", "1.50"),
-    "claude-sonnet-5": _rate("3", "15", "3.75", "0.30"),
-    "claude-haiku-4-5-20251001": _rate("1", "5", "1.25", "0.10"),
-    "claude-fable-5": _rate("3", "15", "3.75", "0.30"),
+    "anthropic/claude-opus-4-8": _rate("15", "75", "18.75", "1.50"),
+    "anthropic/claude-sonnet-5": _rate("3", "15", "3.75", "0.30"),
+    "anthropic/claude-haiku-4-5-20251001": _rate("1", "5", "1.25", "0.10"),
+    "anthropic/claude-fable-5": _rate("3", "15", "3.75", "0.30"),
 }
 
 

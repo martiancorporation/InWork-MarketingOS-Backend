@@ -2,11 +2,12 @@
 
 ``AiUsageContext`` is the small object callers attach to an AI call to say *who*
 triggered it, *which client* it's for, and *where* in the app it came from.
-``record_usage`` is the single write path used by the instrumented
-``AnthropicClient`` — it prices the tokens and inserts one ``ai_usage_events``
-row on its own short-lived session, committed independently and error-swallowed
-so usage logging can never break or roll back with the business transaction
-(the tokens were spent regardless of what the caller does next).
+``record_usage`` is the single write path used by every ``LLMClient``
+implementation (``app/integrations/llm/``) — it prices the tokens and inserts
+one ``ai_usage_events`` row on its own short-lived session, committed
+independently and error-swallowed so usage logging can never break or roll
+back with the business transaction (the tokens were spent regardless of what
+the caller does next).
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AiUsageContext:
-    """Attribution for one AI call. Pass it to any AnthropicClient method."""
+    """Attribution for one AI call. Pass it to any LLMClient method."""
 
     feature: str
     user_id: uuid.UUID | None = None
@@ -83,17 +84,3 @@ def record_usage(
             db.commit()
     except Exception as exc:  # logging must never break an AI request
         logger.warning("AI usage recording failed (%s/%s): %s", provider, model, exc)
-
-
-def usage_from_message(message) -> UsageBreakdown:
-    """Extract a token breakdown from an Anthropic Messages response."""
-    u = getattr(message, "usage", None)
-    if u is None:
-        return UsageBreakdown()
-    g = lambda name: int(getattr(u, name, 0) or 0)  # noqa: E731
-    return UsageBreakdown(
-        input_tokens=g("input_tokens"),
-        output_tokens=g("output_tokens"),
-        cache_write_tokens=g("cache_creation_input_tokens"),
-        cache_read_tokens=g("cache_read_input_tokens"),
-    )

@@ -45,7 +45,7 @@ from app.services.scheduler_service import SchedulerService
 router = APIRouter(prefix="/automation", tags=["automation"])
 
 # These sweeps are the most expensive routes in the app — the report-email
-# one makes an Anthropic call *and* sends real email per client. Admin-only
+# one makes an AI provider call *and* sends real email per client. Admin-only
 # is an authorization control, not a cost control: a retry loop or a
 # double-click shouldn't be able to bill twice or double-send to clients.
 _SWEEP_RATE_LIMIT = RateLimit("automation_sweep", times=2, seconds=300)

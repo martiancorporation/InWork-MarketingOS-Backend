@@ -3,8 +3,8 @@
 Client-access scoping is enforced at the router via ``ClientService.get_client``
 (inaccessible client → 404). Repos flush; this service owns the commit. The
 question runs through ``ProjectAssistantAgent``, grounded in the client's
-intelligence context + RAG store, with a deterministic fallback when Claude is
-unconfigured.
+intelligence context + RAG store, with a deterministic fallback when the AI
+provider is unconfigured.
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ from app.ai.features import AiFeature
 from app.ai.usage import AiUsageContext
 from app.core.exceptions import BadRequestError, NotFoundError, ServiceUnavailableError
 from app.core.pagination import PaginationParams
-from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.embeddings import get_embedder
+from app.integrations.llm import get_llm_client
 from app.integrations.storage import Storage
 from app.models.ai import AiChat, AiChatMessage
 from app.models.enums import AiRole
@@ -180,7 +180,7 @@ class AssistantService:
             self.db,
             client_id,
             embedder=get_embedder(),
-            ai_client=AnthropicClient(
+            ai_client=get_llm_client(
                 AiUsageContext(feature=AiFeature.PROJECT_AI, client_id=client_id, user_id=user.id)
             ),
         )
@@ -247,7 +247,7 @@ class AssistantService:
         the request session is open. Raises ``NotFoundError`` (404) before any
         streaming starts. Call this, then feed the result to ``stream_events``."""
         if attachment_upload_ids:
-            # `AnthropicClient.stream` is text-only, so an attachment here would be
+            # `LLMClient.stream` is text-only, so an attachment here would be
             # accepted and then silently dropped. Fail loudly and point at the route
             # that does support files.
             raise BadRequestError(
@@ -266,7 +266,7 @@ class AssistantService:
             self.db,
             client_id,
             embedder=get_embedder(),
-            ai_client=AnthropicClient(
+            ai_client=get_llm_client(
                 AiUsageContext(feature=AiFeature.PROJECT_AI, client_id=client_id, user_id=user_id)
             ),
         )
@@ -276,8 +276,8 @@ class AssistantService:
     async def stream_events(self, ctx: StreamContext) -> AsyncIterator[str]:
         """Server-Sent Events for one streamed answer: a ``sources`` frame, then a
         ``delta`` frame per token chunk, then a ``done`` frame with the persisted
-        message id + full text. Degrades to the deterministic fallback when Claude
-        is unconfigured or the stream fails."""
+        message id + full text. Degrades to the deterministic fallback when the AI
+        provider is unconfigured or the stream fails."""
         prep = ctx.prep
         yield _sse({"type": "sources", "sources": prep.snippets})
 

@@ -1,8 +1,8 @@
 """Watchdog engine.
 
 Surfaces alerts (things going wrong) and opportunities (things to capitalize on)
-for the account. Claude when configured; deterministic fallback derived from real
-setup/pipeline signals so there is always an honest watchlist.
+for the account. AI provider when configured; deterministic fallback derived
+from real setup/pipeline signals so there is always an honest watchlist.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from app.ai.features import AiFeature
 from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import LLMClient, get_llm_client
 from app.models.client import Client
 from app.prompts.loader import load_prompt, render
 from app.schemas.ai import WatchdogItem
@@ -26,8 +26,8 @@ logger = logging.getLogger("app.ai.watchdog")
 class WatchdogAgent:
     feature = AiFeature.WATCHDOG
 
-    def __init__(self, ai_client: AnthropicClient | None = None) -> None:
-        self._client = ai_client or AnthropicClient()
+    def __init__(self, ai_client: LLMClient | None = None) -> None:
+        self._client = ai_client or get_llm_client()
 
     async def generate(
         self,

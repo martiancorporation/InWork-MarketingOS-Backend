@@ -1,7 +1,7 @@
 """API tests: streamed ("Ask AI") project-assistant replies over SSE.
 
-Covers the deterministic-fallback stream (Claude unconfigured), the real
-token-by-token path (monkeypatched ``AnthropicClient.stream``), persistence of
+Covers the deterministic-fallback stream (AI provider unconfigured), the real
+token-by-token path (monkeypatched ``OpenRouterClient.stream``), persistence of
 the assembled reply, and access scoping (unassigned user → 404).
 """
 
@@ -11,7 +11,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm.openrouter import OpenRouterClient
 from tests.conftest import API
 from tests.helpers import onboarding_payload
 
@@ -74,8 +74,8 @@ def test_stream_emits_tokens_when_ai_configured(
         for token in ["Your ", "brand ", "voice ", "is ", "confident."]:
             yield token
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "stream", fake_stream)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "stream", fake_stream)
 
     cid = _client_id(client, admin_headers, name="Configured Co.")
     chat = _chat_id(client, admin_headers, cid)
@@ -103,8 +103,8 @@ def test_stream_fallback_when_ai_configured_but_call_fails(
         raise RuntimeError("credit balance too low")
         yield  # pragma: no cover - unreachable, makes this an async generator
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "stream", fake_stream)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "stream", fake_stream)
 
     cid = _client_id(client, admin_headers, name="Stream Error Co.")
     chat = _chat_id(client, admin_headers, cid)

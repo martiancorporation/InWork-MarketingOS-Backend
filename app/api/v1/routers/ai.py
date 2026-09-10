@@ -10,7 +10,7 @@
 
 Every route is client-access-scoped via ``ClientService.get_client`` (admin or
 assigned user); an inaccessible client returns 404. The dashboard leans on the
-client's intelligence context (directive preamble) and, when Claude is
+client's intelligence context (directive preamble) and, when the AI provider is
 unconfigured, falls back to deterministic output grounded in real client data.
 """
 

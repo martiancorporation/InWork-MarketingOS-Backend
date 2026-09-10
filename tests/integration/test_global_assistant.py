@@ -49,7 +49,7 @@ def test_non_admin_sees_only_assigned_clients(
     assert body["clients_considered"] == 1
     assert body["scope"] == "1 assigned client(s)"
     # The unassigned clients' names must never reach this user's answer —
-    # the deterministic fallback (Claude unconfigured in tests) echoes the
+    # the deterministic fallback (AI provider unconfigured in tests) echoes the
     # portfolio fact sheet directly, so this also guards against the fact
     # sheet itself leaking another client's data.
     assert "Other Client 1" not in body["answer"]

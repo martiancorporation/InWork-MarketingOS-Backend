@@ -14,7 +14,7 @@ import os
 os.environ["APP_ENV"] = "test"
 # Force the AI provider "not configured" so the suite is hermetic (no network).
 # Tests that exercise the AI-configured branch monkeypatch the client instead.
-os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["OPENROUTER_API_KEY"] = ""
 os.environ["STORAGE_S3_BUCKET"] = ""
 os.environ["STORAGE_S3_REGION"] = ""
 # Scraping/research providers off so brand extraction stays hermetic (no live
@@ -52,7 +52,7 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 os.environ["AI_USAGE_ENABLED"] = "false"
 # Client intelligence: use the deterministic local embedder so the RAG pipeline
 # runs hermetically (no Voyage key, no network). Agents fall back to their
-# deterministic path because ANTHROPIC_API_KEY is empty (above).
+# deterministic path because OPENROUTER_API_KEY is empty (above).
 os.environ["INTEL_EMBEDDING_PROVIDER"] = "fake"
 # Demo seeding fires on client creation, so leaving it on would give every test
 # that onboards a client a synthetic history — tests asserting "a new client has

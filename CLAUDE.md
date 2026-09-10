@@ -34,7 +34,7 @@ This file holds the rules and commands an assistant can't infer from the code.
 - **Errors:** raise typed exceptions from `app/core/exceptions.py` (`NotFoundError`, `AuthError`,
   `ForbiddenError`, `ConflictError`, `TooManyRequestsError`, …). Never build HTTP responses in
   services. The central handlers produce the `{"error": {...}}` envelope.
-- **Graceful degradation:** AI (Anthropic), storage (S3), and embeddings (Voyage) must each keep
+- **Graceful degradation:** AI (OpenRouter), storage (S3), and embeddings (Voyage) must each keep
   working via their deterministic fallback when unconfigured — don't hard-require them.
 - **Async routes must not block the event loop:** if an `async def` handler calls sync I/O
   (S3, blocking DB), offload it with `anyio.to_thread.run_sync`. Plain `def` handlers are fine

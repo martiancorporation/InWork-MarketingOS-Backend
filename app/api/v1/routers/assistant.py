@@ -9,7 +9,7 @@
 Every route is client-access-scoped via ``ClientService.get_client`` (admin or
 assigned user); an inaccessible client returns 404. The assistant is grounded in
 the client's intelligence profile + RAG knowledge and degrades to a deterministic
-reply when Claude is unconfigured. The ask endpoint is rate-limited (paid-AI).
+reply when the AI provider is unconfigured. The ask endpoint is rate-limited (paid-AI).
 """
 
 from __future__ import annotations

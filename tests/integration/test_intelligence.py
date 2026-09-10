@@ -2,7 +2,7 @@
 
 Runs the build hermetically: the orchestrator is driven directly on the test
 session with the deterministic local embedder and the agents' deterministic
-fallback (no Claude key, no network). Endpoints are exercised via the API.
+fallback (no OpenRouter key, no network). Endpoints are exercised via the API.
 """
 
 from __future__ import annotations

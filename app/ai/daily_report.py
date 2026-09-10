@@ -3,9 +3,9 @@
 Writes the short "what happened today" commentary (headline, highlights,
 watch-outs, recommended actions) that sits on top of the deterministic
 numbers assembled by ``app/services/report_email/data.py``. Modeled 1:1 on
-``ExecutiveBriefAgent``: Claude when configured, deterministic fallback from
-the same facts otherwise — the AI never invents a number that isn't already
-in ``DailyReportData``.
+``ExecutiveBriefAgent``: AI provider when configured, deterministic fallback
+from the same facts otherwise — the AI never invents a number that isn't
+already in ``DailyReportData``.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from app.ai.features import AiFeature
 from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import LLMClient, get_llm_client
 from app.prompts.loader import load_prompt, render
 from app.schemas.ai import DailyReportNarrative
 from app.services.report_email.data import DailyReportData
@@ -27,8 +27,8 @@ logger = logging.getLogger("app.ai.daily_report")
 class DailyReportAgent:
     feature = AiFeature.REPORT_NARRATIVE
 
-    def __init__(self, ai_client: AnthropicClient | None = None) -> None:
-        self._client = ai_client or AnthropicClient()
+    def __init__(self, ai_client: LLMClient | None = None) -> None:
+        self._client = ai_client or get_llm_client()
 
     async def generate(
         self, data: DailyReportData, usage: AiUsageContext | None = None

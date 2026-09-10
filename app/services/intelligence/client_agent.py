@@ -23,8 +23,8 @@ from sqlalchemy.orm import Session
 from app.ai.features import AiFeature
 from app.ai.usage import AiUsageContext
 from app.core.exceptions import AppError
-from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.embeddings.base import EmbeddingClient
+from app.integrations.llm import LLMClient, get_llm_client
 from app.services.intelligence.context_service import ClientContext, ContextService
 
 
@@ -42,13 +42,13 @@ class ClientAgent:
         client_id: uuid.UUID,
         *,
         embedder: EmbeddingClient | None = None,
-        ai_client: AnthropicClient | None = None,
+        ai_client: LLMClient | None = None,
     ) -> None:
         self.db = db
         self.client_id = client_id
         self._embedder = embedder
         self.context: ClientContext = ContextService(db, embedder).build(client_id)
-        self.ai = ai_client or AnthropicClient(
+        self.ai = ai_client or get_llm_client(
             AiUsageContext(feature=self.feature, client_id=client_id)
         )
 

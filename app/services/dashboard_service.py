@@ -32,7 +32,7 @@ from app.ai.recommendations import RecommendationsAgent
 from app.ai.usage import AiUsageContext
 from app.ai.watchdog import WatchdogAgent
 from app.core.pagination import PaginationParams
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import get_llm_client
 from app.models.client import Client
 from app.models.enums import ApprovalStatus, ComplianceKind, IntegrationStatus
 from app.models.event import MarketingEvent
@@ -157,7 +157,7 @@ class DashboardService:
             executive_brief=brief,
             watchdog=watchdog,
             recommendations=recs,
-            ai_generated=AnthropicClient().is_configured,
+            ai_generated=get_llm_client().is_configured,
             qa_review=qa_review,
         )
         # One atomic upsert — see DashboardSnapshotRepository.upsert. Two

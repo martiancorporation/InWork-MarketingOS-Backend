@@ -6,7 +6,8 @@ Checks a draft caption/post BEFORE a human approves it:
   no model needed.
 - **SEO** (deterministic heuristics): length, hashtags, a clear call-to-action.
 - **Brand voice + polish** (AI, when configured): grounded in the client's rule
-  preamble; degrades to the deterministic result when Claude is unconfigured.
+  preamble; degrades to the deterministic result when the AI provider is
+  unconfigured.
 """
 
 from __future__ import annotations

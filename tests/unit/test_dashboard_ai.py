@@ -1,4 +1,4 @@
-"""Unit tests: the dashboard AI engines' Claude path + fallback, with a fake client."""
+"""Unit tests: the dashboard AI engines' AI-provider path + fallback, with a fake client."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from app.services.intelligence.context_service import ClientContext
 
 
 class FakeAI:
-    """Stand-in AnthropicClient: reports configured and returns canned text."""
+    """Stand-in LLMClient: reports configured and returns canned text."""
 
     def __init__(self, raw: str) -> None:
         self._raw = raw

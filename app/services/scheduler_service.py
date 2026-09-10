@@ -290,7 +290,7 @@ class SchedulerService:
         bounded catch-up, yesterday). Isolated per client/date exactly like
         ``sync_integrations_sweep``, and ``sweep_concurrency`` clients run at
         once — each on its own DB session, since sending involves a real
-        Anthropic call plus a Brevo send per client/date and shouldn't
+        AI provider call plus a Brevo send per client/date and shouldn't
         serialize across the whole client base."""
         clients = self._active_clients()
         semaphore = self._sweep_semaphore()

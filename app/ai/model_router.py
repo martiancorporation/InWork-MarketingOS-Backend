@@ -1,4 +1,4 @@
-"""Per-feature Anthropic model routing.
+"""Per-feature LLM model routing.
 
 Not every AI surface needs the top-tier model: features that just extract,
 classify, or gather structured facts (no client-facing prose, low creative

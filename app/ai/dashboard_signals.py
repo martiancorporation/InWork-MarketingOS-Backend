@@ -2,7 +2,7 @@
 
 Assembled once per dashboard request (in ``DashboardService``) from the client's
 own data — metrics, integrations, pending approvals, onboarding/profile state,
-brand rules. Both the Claude path (as prompt facts) and the deterministic
+brand rules. Both the AI path (as prompt facts) and the deterministic
 fallback (as the source of every number) read from here, so the dashboard is
 always grounded in what is actually known about the client — never invented.
 """

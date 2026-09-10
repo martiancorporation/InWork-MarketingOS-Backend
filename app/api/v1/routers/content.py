@@ -5,8 +5,8 @@
 
 Client-access-scoped via ``ClientService.get_client`` (admin or assigned user);
 inaccessible client → 404. Compliance (banned/required terms) and an SEO score are
-deterministic; the brand-voice judgment uses Claude when configured and degrades
-gracefully otherwise. Rate-limited (paid-AI route).
+deterministic; the brand-voice judgment uses the AI provider when configured
+and degrades gracefully otherwise. Rate-limited (paid-AI route).
 """
 
 from __future__ import annotations

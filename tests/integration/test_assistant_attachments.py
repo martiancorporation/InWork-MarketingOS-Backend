@@ -2,7 +2,7 @@
 
 The composer used to discard the file bytes and append the *filenames* to the
 message text, so "why doesn't this report match?" reached the model as a filename.
-These tests pin the real contract: bytes reach Claude (images as vision blocks,
+These tests pin the real contract: bytes reach the AI provider (images as vision blocks,
 documents as extracted text), the reference is owner-scoped, and the attachment
 survives a chat reload with a freshly signed URL.
 """
@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_storage
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm.openrouter import OpenRouterClient
 from app.main import app
 from app.utils.download_link import upload_permalink
 from tests.conftest import API
@@ -61,7 +61,7 @@ def storage() -> Generator[FakeStorage, None, None]:
 
 @pytest.fixture
 def captured(monkeypatch) -> dict:
-    """Configure Claude and record what the vision / text calls received."""
+    """Configure the AI provider and record what the vision / text calls received."""
     seen: dict = {}
 
     async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
@@ -78,9 +78,9 @@ def captured(monkeypatch) -> dict:
         seen["images"] = images
         return "I can see the chart."
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "complete", fake_complete)
-    monkeypatch.setattr(AnthropicClient, "complete_with_images", fake_complete_with_images)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "complete", fake_complete)
+    monkeypatch.setattr(OpenRouterClient, "complete_with_images", fake_complete_with_images)
     return seen
 
 
@@ -118,7 +118,7 @@ def _ask(client: TestClient, headers: dict, cid: str, chat: str, **body):
 def test_image_attachment_reaches_vision(
     client: TestClient, admin_headers: dict, storage, captured
 ):
-    """The bytes must actually get to Claude, not just the filename."""
+    """The bytes must actually get to the AI provider, not just the filename."""
     cid = _client_id(client, admin_headers)
     chat = _chat_id(client, admin_headers, cid)
     upload_id = _upload(client, admin_headers, "chart.png", PNG, "image/png")
@@ -329,7 +329,7 @@ def test_attachments_survive_a_chat_reload_with_a_permanent_url(
 
 
 def test_streaming_endpoint_rejects_attachments(client: TestClient, admin_headers: dict, storage):
-    """`AnthropicClient.stream` is text-only, so fail loudly rather than drop files."""
+    """`OpenRouterClient.stream` is text-only, so fail loudly rather than drop files."""
     cid = _client_id(client, admin_headers)
     chat = _chat_id(client, admin_headers, cid)
     resp = client.post(

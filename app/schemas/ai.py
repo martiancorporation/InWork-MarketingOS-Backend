@@ -158,7 +158,7 @@ class DashboardResponse(BaseModel):
     executive_brief: ExecutiveBrief
     watchdog: list[WatchdogItem] = []
     recommendations: list[Recommendation] = []
-    # False when Claude is unconfigured/failed and the deterministic fallback ran.
+    # False when the AI provider is unconfigured/failed and the deterministic fallback ran.
     ai_generated: bool
     # Independent second-provider review of the generated brief + recommendations.
     # ``status="not_reviewed"`` when QA is disabled/unconfigured (the default).
@@ -185,7 +185,7 @@ class OpportunityResponse(BaseModel):
     items: list[Opportunity] = []
     # True when external research (Brave/ScrapingBee) contributed grounding.
     researched: bool
-    # False when Claude is unconfigured/failed and the deterministic fallback ran.
+    # False when the AI provider is unconfigured/failed and the deterministic fallback ran.
     ai_generated: bool
 
 

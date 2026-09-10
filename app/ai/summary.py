@@ -5,9 +5,10 @@ produces a structured, comprehensive client summary: who they are, what they
 want / don't want, goals, expectations, design & content preferences, and
 restrictions.
 
-Uses Claude when configured; otherwise falls back to a deterministic summary
-assembled from the structured client fields, so the pipeline always yields a
-usable profile. File content is presented as untrusted data, never instructions.
+Uses the AI provider when configured; otherwise falls back to a deterministic
+summary assembled from the structured client fields, so the pipeline always
+yields a usable profile. File content is presented as untrusted data, never
+instructions.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from typing import Any
 from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import LLMClient, get_llm_client
 from app.models.client import Client
 from app.prompts.loader import load_prompt, render
 
@@ -46,8 +47,8 @@ class SummaryResult:
 
 
 class SummaryAgent:
-    def __init__(self, client: AnthropicClient | None = None) -> None:
-        self._client = client or AnthropicClient()
+    def __init__(self, client: LLMClient | None = None) -> None:
+        self._client = client or get_llm_client()
 
     async def summarize(
         self, client: Client, corpus: str, context: AiUsageContext | None = None

@@ -6,9 +6,10 @@ information beyond that checklist — e.g. licensing details for a regulated
 industry, service areas for a local business, deal size for B2B — each with a
 rationale.
 
-Graceful degradation: when Anthropic is unconfigured or the call fails, ``detect``
-returns just the fixed-checklist gaps (``ai_generated=False``), so the endpoint is
-always useful. All client text is treated as DATA, never as instructions.
+Graceful degradation: when the AI provider is unconfigured or the call fails,
+``detect`` returns just the fixed-checklist gaps (``ai_generated=False``), so
+the endpoint is always useful. All client text is treated as DATA, never as
+instructions.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from app.ai.features import AiFeature
 from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import LLMClient, get_llm_client
 from app.models.client import Client
 from app.prompts.loader import load_prompt, render
 from app.schemas.onboarding import MissingInfoItem, MissingInfoReport
@@ -32,8 +33,8 @@ _MAX_ITEMS = 8
 class MissingInfoAgent:
     feature = AiFeature.MISSING_INFO
 
-    def __init__(self, ai_client: AnthropicClient | None = None) -> None:
-        self._client = ai_client or AnthropicClient()
+    def __init__(self, ai_client: LLMClient | None = None) -> None:
+        self._client = ai_client or get_llm_client()
 
     async def detect(
         self,

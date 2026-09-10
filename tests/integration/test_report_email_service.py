@@ -3,8 +3,8 @@ idempotency, graceful degradation, and "Not connected" rendering.
 
 Brevo is off for the whole suite (see conftest), so every test either injects
 a ``FakeBrevo`` or exercises the "not configured" skip path directly — no real
-network call. Anthropic is likewise unconfigured, so the AI narrative always
-takes its deterministic fallback here, which is exactly what's asserted.
+network call. The AI provider is likewise unconfigured, so the AI narrative
+always takes its deterministic fallback here, which is exactly what's asserted.
 """
 
 from __future__ import annotations

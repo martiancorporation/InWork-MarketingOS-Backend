@@ -6,9 +6,10 @@ only the assigned clients for everyone else. Access scoping is decided by the
 caller (the service) and handed in as the ``platform_facts`` fact sheet; the agent
 never widens it.
 
-Graceful degradation: when Anthropic is unconfigured or the call fails, it returns
-a deterministic, fact-grounded summary instead of raising — same house stance as
-every other AI feature. All portfolio data is DATA, never instructions.
+Graceful degradation: when the AI provider is unconfigured or the call fails,
+it returns a deterministic, fact-grounded summary instead of raising — same
+house stance as every other AI feature. All portfolio data is DATA, never
+instructions.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from __future__ import annotations
 import logging
 
 from app.ai.features import AiFeature
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import LLMClient, get_llm_client
 from app.prompts.loader import load_prompt, render
 
 logger = logging.getLogger("app.ai.global_assistant")
@@ -27,8 +28,8 @@ _MAX_HISTORY = 10
 class GlobalAssistantAgent:
     feature = AiFeature.ASSISTANT
 
-    def __init__(self, ai_client: AnthropicClient | None = None) -> None:
-        self._client = ai_client or AnthropicClient()
+    def __init__(self, ai_client: LLMClient | None = None) -> None:
+        self._client = ai_client or get_llm_client()
 
     async def answer(
         self,

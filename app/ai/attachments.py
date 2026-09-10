@@ -3,7 +3,7 @@
 The Ask AI composer lets an operator attach files — e.g. "I can share last week's
 report and say, why is it not matching?". Two shapes reach the model:
 
-* **Images** go through Claude vision as image blocks.
+* **Images** go through the AI provider's vision as image blocks.
 * **Everything else** is parsed to plain text by the shared document extractor
   (PDF / DOCX / PPTX / XLSX / CSV / text) and folded into the prompt.
 

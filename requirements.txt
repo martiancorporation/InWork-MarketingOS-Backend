@@ -27,10 +27,8 @@ cryptography==50.0.0
 # enforcing it independently (see app/core/rate_limit.py).
 # redis==5.2.1
 
-# AI (optional at runtime — the app degrades gracefully without it)
-anthropic==0.116.0
-
-# HTTP client — website scrape fallback for brand extraction (also the test client)
+# HTTP client — website scrape fallback for brand extraction, the OpenRouter/
+# OpenAI-compatible LLM clients (no vendor SDK needed), and the test client
 httpx==0.28.1
 
 # IANA timezone database for zoneinfo — pinned so the daily-report-email

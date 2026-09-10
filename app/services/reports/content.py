@@ -10,7 +10,7 @@ directly from the campaign rows already pulled for this same report, not routed
 through ``ExecutiveBriefAgent``/``DashboardService`` (that machinery assembles the
 full live-dashboard signal set + an async AI call, built for a different job).
 Keeping this deterministic means report generation is fast and always available,
-Anthropic configured or not.
+AI provider configured or not.
 """
 
 from __future__ import annotations

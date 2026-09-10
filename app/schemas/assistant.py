@@ -112,5 +112,5 @@ class GlobalAssistantAskResponse(BaseModel):
     # "all clients" for an admin; "N assigned client(s)" otherwise.
     scope: str
     clients_considered: int
-    # False when Claude is unconfigured/failed and the deterministic fallback ran.
+    # False when the AI provider is unconfigured/failed and the deterministic fallback ran.
     ai_generated: bool
