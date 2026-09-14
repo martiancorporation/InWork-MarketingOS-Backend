@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from zoneinfo import available_timezones
 
 from pydantic import BaseModel, ConfigDict
@@ -51,3 +52,14 @@ def validate_timezone(value: str | None) -> str | None:
     if tz not in available_timezones():
         raise ValueError(f"Unknown timezone '{tz}'. Use an IANA name such as 'America/New_York'.")
     return tz
+
+
+_PERIOD_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+def validate_period(value: str) -> str:
+    """Accept only a ``YYYY-MM`` period string (shared by budgets and plan
+    generation — anything month-scoped uses this same format)."""
+    if not _PERIOD_RE.match(value):
+        raise ValueError("period must be in YYYY-MM format")
+    return value

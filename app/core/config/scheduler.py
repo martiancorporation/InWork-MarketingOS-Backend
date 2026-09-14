@@ -55,3 +55,8 @@ class SchedulerSettings(BaseSettings):
     # true cron) since this scheduler is tick-based; see app/services/report_email/timing.py.
     report_email_enabled: bool = True  # SCHEDULER_REPORT_EMAIL_ENABLED
     report_email_check_interval_minutes: int = 10  # SCHEDULER_REPORT_EMAIL_CHECK_INTERVAL_MINUTES
+
+    # Notification email digest — sends each opted-in user one email covering
+    # their new warning/critical notifications since the last sweep.
+    notification_email_enabled: bool = True  # SCHEDULER_NOTIFICATION_EMAIL_ENABLED
+    notification_email_interval_minutes: int = 15  # SCHEDULER_NOTIFICATION_EMAIL_INTERVAL_MINUTES

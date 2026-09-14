@@ -13,7 +13,7 @@ from typing import Self
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.enums import TaskCategory, TaskStatus
+from app.models.enums import TaskCategory, TaskPriority, TaskStatus
 from app.schemas.common import MAX_TEXT, ORMModel, StrictModel
 
 
@@ -40,6 +40,7 @@ class PlanTaskCreate(StrictModel):
     description: str | None = Field(None, max_length=MAX_TEXT)
     category: TaskCategory = TaskCategory.strategy
     status: TaskStatus = TaskStatus.todo
+    priority: TaskPriority = TaskPriority.medium
     assignee_id: uuid.UUID | None = None
     #: A task spans ``start_date``..``due_date``; either may be omitted for a
     #: single-day item, and both for an open-ended organic one.
@@ -65,6 +66,7 @@ class PlanTaskUpdate(StrictModel):
     description: str | None = Field(default=None, max_length=MAX_TEXT)
     category: TaskCategory | None = None
     status: TaskStatus | None = None
+    priority: TaskPriority | None = None
     assignee_id: uuid.UUID | None = None
     start_date: date | None = None
     due_date: date | None = None
@@ -94,7 +96,11 @@ class PlanTaskRead(ORMModel):
     description: str | None = None
     category: TaskCategory
     status: TaskStatus
+    priority: TaskPriority
     assignee_id: uuid.UUID | None = None
+    #: The linked calendar item, when this task represents an AI-generated
+    #: content post — set only by ``PlanGenerationService``, never client-writable.
+    event_id: uuid.UUID | None = None
     start_date: date | None = None
     due_date: date | None = None
     start_time: time | None = None

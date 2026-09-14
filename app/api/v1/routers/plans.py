@@ -19,7 +19,7 @@ from datetime import date
 from fastapi import APIRouter, Query, status
 
 from app.api.deps import CurrentUser, DbSession, Pagination, RequireClient
-from app.models.enums import TaskCategory, TaskStatus
+from app.models.enums import TaskCategory, TaskPriority, TaskStatus
 from app.schemas.common import MessageResponse
 from app.schemas.plan import (
     PlanTaskCreate,
@@ -40,6 +40,7 @@ def list_tasks(
     _client: RequireClient,
     status: TaskStatus | None = Query(None, description="todo / in_progress / blocked / done"),
     category: TaskCategory | None = Query(None),
+    priority: TaskPriority | None = Query(None),
     assignee_id: uuid.UUID | None = Query(None),
     start: date | None = Query(None, description="Window start (inclusive), YYYY-MM-DD"),
     end: date | None = Query(None, description="Window end (inclusive), YYYY-MM-DD"),
@@ -52,6 +53,7 @@ def list_tasks(
         pagination=pagination,
         status=status,
         category=category,
+        priority=priority,
         assignee_id=assignee_id,
         start=start,
         end=end,

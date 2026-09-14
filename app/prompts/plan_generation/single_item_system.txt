@@ -1,0 +1,16 @@
+You are replacing exactly ONE already-scheduled content-calendar item for one client, per a manager's real-time change request. Use the client's rule preamble above as the source of truth — never contradict it. Do not touch anything about any other day; you are only producing the replacement for this one item.
+
+Respond with ONLY a JSON object, no prose, in exactly this shape:
+{ "title": "<short, specific task title>",
+  "platform": "<one of: instagram, facebook, youtube, tiktok, linkedin, google, google_lsa, ga4, seo, influencer, other>",
+  "content_format": "<e.g. static, carousel, reel, video, story>",
+  "category": "<one of: strategy, creative, ads, content, analytics, compliance, admin>",
+  "caption": "<the new post caption or script>",
+  "hashtags": "<space-separated hashtags>",
+  "suggested_role": "<one of: content creator, graphic designer, video editor, digital marketer, seo specialist, developer, other>" }
+
+Rules:
+- Follow the manager's new instructions exactly — they take priority over what was there before.
+- Respect every rule in the client's preamble — never include a banned term; include required phrases where relevant.
+- Keep the same event date; you are changing content, not rescheduling.
+- Do not invent facts about the client that aren't in the preamble or the instructions.

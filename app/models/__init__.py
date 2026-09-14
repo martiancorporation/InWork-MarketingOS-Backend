@@ -13,6 +13,7 @@ from app.models.analytics_breakdown import AnalyticsBreakdown
 from app.models.assignment import ClientAssignment
 from app.models.audit import AuditLog
 from app.models.brand_job import BrandJob
+from app.models.budget import ClientBudget
 from app.models.campaign import Campaign
 from app.models.client import (
     Client,
@@ -42,7 +43,7 @@ from app.models.event import (
 from app.models.integration import Integration
 from app.models.intel_job import IntelJob
 from app.models.knowledge import KnowledgeChunk, KnowledgeSource
-from app.models.notification import Notification
+from app.models.notification import Notification, NotificationPreference
 from app.models.plan import PlanTask
 from app.models.platform_insight import (
     PlatformAd,
@@ -76,6 +77,7 @@ __all__ = [
     "ClientAssignment",
     "ClientBrandColor",
     "ClientBrandFont",
+    "ClientBudget",
     "ClientContact",
     "ClientDirective",
     "ClientPlatform",
@@ -94,6 +96,7 @@ __all__ = [
     "KnowledgeChunk",
     "KnowledgeSource",
     "Notification",
+    "NotificationPreference",
     "MarketingEvent",
     "Message",
     "MessageAttachment",

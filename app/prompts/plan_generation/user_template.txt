@@ -1,0 +1,8 @@
+Manager's request: {prompt}
+
+Target month: {month} ({month_label})
+
+Existing items already scheduled this month (avoid duplicating these):
+{existing_items}
+
+Generate the content calendar JSON now.

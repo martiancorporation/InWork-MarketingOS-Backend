@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from app.core.config import get_settings
 from app.core.config.scheduler import SchedulerSettings
 from app.db.session import get_session_factory
+from app.services.notification_email_service import NotificationEmailService
 from app.services.scheduler_service import SchedulerService
 
 logger = logging.getLogger("app.scheduler")
@@ -23,6 +24,7 @@ DIGEST_JOB = "daily_digest"
 SESSION_PURGE_JOB = "session_purge"
 REPORT_EMAIL_JOB = "daily_report_email"
 AUDIT_LOG_PURGE_JOB = "audit_log_purge"
+NOTIFICATION_EMAIL_JOB = "notification_email"
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,14 @@ def build_jobs(settings: SchedulerSettings | None = None) -> list[ScheduledJob]:
                 "Send the daily report email to clients whose local 23:30 has passed",
             )
         )
+    if s.notification_email_enabled:
+        jobs.append(
+            ScheduledJob(
+                NOTIFICATION_EMAIL_JOB,
+                s.notification_email_interval_minutes * 60,
+                "Email opted-in users their new warning/critical notifications",
+            )
+        )
     return jobs
 
 
@@ -120,6 +130,9 @@ async def run_job(name: str) -> None:
                 sweep.skipped,
                 sweep.failed,
             )
+        elif name == NOTIFICATION_EMAIL_JOB:
+            sent = await NotificationEmailService(session).send_pending_emails()
+            logger.info("notification email digest: users emailed=%d", sent)
         else:
             logger.warning("Unknown scheduled job: %s", name)
     finally:

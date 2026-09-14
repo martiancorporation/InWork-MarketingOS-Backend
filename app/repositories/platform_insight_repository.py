@@ -354,6 +354,51 @@ class PlatformInsightRepository(BaseRepository[PlatformCampaign]):
             for row in self.db.execute(stmt).all()
         }
 
+    def sum_spend(
+        self,
+        client_id: uuid.UUID,
+        integration_key: str,
+        *,
+        start: date,
+        end: date,
+    ) -> float:
+        """Total spend for one platform over a date window.
+
+        Filtered to ``entity_type="campaign"`` — the only granularity daily
+        metrics are actually synced at (see ``_normalize_meta_campaign_metric``
+        et al.); summing every entity type would double-count the same spend
+        once campaigns gain ad-set/ad-level rows.
+        """
+        total = self.db.scalar(
+            select(func.coalesce(func.sum(PlatformMetricDaily.spend), 0)).where(
+                PlatformMetricDaily.client_id == client_id,
+                PlatformMetricDaily.integration_key == integration_key,
+                PlatformMetricDaily.entity_type == "campaign",
+                PlatformMetricDaily.date >= start,
+                PlatformMetricDaily.date <= end,
+            )
+        )
+        return float(total or 0)
+
+    def count_campaigns(
+        self, client_id: uuid.UUID, integration_key: str
+    ) -> tuple[int, int]:
+        """``(total, active)`` campaign counts for one platform."""
+        total = self.db.scalar(
+            select(func.count()).select_from(PlatformCampaign).where(
+                PlatformCampaign.client_id == client_id,
+                PlatformCampaign.integration_key == integration_key,
+            )
+        )
+        active = self.db.scalar(
+            select(func.count()).select_from(PlatformCampaign).where(
+                PlatformCampaign.client_id == client_id,
+                PlatformCampaign.integration_key == integration_key,
+                PlatformCampaign.effective_status == "ACTIVE",
+            )
+        )
+        return int(total or 0), int(active or 0)
+
     def list_recommendations(
         self,
         client_id: uuid.UUID,

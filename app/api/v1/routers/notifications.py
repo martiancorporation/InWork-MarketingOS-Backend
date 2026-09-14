@@ -4,6 +4,8 @@
 - ``GET  /notifications/unread-count``   — badge count for the "red dot"
 - ``POST /notifications/read-all``       — mark all mine read
 - ``POST /notifications/{id}/read``      — mark one read
+- ``GET  /notifications/preferences``    — my email/mute preferences
+- ``PUT  /notifications/preferences``    — update them
 
 Every route is scoped to the authenticated user — a user only ever sees their
 own notifications. No admin/client scoping applies.
@@ -19,6 +21,8 @@ from app.api.deps import CurrentUser, DbSession, Pagination
 from app.schemas.common import MessageResponse
 from app.schemas.notification import (
     NotificationListResponse,
+    NotificationPreferenceRead,
+    NotificationPreferenceUpdate,
     NotificationRead,
     UnreadCount,
 )
@@ -54,4 +58,28 @@ def mark_all_read(user: CurrentUser, db: DbSession) -> MessageResponse:
 def mark_read(notification_id: uuid.UUID, user: CurrentUser, db: DbSession) -> NotificationRead:
     return NotificationRead.model_validate(
         NotificationService(db).mark_read(user.id, notification_id)
+    )
+
+
+@router.get(
+    "/preferences",
+    response_model=NotificationPreferenceRead,
+    summary="My notification email/mute preferences",
+)
+def get_preferences(user: CurrentUser, db: DbSession) -> NotificationPreferenceRead:
+    return NotificationPreferenceRead.model_validate(
+        NotificationService(db).get_preferences(user.id)
+    )
+
+
+@router.put(
+    "/preferences",
+    response_model=NotificationPreferenceRead,
+    summary="Update my notification email/mute preferences",
+)
+def set_preferences(
+    data: NotificationPreferenceUpdate, user: CurrentUser, db: DbSession
+) -> NotificationPreferenceRead:
+    return NotificationPreferenceRead.model_validate(
+        NotificationService(db).set_preferences(user.id, data)
     )

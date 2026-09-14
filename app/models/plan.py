@@ -16,10 +16,11 @@ from app.models.base import (
     UUIDPrimaryKeyMixin,
     pg_enum,
 )
-from app.models.enums import TaskCategory, TaskStatus
+from app.models.enums import TaskCategory, TaskPriority, TaskStatus
 
 if TYPE_CHECKING:
     from app.models.client import Client
+    from app.models.event import MarketingEvent
 
 
 class PlanTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -41,8 +42,17 @@ class PlanTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[TaskStatus] = mapped_column(
         pg_enum(TaskStatus, "task_status"), nullable=False, default=TaskStatus.todo
     )
+    priority: Mapped[TaskPriority] = mapped_column(
+        pg_enum(TaskPriority, "task_priority"), nullable=False, default=TaskPriority.medium
+    )
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    # Set only by PlanGenerationService — bridges an AI-generated content task to
+    # its calendar item (script/hashtags/platform/approval workflow live there).
+    # Null for every non-content task (SEO audit, dev work, campaign setup, …).
+    event_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("marketing_events.id", ondelete="SET NULL"), index=True
     )
     # A task spans ``start_date``..``due_date``. Either may be null: a single-day
     # item carries one of them, and an open-ended organic post — one with no
@@ -60,3 +70,4 @@ class PlanTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     client: Mapped[Client] = relationship(back_populates="tasks")
+    event: Mapped[MarketingEvent | None] = relationship()

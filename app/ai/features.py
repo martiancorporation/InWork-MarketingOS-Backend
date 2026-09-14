@@ -17,6 +17,7 @@ class AiFeature:
     CLIENT_SUMMARY = "intelligence.client_summary"
     CLIENT_DIRECTIVES = "intelligence.client_directives"
     PROJECT_AI = "project_ai.chat"
+    PLAN_GENERATION = "plan.generate"
     DAY_CHAT = "day.chat"
     ASSISTANT = "assistant.global"
     INSIGHTS = "insights.generate"

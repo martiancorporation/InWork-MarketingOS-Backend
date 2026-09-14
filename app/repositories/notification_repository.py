@@ -1,4 +1,6 @@
-"""Data access for per-user notifications. Every query is scoped to ``user_id``."""
+"""Data access for per-user notifications. Every query is scoped to ``user_id``,
+except `list_pending_email`, which is the platform-wide sweep the email digest
+job runs (not a single user's view)."""
 
 from __future__ import annotations
 
@@ -6,6 +8,7 @@ import uuid
 
 from sqlalchemy import func, select
 
+from app.models.enums import NotificationLevel
 from app.models.notification import Notification
 from app.repositories.base import BaseRepository
 
@@ -60,3 +63,20 @@ class NotificationRepository(BaseRepository[Notification]):
         if limit is not None:
             stmt = stmt.limit(limit)
         return list(self.db.scalars(stmt).all()), int(total or 0)
+
+    def list_pending_email(self, limit: int) -> list[Notification]:
+        """Rows not yet emailed, restricted to signals worth an email —
+        routine ``info`` notifications never warrant one. Oldest first, so a
+        backlog drains in order rather than the newest repeatedly winning."""
+        stmt = (
+            select(Notification)
+            .where(
+                Notification.emailed_at.is_(None),
+                Notification.level.in_(
+                    [NotificationLevel.warning.value, NotificationLevel.critical.value]
+                ),
+            )
+            .order_by(Notification.created_at.asc())
+            .limit(limit)
+        )
+        return list(self.db.scalars(stmt).all())

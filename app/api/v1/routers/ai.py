@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, Path, Query, status
 
 from app.api.deps import (
     AdminUser,
@@ -32,6 +32,7 @@ from app.api.deps import (
 from app.core.rate_limit import RateLimit
 from app.models.client import Client
 from app.models.enums import ClientCapability
+from app.schemas.ads_overview import AdsOverviewResponse
 from app.schemas.ai import (
     DashboardResponse,
     OpportunityResponse,
@@ -40,6 +41,7 @@ from app.schemas.ai import (
     RecommendationDecisionRequest,
     SetupStatusResponse,
 )
+from app.services.ads_overview_service import AdsOverviewService
 from app.services.dashboard_service import DashboardService
 
 router = APIRouter(prefix="/clients/{client_id}", tags=["dashboard"])
@@ -79,6 +81,20 @@ async def get_opportunities(
     client_id: uuid.UUID, user: CurrentUser, db: DbSession, client: RequireClient
 ) -> OpportunityResponse:
     return await DashboardService(db).opportunities(client, user_id=user.id)
+
+
+@router.get(
+    "/dashboard/ads-overview",
+    response_model=AdsOverviewResponse,
+    summary="Unified Meta/Google Ads spend, budget, and campaign status for a period",
+)
+def get_ads_overview(
+    client_id: uuid.UUID,
+    db: DbSession,
+    _client: RequireClient,
+    period: str = Query(..., min_length=7, max_length=7, description="YYYY-MM"),
+) -> AdsOverviewResponse:
+    return AdsOverviewService(db).get_overview(client_id, period)
 
 
 @router.get(

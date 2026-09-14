@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from app.models.analytics import AnalyticsDaily, StrategyVisual
     from app.models.analytics_breakdown import AnalyticsBreakdown
     from app.models.assignment import ClientAssignment
+    from app.models.budget import ClientBudget
     from app.models.campaign import Campaign
     from app.models.compliance import ComplianceDoc, ComplianceEntry
     from app.models.contact import ClientContact
@@ -183,6 +184,9 @@ class Client(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="client", cascade="all, delete-orphan"
     )
     report_email_logs: Mapped[list[ReportEmailLog]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+    budgets: Mapped[list[ClientBudget]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
 

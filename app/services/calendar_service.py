@@ -169,6 +169,7 @@ class CalendarService:
             hashtags=data.hashtags,
             cta_label=data.cta_label,
             cta_url=data.cta_url,
+            content_format=data.content_format,
         )
 
     @staticmethod
@@ -190,6 +191,7 @@ class CalendarService:
             event.post.hashtags = data.hashtags
             event.post.cta_label = data.cta_label
             event.post.cta_url = data.cta_url
+            event.post.content_format = data.content_format
 
     def _apply_ad(self, event: MarketingEvent, data: EventAdIn) -> None:
         if event.ad is None:

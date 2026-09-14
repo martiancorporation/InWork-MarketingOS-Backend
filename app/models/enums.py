@@ -243,6 +243,13 @@ class TaskStatus(str, enum.Enum):
     done = "done"
 
 
+class TaskPriority(str, enum.Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    urgent = "urgent"
+
+
 class TaskCategory(str, enum.Enum):
     strategy = "strategy"
     creative = "creative"

@@ -32,6 +32,7 @@ class EventPostIn(StrictModel):
     hashtags: str | None = Field(None, max_length=MAX_LONG_LINE)  # e.g. "#new #drop"
     cta_label: str | None = Field(None, max_length=80)  # e.g. "Book Now"
     cta_url: str | None = Field(None, max_length=1024)
+    content_format: str | None = Field(None, max_length=30)  # e.g. "static"/"carousel"/"reel"
 
 
 class EventAdIn(StrictModel):
@@ -53,6 +54,7 @@ class EventPostRead(ORMModel):
     hashtags: str | None = None
     cta_label: str | None = None
     cta_url: str | None = None
+    content_format: str | None = None
 
 
 class EventAdRead(ORMModel):

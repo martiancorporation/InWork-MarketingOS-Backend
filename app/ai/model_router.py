@@ -44,6 +44,7 @@ MID_TIER_FEATURES = frozenset(
         AiFeature.OPPORTUNITY,
         AiFeature.CONTENT_REVIEW,
         AiFeature.REPORT_NARRATIVE,
+        AiFeature.PLAN_GENERATION,
     }
 )
 

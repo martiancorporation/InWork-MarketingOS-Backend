@@ -17,16 +17,24 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import NotFoundError
 from app.core.pagination import PaginationParams
 from app.models.enums import NotificationLevel
-from app.models.notification import Notification
+from app.models.notification import Notification, NotificationPreference
 from app.repositories.assignment_repository import AssignmentRepository
+from app.repositories.notification_preference_repository import (
+    NotificationPreferenceRepository,
+)
 from app.repositories.notification_repository import NotificationRepository
-from app.schemas.notification import NotificationListResponse, NotificationRead
+from app.schemas.notification import (
+    NotificationListResponse,
+    NotificationPreferenceUpdate,
+    NotificationRead,
+)
 
 
 class NotificationService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.notifications = NotificationRepository(db)
+        self.preferences = NotificationPreferenceRepository(db)
 
     # ---- create / deliver --------------------------------------------- #
 
@@ -115,3 +123,29 @@ class NotificationService:
             n.read_at = now
         self.db.commit()
         return len(rows)
+
+    # ---- preferences ---------------------------------------------------- #
+
+    def get_preferences(self, user_id: uuid.UUID) -> NotificationPreference:
+        """Always returns a row — lazily creates the default (email off, no
+        muted clients) on first read so GET never 404s on a brand-new user."""
+        pref = self.preferences.get_for_user(user_id)
+        if pref is None:
+            pref = NotificationPreference(user_id=user_id)
+            self.preferences.add(pref)
+            self.db.commit()
+            self.db.refresh(pref)
+        return pref
+
+    def set_preferences(
+        self, user_id: uuid.UUID, data: NotificationPreferenceUpdate
+    ) -> NotificationPreference:
+        pref = self.get_preferences(user_id)
+        fields = data.model_fields_set
+        if "email_enabled" in fields and data.email_enabled is not None:
+            pref.email_enabled = data.email_enabled
+        if "muted_client_ids" in fields and data.muted_client_ids is not None:
+            pref.muted_client_ids = [str(cid) for cid in data.muted_client_ids]
+        self.db.commit()
+        self.db.refresh(pref)
+        return pref

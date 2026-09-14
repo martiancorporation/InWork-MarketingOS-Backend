@@ -11,7 +11,7 @@ from datetime import date
 
 from sqlalchemy import and_, func, or_, select
 
-from app.models.enums import TaskCategory, TaskStatus
+from app.models.enums import TaskCategory, TaskPriority, TaskStatus
 from app.models.plan import PlanTask
 from app.repositories.base import BaseRepository
 
@@ -34,6 +34,7 @@ class PlanTaskRepository(BaseRepository[PlanTask]):
         *,
         status: TaskStatus | None = None,
         category: TaskCategory | None = None,
+        priority: TaskPriority | None = None,
         assignee_id: uuid.UUID | None = None,
         start: date | None = None,
         end: date | None = None,
@@ -57,6 +58,8 @@ class PlanTaskRepository(BaseRepository[PlanTask]):
             conditions.append(PlanTask.status == status)
         if category is not None:
             conditions.append(PlanTask.category == category)
+        if priority is not None:
+            conditions.append(PlanTask.priority == priority)
         if assignee_id is not None:
             conditions.append(PlanTask.assignee_id == assignee_id)
 
@@ -119,6 +122,49 @@ class PlanTaskRepository(BaseRepository[PlanTask]):
             select(PlanTask.client_id, func.count()).where(*conditions).group_by(PlanTask.client_id)
         ).all()
         return {cid: int(n) for cid, n in rows}
+
+    def list_across_clients(
+        self,
+        client_ids: list[uuid.UUID] | None,
+        *,
+        status: TaskStatus | None = None,
+        priority: TaskPriority | None = None,
+        assignee_id: uuid.UUID | None = None,
+        client_id: uuid.UUID | None = None,
+        overdue_only: bool = False,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> tuple[list[PlanTask], int]:
+        """Return a page of tasks across clients plus the total matching count.
+
+        ``client_ids=None`` means no scope restriction (admin sees every
+        client); a list restricts to those clients (an empty list yields no
+        rows) — same scope convention as ``open_counts_for_assignee``. Backs
+        the cross-client Admin Panel task view.
+        """
+        conditions = []
+        if client_ids is not None:
+            conditions.append(PlanTask.client_id.in_(client_ids))
+        if client_id is not None:
+            conditions.append(PlanTask.client_id == client_id)
+        if status is not None:
+            conditions.append(PlanTask.status == status)
+        if priority is not None:
+            conditions.append(PlanTask.priority == priority)
+        if assignee_id is not None:
+            conditions.append(PlanTask.assignee_id == assignee_id)
+        if overdue_only:
+            conditions.append(PlanTask.due_date < date.today())
+            conditions.append(PlanTask.status != TaskStatus.done)
+
+        total = self.db.scalar(select(func.count()).select_from(PlanTask).where(*conditions))
+        # Newest-first, portable across dialects — same rationale as the
+        # unwindowed branch of `list_for_client` (cross-DB "nulls last" for a
+        # due-date sort is tricky; this view is filterable by overdue instead).
+        stmt = select(PlanTask).where(*conditions).order_by(PlanTask.created_at.desc()).offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return list(self.db.scalars(stmt).all()), int(total or 0)
 
     def completion_counts(self, client_id: uuid.UUID) -> tuple[int, int]:
         """Return ``(done, total)`` task counts for a client (BE-06 adherence)."""

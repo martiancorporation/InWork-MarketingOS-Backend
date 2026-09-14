@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.routers import (
+    admin_tasks,
     ai,
     ai_usage,
     alerts,
@@ -15,6 +16,7 @@ from app.api.v1.routers import (
     audit,
     auth,
     automation,
+    budgets,
     calendar,
     campaigns,
     clients,
@@ -26,6 +28,7 @@ from app.api.v1.routers import (
     intelligence,
     me,
     notifications,
+    plan_generation,
     plans,
     platform_insights,
     reports,
@@ -55,12 +58,15 @@ api_router.include_router(content.router)
 api_router.include_router(analytics.router)
 api_router.include_router(analytics_breakdowns.router)
 api_router.include_router(campaigns.router)
+api_router.include_router(budgets.router)
 api_router.include_router(alerts.router)
 api_router.include_router(integrations.router)
 api_router.include_router(plans.router)
+api_router.include_router(plan_generation.router)
 api_router.include_router(platform_insights.router)
 api_router.include_router(automation.router)
 api_router.include_router(notifications.router)
 api_router.include_router(strategy.router)
 api_router.include_router(support_tickets.router)
 api_router.include_router(me.router)
+api_router.include_router(admin_tasks.router)

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BadRequestError, NotFoundError
 from app.core.pagination import PaginationParams
 from app.core.request_context import set_audit_changes
-from app.models.enums import TaskCategory, TaskStatus
+from app.models.enums import TaskCategory, TaskPriority, TaskStatus
 from app.models.plan import PlanTask
 from app.repositories.plan_repository import PlanTaskRepository
 from app.schemas.plan import (
@@ -35,6 +35,7 @@ _MUTABLE = (
     "description",
     "category",
     "status",
+    "priority",
     "assignee_id",
     "start_date",
     "due_date",
@@ -70,6 +71,7 @@ class PlanService:
         pagination: PaginationParams,
         status: TaskStatus | None = None,
         category: TaskCategory | None = None,
+        priority: TaskPriority | None = None,
         assignee_id: uuid.UUID | None = None,
         start: date | None = None,
         end: date | None = None,
@@ -81,6 +83,7 @@ class PlanService:
             client_id,
             status=status,
             category=category,
+            priority=priority,
             assignee_id=assignee_id,
             start=start,
             end=end,
@@ -113,6 +116,7 @@ class PlanService:
             description=data.description,
             category=data.category,
             status=data.status,
+            priority=data.priority,
             assignee_id=data.assignee_id,
             start_date=data.start_date,
             due_date=data.due_date,
