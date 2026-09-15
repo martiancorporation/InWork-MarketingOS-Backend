@@ -287,7 +287,9 @@ class AssistantService:
             yield _sse({"type": "delta", "text": prep.fallback})
         else:
             try:
-                async for delta in ctx.agent.ai.stream(system=prep.system, prompt=prep.prompt):
+                async for delta in ctx.agent.ai.stream(
+                    system=prep.system, prompt=prep.prompt, model=prep.model
+                ):
                     if delta:
                         parts.append(delta)
                         yield _sse({"type": "delta", "text": delta})

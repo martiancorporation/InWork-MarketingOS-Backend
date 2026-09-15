@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.api.v1.routers import (
     admin_tasks,
     ai,
+    ai_model_routes,
     ai_usage,
     alerts,
     analytics,
@@ -70,3 +71,4 @@ api_router.include_router(strategy.router)
 api_router.include_router(support_tickets.router)
 api_router.include_router(me.router)
 api_router.include_router(admin_tasks.router)
+api_router.include_router(ai_model_routes.router)

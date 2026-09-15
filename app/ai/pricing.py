@@ -5,12 +5,16 @@ Rates are USD **per 1,000,000 tokens**, split into input / output / cache-write
 the base input rate). Cost is computed once, at call time, and stored on the
 usage row — so changing these rates never rewrites history.
 
-Keyed by the exact OpenRouter model id string (e.g. ``"anthropic/claude-opus-4-8"``)
+Keyed by the exact OpenRouter model id string (e.g. ``"anthropic/claude-opus-5"``)
 passed to the API — see ``app/integrations/llm/``.
 
-⚠️ PLACEHOLDER RATES — verify each number against OpenRouter's published
-per-model pricing (or your negotiated contract) before trusting the dollar
-figures. Override at runtime with the ``AI_PRICING_JSON`` env var (JSON:
+Rates below were verified directly against OpenRouter's live catalog
+(``GET https://openrouter.ai/api/v1/models``) in September 2026 — replacing an
+earlier placeholder table that had been overstating Anthropic costs by
+1.5x-3x. Re-run ``scripts/refresh_model_pricing.py`` periodically (or after
+adding a model to ``app/ai/model_router.py``'s ``KNOWN_MODELS``) to catch
+drift; OpenRouter prices can change without notice. Override at runtime with
+the ``AI_PRICING_JSON`` env var (JSON:
 ``{"model": {"input":.., "output":.., "cache_write":.., "cache_read":..}}``,
 values per 1M tokens).
 """
@@ -42,12 +46,26 @@ def _rate(inp: str, out: str, cw: str, cr: str) -> ModelRate:
     return ModelRate(Decimal(inp), Decimal(out), Decimal(cw), Decimal(cr))
 
 
-# PLACEHOLDER defaults — confirm against real OpenRouter pricing.
+# Verified against OpenRouter's live /models catalog (Sept 2026).
 _DEFAULT_PRICING: dict[str, ModelRate] = {
-    "anthropic/claude-opus-4-8": _rate("15", "75", "18.75", "1.50"),
-    "anthropic/claude-sonnet-5": _rate("3", "15", "3.75", "0.30"),
-    "anthropic/claude-haiku-4-5-20251001": _rate("1", "5", "1.25", "0.10"),
-    "anthropic/claude-fable-5": _rate("3", "15", "3.75", "0.30"),
+    # --- Anthropic (via OpenRouter) ---
+    "anthropic/claude-opus-5": _rate("5", "25", "6.25", "0.50"),
+    # "claude-opus-4-8" (the configured OPENROUTER_MODEL default before this
+    # fix) no longer appears in OpenRouter's public catalog but still serves
+    # real requests (confirmed live) — priced at parity with opus-5 as a
+    # best-effort estimate so historical/legacy usage rows stay priced rather
+    # than silently zeroing out.
+    "anthropic/claude-opus-4-8": _rate("5", "25", "6.25", "0.50"),
+    "anthropic/claude-sonnet-5": _rate("2", "10", "2.5", "0.20"),
+    "anthropic/claude-haiku-4.5": _rate("1", "5", "1.25", "0.10"),
+    "anthropic/claude-fable-5": _rate("10", "50", "12.5", "1.00"),
+    "anthropic/claude-fable-5.1": _rate("10", "50", "12.5", "1.00"),
+    # --- new low-cost models (Ayon Das's Sept 2026 recommendations) ---
+    "openai/gpt-5.6-luna": _rate("0.20", "1.20", "0.25", "0.02"),
+    "z-ai/glm-5.3-flash": _rate("0.15", "0.50", "0.15", "0.03"),
+    "deepseek/deepseek-v4.1-flash": _rate("0.15", "0.60", "0.15", "0.003"),
+    "minimax/minimax-m3": _rate("0.30", "1.20", "0.30", "0.06"),
+    "qwen/qwen3.7-flash": _rate("0.03", "0.13", "0.038", "0.006"),
 }
 
 

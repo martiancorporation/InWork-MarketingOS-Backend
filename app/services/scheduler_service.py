@@ -45,6 +45,7 @@ from app.schemas.automation import (
     WatchdogSweepResult,
 )
 from app.services.alert_service import AlertService
+from app.services.dashboard_service import DashboardService
 from app.services.integration_service import _REAL_KEYS, IntegrationService
 from app.services.notification_service import NotificationService
 from app.services.report_email.service import ReportEmailService
@@ -168,7 +169,15 @@ class SchedulerService:
         """Sync every connected integration, ``sweep_concurrency`` clients at a
         time. Each concurrent client gets its own DB session (see
         ``run_watchdog_sweep`` for why); per-integration failures are still
-        isolated exactly as before."""
+        isolated exactly as before.
+
+        After a client's integrations finish syncing, this also pre-warms its
+        dashboard (health score / brief / watchdog / recommendations) in the
+        background — see ``_prewarm_dashboard`` — so a user opening the
+        dashboard later reads an already-fresh ``DashboardSnapshot`` instead of
+        paying for live AI calls on page load. A client with nothing connected
+        never reaches that call at all (``rows`` stays empty).
+        """
         clients = self._active_clients()
         semaphore = self._sweep_semaphore()
 
@@ -199,6 +208,8 @@ class SchedulerService:
                                 error=err,
                             )
                         )
+                    if rows:  # only clients with at least one real connected integration
+                        await self._prewarm_dashboard(session, client)
                 finally:
                     session.close()
             return rows
@@ -208,6 +219,24 @@ class SchedulerService:
         synced = sum(1 for row in details if row.ok)
         failed = sum(1 for row in details if not row.ok)
         return SyncSweepResult(clients=len(clients), synced=synced, failed=failed, details=details)
+
+    async def _prewarm_dashboard(self, session: Session, client: Client) -> None:
+        """Recompute ``client``'s dashboard snapshot in the background if
+        anything the AI engines read has actually changed.
+
+        ``DashboardService.build`` already hashes its inputs and skips the
+        4-6 AI calls entirely when nothing changed since the last snapshot —
+        so on the common "synced, nothing new" tick this is a cheap no-op,
+        and on a real change it's exactly the AI work a dashboard page-load
+        would otherwise have to do live. Isolated in its own try/except: one
+        client's AI failure must never break the sync sweep's own reporting.
+        """
+        try:
+            fresh_client = session.get(Client, client.id)
+            if fresh_client is not None:
+                await DashboardService(session).build(fresh_client)
+        except Exception:
+            logger.warning("Dashboard pre-warm failed for client %s", client.id, exc_info=True)
 
     # ---- expired session purge ---------------------------------------- #
 

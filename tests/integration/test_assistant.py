@@ -61,7 +61,7 @@ def test_ask_fallback_when_ai_configured_but_call_fails(
     "unconfigured" — otherwise a temporary outage looks like a permanent
     misconfiguration to whoever's chatting."""
 
-    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
+    async def fake_complete(self, *, system, prompt, max_tokens=None, model=None, context=None):
         raise RuntimeError("credit balance too low")
 
     monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
@@ -82,7 +82,7 @@ def test_ask_fallback_when_ai_configured_but_call_fails(
 
 
 def test_ask_uses_ai_when_configured(client: TestClient, admin_headers: dict, monkeypatch):
-    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
+    async def fake_complete(self, *, system, prompt, max_tokens=None, model=None, context=None):
         assert "brand voice" in prompt  # the question flows into the prompt
         return "Your brand voice is confident and warm."
 

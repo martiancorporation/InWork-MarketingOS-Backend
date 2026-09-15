@@ -70,7 +70,7 @@ def test_stream_fallback_when_ai_unconfigured(client: TestClient, admin_headers:
 def test_stream_emits_tokens_when_ai_configured(
     client: TestClient, admin_headers: dict, monkeypatch
 ):
-    async def fake_stream(self, *, system, prompt, max_tokens=None, context=None):
+    async def fake_stream(self, *, system, prompt, max_tokens=None, model=None, context=None):
         for token in ["Your ", "brand ", "voice ", "is ", "confident."]:
             yield token
 
@@ -99,7 +99,7 @@ def test_stream_fallback_when_ai_configured_but_call_fails(
     """Same distinction as the non-streaming path: a real mid-stream provider
     failure must not read as "AI responses aren't configured"."""
 
-    async def fake_stream(self, *, system, prompt, max_tokens=None, context=None):
+    async def fake_stream(self, *, system, prompt, max_tokens=None, model=None, context=None):
         raise RuntimeError("credit balance too low")
         yield  # pragma: no cover - unreachable, makes this an async generator
 

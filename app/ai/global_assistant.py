@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 
 from app.ai.features import AiFeature
+from app.ai.model_router import model_for
 from app.integrations.llm import LLMClient, get_llm_client
 from app.prompts.loader import load_prompt, render
 
@@ -54,7 +55,9 @@ class GlobalAssistantAgent:
             },
         )
         try:
-            raw = await self._client.complete(system=system, prompt=prompt, max_tokens=1500)
+            raw = await self._client.complete(
+                system=system, prompt=prompt, max_tokens=1500, model=model_for(self.feature)
+            )
         except Exception:  # transient API error — degrade, never 500 the chat
             logger.warning("Global assistant completion failed", exc_info=True)
             return self._fallback(platform_facts, scope_label)

@@ -26,21 +26,22 @@ class AISettings(BaseSettings):
     api_key: str | None = None  # OPENROUTER_API_KEY — absent in local dev
     # Model ids are "vendor/model", e.g. "anthropic/claude-sonnet-5",
     # "openai/gpt-4o", "google/gemini-2.5-pro" — see openrouter.ai/models.
-    model: str = "anthropic/claude-opus-4-8"  # OPENROUTER_MODEL
+    # This is the ceiling default: any feature not routed to a specific model
+    # via app/ai/model_router.py's category table uses this. Per-category
+    # routing (which model each *kind* of AI task actually uses) now lives in
+    # the admin-editable ``ai_model_routes`` table, not static settings here.
+    # Deliberately sonnet-5, not opus-5: opus-5 costs 2.5x more ($5/$25 vs
+    # $2/$10 per 1M tokens) for a fallback path that, today, no live feature
+    # actually hits (every real feature is already categorized in
+    # model_router.py) — sonnet-5 is the same model the hardest category
+    # (REASONING_COMPLEX) already defaults to, so the ceiling stays capable
+    # without paying the opus premium on an edge case.
+    model: str = "anthropic/claude-sonnet-5"  # OPENROUTER_MODEL
     base_url: str = "https://openrouter.ai/api/v1"  # OPENROUTER_BASE_URL
     max_tokens: int = 1024  # OPENROUTER_MAX_TOKENS
     # Per-request timeout (seconds) and client-side retries.
     timeout_seconds: float = 30.0  # OPENROUTER_TIMEOUT_SECONDS
     max_retries: int = 2  # OPENROUTER_MAX_RETRIES
-
-    # Cost-optimization model tiers — the models the cost heuristics
-    # (app/ai/cost_optimization.py) route between. Kept in config so model
-    # identities are never hard-coded in the heuristic module.
-    cheap_model: str = "anthropic/claude-haiku-4-5-20251001"  # OPENROUTER_CHEAP_MODEL
-    mid_model: str = "anthropic/claude-sonnet-5"  # OPENROUTER_MID_MODEL
-    expensive_models: str = (
-        "anthropic/claude-opus-4-8"  # OPENROUTER_EXPENSIVE_MODELS — comma-separated
-    )
 
     # Optional OpenRouter attribution headers (show up on the OpenRouter
     # dashboard) — never required for the API to work.
@@ -55,8 +56,3 @@ class AISettings(BaseSettings):
     @property
     def is_configured(self) -> bool:
         return bool(self.api_key)
-
-    @property
-    def expensive_model_set(self) -> frozenset[str]:
-        """The expensive-tier model ids to route down from (parsed, de-blanked)."""
-        return frozenset(m.strip() for m in self.expensive_models.split(",") if m.strip())

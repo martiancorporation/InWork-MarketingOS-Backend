@@ -16,6 +16,10 @@ class AiUsageEventRead(ORMModel):
     actor_user_id: uuid.UUID | None = None
     client_id: uuid.UUID | None = None
     feature: str
+    # Populated by AiUsageService from app.ai.features.feature_label — not a
+    # real ORM column, hence the default (model_validate(from_attributes)
+    # would otherwise require it on the row itself).
+    feature_label: str = ""
     provider: str
     model: str
     operation: str
@@ -56,6 +60,10 @@ class UsageTotals(BaseModel):
 
 class UsageGroupRow(BaseModel):
     key: str | None  # feature / model / client_id / user_id (as string)
+    # Human-readable label for `key` — populated only when grouping by
+    # feature (see AiUsageService._group); None for model/client/user groups,
+    # which the frontend already labels from data it holds elsewhere.
+    label: str | None = None
     requests: int
     total_tokens: int
     total_cost: float

@@ -82,9 +82,18 @@ def test_detailed_log_lists_events(client: TestClient, admin_headers: dict, db_s
     assert {"items", "total", "page", "page_size"} <= set(body)
     # each item carries tokens + cost + attribution
     row = body["items"][0]
-    assert {"feature", "model", "total_tokens", "total_cost", "actor_user_id", "client_id"} <= set(
-        row
-    )
+    assert {
+        "feature",
+        "feature_label",
+        "model",
+        "total_tokens",
+        "total_cost",
+        "actor_user_id",
+        "client_id",
+    } <= set(row)
+    by_feature = {r["feature"]: r["feature_label"] for r in body["items"]}
+    assert by_feature["project_ai.chat"] == "AI Chat"
+    assert by_feature["onboarding.brand_extraction"] == "Brand Extraction"
 
 
 def test_detailed_log_filters_by_feature(
@@ -108,6 +117,11 @@ def test_platform_summary_totals_and_breakdowns(
     assert abs(s["totals"]["total_cost"] - 0.08) < 1e-6  # 0.05 + 0.01 + 0.02
     features = {r["key"] for r in s["by_feature"]}
     assert {"onboarding.brand_extraction", "project_ai.chat", "assistant.global"} == features
+    labels = {r["key"]: r["label"] for r in s["by_feature"]}
+    assert labels["project_ai.chat"] == "AI Chat"
+    assert labels["assistant.global"] == "Global Assistant"
+    # by_model isn't a feature grouping — no label expected there.
+    assert all(r["label"] is None for r in s["by_model"])
     models = {r["key"] for r in s["by_model"]}
     assert {"claude-opus-4-8", "claude-sonnet-5"} == models
     assert len(s["daily"]) >= 1

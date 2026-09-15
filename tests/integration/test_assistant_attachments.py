@@ -64,14 +64,22 @@ def captured(monkeypatch) -> dict:
     """Configure the AI provider and record what the vision / text calls received."""
     seen: dict = {}
 
-    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
+    async def fake_complete(self, *, system, prompt, max_tokens=None, model=None, context=None):
         seen["prompt"] = prompt
         seen["system"] = system
         seen["images"] = []
         return "Text answer."
 
     async def fake_complete_with_images(
-        self, *, system, prompt, images, max_tokens=None, context=None, operation=None
+        self,
+        *,
+        system,
+        prompt,
+        images,
+        max_tokens=None,
+        model=None,
+        context=None,
+        operation=None,
     ):
         seen["prompt"] = prompt
         seen["system"] = system

@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.ai.cost_optimization import build_report
+from app.ai.features import feature_label
 from app.core.pagination import PaginationParams
 from app.models.ai_usage import AiUsageEvent
 from app.repositories.ai_usage_repository import AiUsageRepository, UsageFilters
@@ -32,7 +33,12 @@ class AiUsageService:
     def list(self, f: UsageFilters, pagination: PaginationParams) -> AiUsageListResponse:
         rows, total = self.repo.list(f, offset=pagination.offset, limit=pagination.limit)
         return AiUsageListResponse(
-            items=[AiUsageEventRead.model_validate(r) for r in rows],
+            items=[
+                AiUsageEventRead.model_validate(r).model_copy(
+                    update={"feature_label": feature_label(r.feature)}
+                )
+                for r in rows
+            ],
             total=total,
             page=pagination.page,
             page_size=pagination.page_size,
@@ -41,7 +47,7 @@ class AiUsageService:
     def platform_summary(self, f: UsageFilters) -> PlatformUsageSummary:
         return PlatformUsageSummary(
             totals=self._totals(f),
-            by_feature=self._group(AiUsageEvent.feature, f),
+            by_feature=self._group(AiUsageEvent.feature, f, is_feature=True),
             by_model=self._group(AiUsageEvent.model, f),
             by_client=self._group(AiUsageEvent.client_id, f),
             by_user=self._group(AiUsageEvent.actor_user_id, f),
@@ -53,7 +59,7 @@ class AiUsageService:
         return ClientUsageSummary(
             client_id=f.client_id,
             totals=self._totals(f),
-            by_feature=self._group(AiUsageEvent.feature, f),
+            by_feature=self._group(AiUsageEvent.feature, f, is_feature=True),
             by_model=self._group(AiUsageEvent.model, f),
             daily=self._daily(f),
         )
@@ -80,10 +86,13 @@ class AiUsageService:
             total_cost=float(t["total_cost"]),
         )
 
-    def _group(self, dimension, f: UsageFilters) -> list[UsageGroupRow]:
+    def _group(
+        self, dimension, f: UsageFilters, *, is_feature: bool = False
+    ) -> list[UsageGroupRow]:
         return [
             UsageGroupRow(
                 key=None if r["key"] is None else str(r["key"]),
+                label=feature_label(str(r["key"])) if is_feature and r["key"] is not None else None,
                 requests=int(r["requests"]),
                 total_tokens=int(r["total_tokens"]),
                 total_cost=float(r["total_cost"]),
