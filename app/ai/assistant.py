@@ -8,9 +8,9 @@ spend/leads/campaign performance, not just onboarding/document knowledge.
 Extends ``ClientAgent`` so the client's rule preamble is always prepended and
 usage is attributed.
 
-Graceful degradation: when Anthropic is unconfigured or the call fails, it returns
-a deterministic, source-grounded reply instead of raising — the same house stance
-as every other AI feature.
+Graceful degradation: when the AI provider is unconfigured or the call fails, it
+returns a deterministic, source-grounded reply instead of raising — the same
+house stance as every other AI feature.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from typing import Literal
 
 from app.ai.attachments import AttachmentBundle
 from app.ai.features import AiFeature
+from app.ai.model_router import model_for
 from app.prompts.loader import load_prompt, render
 from app.services.analytics_service import AnalyticsService
 from app.services.intelligence.client_agent import ClientAgent
@@ -37,7 +38,7 @@ _PERFORMANCE_WINDOW_DAYS = 30
 class AssistantStreamPrep:
     """Everything a streamed answer needs, computed while the DB session is open.
 
-    ``system``/``prompt`` are None when Claude is unconfigured — the caller then
+    ``system``/``prompt`` are None when the AI provider is unconfigured — the caller then
     streams ``fallback`` instead of calling the provider. ``error_fallback`` is
     the distinct copy for when the provider *was* configured but the call
     actually failed mid-stream — see ``_fallback``'s ``reason`` parameter.
@@ -48,6 +49,7 @@ class AssistantStreamPrep:
     error_fallback: str
     system: str | None
     prompt: str | None
+    model: str | None = None
 
 
 class ProjectAssistantAgent(ClientAgent):
@@ -91,10 +93,12 @@ class ProjectAssistantAgent(ClientAgent):
         try:
             if images:
                 raw = await self.ai.complete_with_images(
-                    system=system, prompt=prompt, images=images
+                    system=system, prompt=prompt, images=images, model=model_for(self.feature)
                 )
             else:
-                raw = await self.ai.complete(system=system, prompt=prompt)
+                raw = await self.ai.complete(
+                    system=system, prompt=prompt, model=model_for(self.feature)
+                )
         except Exception:  # transient API error — degrade, never 500 the chat
             logger.warning(
                 "Project assistant completion failed for client %s",
@@ -109,7 +113,7 @@ class ProjectAssistantAgent(ClientAgent):
     ) -> AssistantStreamPrep:
         """Do all DB/RAG work (retrieval + prompt build) up front so the streaming
         step touches only the AI provider — call this while the request's DB
-        session is still open, then stream from ``AnthropicClient.stream``."""
+        session is still open, then stream from ``LLMClient.stream``."""
         snippets = self.retrieve(question, top_k=_MAX_SNIPPETS)
         fallback = self._fallback(snippets, reason="unconfigured")
         error_fallback = self._fallback(snippets, reason="error")
@@ -133,7 +137,9 @@ class ProjectAssistantAgent(ClientAgent):
                 "attachments": "(none)",
             },
         )
-        return AssistantStreamPrep(snippets, fallback, error_fallback, system, prompt)
+        return AssistantStreamPrep(
+            snippets, fallback, error_fallback, system, prompt, model_for(self.feature)
+        )
 
     def _performance_facts(self) -> str:
         """Real spend/lead/campaign numbers from ``analytics_daily``, formatted

@@ -1,0 +1,10 @@
+Date being replaced: {event_date}
+
+The item currently scheduled for this date:
+Title: {current_title}
+Caption: {current_caption}
+
+Manager's reason for replacing it: {reason}
+Manager's new instructions: {instructions}
+
+Generate the replacement item JSON now.

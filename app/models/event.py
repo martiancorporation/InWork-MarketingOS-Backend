@@ -100,6 +100,10 @@ class EventPost(UUIDPrimaryKeyMixin, Base):
     image_url: Mapped[str | None] = mapped_column(Text)
     caption: Mapped[str | None] = mapped_column(Text)
     hashtags: Mapped[str | None] = mapped_column(Text)  # space-separated tags
+    # Post format, e.g. "static"/"carousel"/"reel"/"video"/"story" — a plain
+    # string (the SocialPlatform/ClientPlatform.channel precedent) since this is
+    # an open, app-defined set that can grow without a migration.
+    content_format: Mapped[str | None] = mapped_column(String(30))
     # Call-to-action for the post (label + destination), e.g. "Book Now" → URL.
     cta_label: Mapped[str | None] = mapped_column(String(80))
     cta_url: Mapped[str | None] = mapped_column(Text)
@@ -131,7 +135,7 @@ class EventAsset(UUIDPrimaryKeyMixin, Base):
         GUID, ForeignKey("marketing_events.id", ondelete="CASCADE"), nullable=False, index=True
     )
     document_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+        GUID, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

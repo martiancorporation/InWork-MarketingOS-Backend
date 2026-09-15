@@ -1,6 +1,6 @@
 """API tests: onboarding cross-field consistency check (review-step guardrail).
 
-Runs against the deterministic fallback (the hermetic suite has no Anthropic
+Runs against the deterministic fallback (the hermetic suite has no OpenRouter
 key), so findings are the rule-based ones mirroring the web check."""
 
 from __future__ import annotations

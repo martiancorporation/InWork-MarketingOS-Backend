@@ -90,9 +90,33 @@ class IntelligenceService:
         directive.status = (
             DirectiveStatus.active.value if activate else DirectiveStatus.superseded.value
         )
+        self._recompute_capability_flags(directive.profile_id)
         self.db.commit()
         self.db.refresh(directive)
         return DirectiveRead.model_validate(directive)
+
+    def _recompute_capability_flags(self, profile_id: uuid.UUID) -> None:
+        """Keep ``ClientProfile.capability_flags`` in sync with whichever
+        directives are actually ``active`` right now. It's built once at
+        build time (``IntelligenceOrchestrator``), but resolving a directive
+        here — approving one held at ``pending_review``, or dismissing an
+        active one — changes what should be enforced, and the profile's
+        stored snapshot (what ``ContextService`` actually reads) has to
+        reflect that, not just the one directive's own status.
+        """
+        profile = self.profiles.get(profile_id)
+        if profile is None:
+            return
+        flags: dict = {}
+        for d in self.directives.active_for_profile(profile_id):
+            if d.status != DirectiveStatus.active.value:
+                continue
+            for key, value in (d.capability_flags or {}).items():
+                if isinstance(value, bool) and key in flags and isinstance(flags[key], bool):
+                    flags[key] = flags[key] and value  # a single False disables it
+                else:
+                    flags[key] = value
+        profile.capability_flags = flags
 
     def _response(self, client: Client, version: int) -> IntelligenceResponse:
         profile = self.profiles.get_version(client.id, version)

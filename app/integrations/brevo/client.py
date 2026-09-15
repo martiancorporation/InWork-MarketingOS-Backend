@@ -1,7 +1,7 @@
 """Thin async wrapper around the Brevo transactional email API.
 
 Used exclusively by the daily report email (``app/services/report_email``).
-Mirrors ``app/integrations/anthropic/client.py``'s shape: an ``is_configured``
+Mirrors ``app/integrations/llm/openrouter.py``'s shape: an ``is_configured``
 gate, a lazy httpx client, settings read from ``app/core/config`` (never
 hardcoded). This is a background-job integration, not an HTTP-request one, so
 failures raise ``BrevoSendError`` (with a ``retryable`` flag) rather than an

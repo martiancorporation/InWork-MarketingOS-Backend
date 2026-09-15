@@ -49,6 +49,7 @@ class AnalyticsService:
         rows: list[AnalyticsDailyIn],
         *,
         source: AnalyticsSource = AnalyticsSource.connector,
+        commit: bool = True,
     ) -> int:
         """Upsert daily facts on (client, date, platform), stamping provenance.
 
@@ -56,12 +57,18 @@ class AnalyticsService:
         clears the ``synthetic`` tag off a seeded cell rather than leaving stale
         provenance behind. Done as one batched statement (see
         ``AnalyticsRepository.bulk_upsert``) rather than a get-then-write loop.
+
+        ``commit=False`` lets a caller with more to write in the same
+        transaction (``IntegrationService.sync``) fold this write into its own
+        terminal commit instead of durably persisting analytics rows before a
+        later step in the same logical operation has succeeded.
         """
         upserted = self.analytics.bulk_upsert(client_id, rows, source=source.value)
         # The client's lifetime rollups are read by the client list, the executive
         # brief and the cross-client assistant; keep them in step with the facts.
         refresh_client_rollups(self.db, client_id)
-        self.db.commit()
+        if commit:
+            self.db.commit()
         return upserted
 
     def import_csv(self, client_id: uuid.UUID, raw: bytes) -> AnalyticsCsvImportResponse:

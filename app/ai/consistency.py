@@ -6,8 +6,8 @@ notes talk about selling cars, or a brand voice that violates the client's own
 banned-words list. This is the review-step guardrail: catch
 disconnects before the client is created.
 
-Uses Claude when configured (it's good at cross-field contradiction reasoning);
-otherwise falls back to a deterministic rule set mirroring the web's
+Uses the AI provider when configured (it's good at cross-field contradiction
+reasoning); otherwise falls back to a deterministic rule set mirroring the web's
 ``runConsistencyCheck``, so the endpoint always returns something useful. All
 onboarding text is treated as untrusted data, never as instructions.
 """
@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import LLMClient, get_llm_client
 from app.models.client import Client
 from app.models.enums import ConsistencyLevel
 from app.prompts.loader import load_prompt, render
@@ -44,8 +44,8 @@ class ConsistencyResult:
 
 
 class ConsistencyAgent:
-    def __init__(self, client: AnthropicClient | None = None) -> None:
-        self._client = client or AnthropicClient()
+    def __init__(self, client: LLMClient | None = None) -> None:
+        self._client = client or get_llm_client()
 
     async def check(
         self, client: Client, context: AiUsageContext | None = None

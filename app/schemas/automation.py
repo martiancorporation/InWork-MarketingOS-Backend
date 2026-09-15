@@ -97,3 +97,23 @@ class DailyReportSweepResult(BaseModel):
     skipped: int
     failed: int
     details: list[DailyReportSweepRow] = []
+
+
+# ---- automatic month-ahead content plan generation ---- #
+
+
+class AutoPlanGenerationRow(BaseModel):
+    client_id: uuid.UUID
+    client_name: str
+    period: str  # "YYYY-MM" the plan was generated for
+    status: str  # generated | skipped | already_generated | failed
+    item_count: int = 0
+    error: str | None = None
+
+
+class AutoPlanGenerationSweepResult(BaseModel):
+    clients: int
+    generated: int
+    skipped: int
+    failed: int
+    details: list[AutoPlanGenerationRow] = []

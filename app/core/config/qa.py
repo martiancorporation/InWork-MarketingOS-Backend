@@ -51,5 +51,5 @@ class QASettings(BaseSettings):
     # when explicitly enabled AND the chosen provider is configured.
     enabled: bool = False  # AI_QA_ENABLED
     # Which provider performs the independent review. Deliberately a DIFFERENT
-    # vendor from the generator (Anthropic) so single-vendor bias is countered.
-    provider: str = "openai"  # AI_QA_PROVIDER — "openai" | "anthropic"
+    # vendor from the generator (OpenRouter) so single-vendor bias is countered.
+    provider: str = "openai"  # AI_QA_PROVIDER — "openai" | "openrouter"

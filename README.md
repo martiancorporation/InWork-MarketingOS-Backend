@@ -34,8 +34,9 @@ service.
 - **Pydantic v2 / pydantic-settings** — validation & typed configuration
 - **SQLAlchemy 2.0 + Alembic** — ORM & database migrations
 - **PostgreSQL** (Neon-compatible) — primary datastore; **pgvector** for RAG
-- **Anthropic (Claude)** — the AI layer (brand extraction, health scores,
-  recommendations, briefs, watchdog, client intelligence)
+- **OpenRouter** — the AI layer (brand extraction, health scores,
+  recommendations, briefs, watchdog, client intelligence); routed through a
+  swappable provider module (`app/integrations/llm/`)
 - **Voyage AI** — optional embeddings provider (falls back to a local embedder)
 - **boto3 / Amazon S3** — object storage for uploads
 - **Playwright (headless Chromium)** — renders client sites for brand extraction
@@ -63,8 +64,9 @@ Supporting pillars:
 - **`app/core/`** — cross-cutting concerns: composed settings, security (JWT +
   password hashing), centralized exception handling, request-id log correlation,
   audit middleware, rate limiting, pagination.
-- **`app/integrations/`** — thin clients for external systems (Anthropic, AWS S3,
-  Voyage embeddings, document extractors, and OAuth stubs for Google/Meta/LinkedIn).
+- **`app/integrations/`** — thin clients for external systems (OpenRouter LLM,
+  AWS S3, Voyage embeddings, document extractors, and OAuth stubs for
+  Google/Meta/LinkedIn).
 - **`app/ai/`** — AI feature orchestration built on top of `integrations` + `prompts`.
 - **`app/services/intelligence/`** — the async client-intelligence (RAG) pipeline,
   driven by a durable job queue and a standalone worker process.
@@ -76,7 +78,7 @@ Key design properties:
   [Security model](#security-model).
 - **Transactional discipline:** repositories flush; services commit. Multi-step
   operations are atomic.
-- **Graceful degradation:** the app runs without an Anthropic key, without S3,
+- **Graceful degradation:** the app runs without an OpenRouter key, without S3,
   and without a Voyage key — each feature falls back to a deterministic path.
 
 ---
@@ -95,11 +97,12 @@ Key design properties:
 | `app/services/` | Business logic & orchestration. |
 | `app/services/intelligence/` | RAG pipeline: orchestrator, ingestion, chunking, context, job queue, reconcile. |
 | `app/repositories/` | Data-access layer (queries only). |
-| `app/integrations/` | External-system clients (anthropic, aws, embeddings, documents, google/meta/linkedin). |
+| `app/integrations/` | External-system clients (llm/OpenRouter, aws, embeddings, documents, google/meta/linkedin). |
 | `app/ai/` | AI feature modules (brand extraction, dashboard signals, health score, recommendations, watchdog, summary, directives, pricing, usage). |
 | `app/prompts/` | Versioned prompt templates, grouped by feature. |
 | `app/db/` | Engine, session factory, declarative base, mixins, portable column types. |
 | `app/worker.py` | Standalone intelligence worker (`python -m app.worker`). |
+| `app/scheduler.py` | Standalone scheduler process (`python -m app.scheduler`) — drives the platform-wide sweeps in `app/tasks/scheduler.py` on a fixed cadence. |
 | `migrations/` | Alembic migrations. |
 | `tests/` | `unit/` and `integration/` suites + `conftest.py`. |
 | `scripts/` | Operational scripts (local startup, seeding, docker entrypoint). |
@@ -132,7 +135,7 @@ Guardrails enforced at startup:
 Notable settings groups: `SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES`,
 `CORS_ORIGINS`, `RATE_LIMIT_ENABLED`, `DATABASE_URL` + pool tuning
 (`DATABASE_POOL_SIZE`, `DATABASE_MAX_OVERFLOW`, `DATABASE_POOL_TIMEOUT`,
-`DATABASE_POOL_RECYCLE`), `ANTHROPIC_*` (key, model, max tokens, timeout,
+`DATABASE_POOL_RECYCLE`), `OPENROUTER_*` (key, model, max tokens, timeout,
 retries), `STORAGE_*` (S3 bucket/region/SSE/limits), and `INTEL_*` (embeddings
 provider, kill-switch).
 
@@ -157,7 +160,7 @@ and launches the server at http://localhost:8000/docs. Idempotent.
 ```bash
 cd Backend
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt                        # or: make install
+pip install -r requirements-dev.txt                    # or: make install
 
 cp .env.local.example .env.local
 python -c "import secrets; print(secrets.token_urlsafe(48))"   # paste into SECRET_KEY
@@ -174,7 +177,7 @@ Open **http://localhost:8000/docs** (Swagger UI) or `GET /health` for liveness.
 # Log in as the seeded admin (returns an access token)
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@inwork.com","password":"12345678"}'
+  -d '{"email":"admin@inwork.com","password":"ChangeMe123456"}'
 
 # List clients (paginated)
 curl "http://localhost:8000/api/v1/clients?page=1&page_size=20" \
@@ -231,9 +234,13 @@ default 20) and return `{ items, total, page, page_size }`. Large collections
 (calendar, analytics series) that previously returned everything are now
 bounded — request larger `page_size` or page through.
 
-**Rate limiting:** in-process sliding-window limiter on `/auth/login` and the
-paid-AI routes (`RATE_LIMIT_ENABLED=true`). It is **per-worker** — for exact
-global limits behind multiple workers, back it with a shared store (Redis).
+**Rate limiting:** sliding-window limiter on `/auth/login` and the paid-AI
+routes (`RATE_LIMIT_ENABLED=true`), plus a per-account backstop on login that
+counts failed attempts only. It is **per-worker by default**
+(`RATE_LIMIT_BACKEND=memory`), so behind N gunicorn workers the effective limit
+is `times × N`; set `RATE_LIMIT_BACKEND=redis` + `REDIS_URL` (and uncomment
+`redis` in `requirements.txt`) for one exact limit shared across every worker
+and replica.
 
 ---
 
@@ -242,7 +249,11 @@ global limits behind multiple workers, back it with a shared store (Redis).
 - **Authentication:** JWT bearer tokens (HS256), issued by `POST /auth/login`.
   Passwords are hashed with **SHA-256 pre-hash → bcrypt** (avoids bcrypt's
   72-byte truncation). Login returns a generic error for both unknown email and
-  wrong password (no user enumeration).
+  wrong password, and runs the bcrypt compare either way (against a fixed dummy
+  hash for an unknown email) so the response time doesn't leak which one it was
+  (no user enumeration, by response content *or* timing). Login mints a unique
+  `jti` + a matching `UserSession` row so the token is revocable server-side;
+  `POST /auth/logout` deletes it, and a scheduled job purges expired sessions.
 - **Roles:** `admin`, `manager`, `user`.
 - **Object-level authorization (anti-IDOR):** admins see everything; non-admins
   see only clients **assigned** to them. An inaccessible client returns **404,
@@ -256,10 +267,6 @@ global limits behind multiple workers, back it with a shared store (Redis).
   traversal defeated), private objects + short-lived presigned URLs, SSE-at-rest.
 - **Auditing:** the `AuditMiddleware` records every API request (actor, action,
   status, duration, ip) on its own session; failures never break the request.
-
-> **Not yet implemented:** server-side token revocation / logout. Tokens are
-> stateless until expiry (`ACCESS_TOKEN_EXPIRE_MINUTES`). The `UserSession` model
-> exists as scaffolding for a future refresh-token/revocation flow.
 
 ---
 
@@ -286,17 +293,21 @@ a pgvector RAG store) that grounds the AI features.
 
 ## AI layer
 
-- **Provider:** Anthropic Claude, via a thin async wrapper
-  ([`app/integrations/anthropic/client.py`](app/integrations/anthropic/client.py))
-  with a request timeout and SDK-level retries on 429/5xx.
+- **Provider:** OpenRouter, via a thin async wrapper
+  ([`app/integrations/llm/openrouter.py`](app/integrations/llm/openrouter.py))
+  with a request timeout and client-side retries on connection failures.
+  Every AI feature depends only on the `LLMClient` protocol
+  ([`app/integrations/llm/base.py`](app/integrations/llm/base.py)) via
+  `get_llm_client()` — swapping providers later is a change in
+  `app/integrations/llm/` alone.
 - **Usage tracking:** every call funnels through one place that records tokens +
   priced cost to `ai_usage_events` (`AI_USAGE_ENABLED`).
 - **Brand extraction:** headless-Chromium render (text after JS, computed
-  brand colors/fonts, a screenshot for Claude vision) with an httpx scrape
-  fallback — both SSRF-guarded.
+  brand colors/fonts, a screenshot for the AI provider's vision) with an httpx
+  scrape fallback — both SSRF-guarded.
 - **Dashboard:** health score, executive brief, watchdog alerts, and
   recommendations — grounded in the client's intelligence context, with
-  deterministic fallbacks when Claude is unconfigured.
+  deterministic fallbacks when the AI provider is unconfigured.
 - **Prompts** live under `app/prompts/<feature>/` as data, loaded via
   `app/prompts/loader.py`.
 
@@ -333,7 +344,7 @@ pytest tests/unit    # fast, isolated units
 - **Hermetic:** the suite pins `APP_ENV=test`, disables audit / usage / rate
   limiting, forces the local embedder, and runs each test against a fresh
   in-memory **SQLite** database with FK enforcement — no network, no real
-  Postgres/S3/Anthropic (external services are faked).
+  Postgres/S3/OpenRouter (external services are faked).
 - **Coverage:** unit + integration for routers, services, security, uploads,
   the SSRF guard, rate limiting, and the intelligence pipeline, including
   authorization (403/404) paths.
@@ -401,6 +412,7 @@ docker run --env-file .env.production -e RUN_MIGRATIONS=1 -p 8000:8000 inwork-ap
 | `make lint` / `make format` | Ruff check / format |
 | `make seed` | Create the initial admin (idempotent) |
 | `python -m app.worker` | Run the intelligence worker |
+| `python -m app.scheduler` | Run the platform-wide sweep scheduler |
 
 All commands accept `APP_ENV=<env>`.
 

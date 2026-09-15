@@ -1,6 +1,6 @@
 """API tests: the AI dashboard (health/brief/watchdog/recommendations) + decisions.
 
-The suite is hermetic (no ANTHROPIC_API_KEY), so these exercise the deterministic
+The suite is hermetic (no OPENROUTER_API_KEY), so these exercise the deterministic
 fallback path and the decision write/merge. Signals are grounded in real client
 data — including calendar posts pending approval.
 """

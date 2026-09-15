@@ -20,7 +20,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.ai.dashboard_signals import DashboardSignals, GoalMetric
 from app.ai.executive_brief import ExecutiveBriefAgent
@@ -32,7 +32,7 @@ from app.ai.recommendations import RecommendationsAgent
 from app.ai.usage import AiUsageContext
 from app.ai.watchdog import WatchdogAgent
 from app.core.pagination import PaginationParams
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import get_llm_client
 from app.models.client import Client
 from app.models.enums import ApprovalStatus, ComplianceKind, IntegrationStatus
 from app.models.event import MarketingEvent
@@ -157,7 +157,7 @@ class DashboardService:
             executive_brief=brief,
             watchdog=watchdog,
             recommendations=recs,
-            ai_generated=AnthropicClient().is_configured,
+            ai_generated=get_llm_client().is_configured,
             qa_review=qa_review,
         )
         # One atomic upsert — see DashboardSnapshotRepository.upsert. Two
@@ -309,6 +309,24 @@ class DashboardService:
                 rec.decision = RecommendationDecisionRead.model_validate(action)
 
     def _signals(self, client: Client) -> DashboardSignals:
+        # Eager-load the 4 collections this method reads instead of letting
+        # each one lazy-load individually on first touch below — `client` is
+        # already in this session's identity map (fetched by the router's
+        # ClientService.get_client), so this re-fetch populates the same
+        # object rather than creating a duplicate.
+        client = (
+            self.db.scalars(
+                select(Client)
+                .where(Client.id == client.id)
+                .options(
+                    selectinload(Client.integrations),
+                    selectinload(Client.compliance_entries),
+                    selectinload(Client.campaigns),
+                    selectinload(Client.platforms),
+                )
+            ).first()
+            or client
+        )
         integrations = list(client.integrations)
         connected = sum(1 for i in integrations if i.status == IntegrationStatus.connected)
         pending = len(integrations) - connected

@@ -21,7 +21,7 @@ from datetime import date
 import httpx
 
 from app.core.config import get_settings
-from app.core.exceptions import AppError
+from app.core.exceptions import AppError, ProviderAuthError
 
 _GRAPH = "https://graph.facebook.com/{version}"
 _TIMEOUT = 30.0
@@ -127,7 +127,14 @@ class MetaClient:
                     ) from exc
                 payload = _safe_json(resp)
                 if resp.status_code >= 400 or "error" in payload:
-                    message = (payload.get("error") or {}).get("message") or resp.text[:200]
+                    error = payload.get("error") or {}
+                    message = error.get("message") or resp.text[:200]
+                    # An OAuthException (classically code 190) means the token
+                    # itself is dead — surface that as its own type so the
+                    # caller can mark the integration "needs reauth" rather
+                    # than "retry later". Everything else is a plain API error.
+                    if error.get("type") == "OAuthException" or resp.status_code in (401, 403):
+                        raise ProviderAuthError(f"Meta rejected our credentials: {message}")
                     raise AppError(
                         f"Meta request failed: {message}",
                         code="meta_api_error",

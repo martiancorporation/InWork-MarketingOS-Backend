@@ -1,6 +1,6 @@
 """Cross-provider QA layer.
 
-One provider (Anthropic) generates content; a DIFFERENT provider independently
+One provider (OpenRouter) generates content; a DIFFERENT provider independently
 reviews it, so single-vendor bias is countered. The reviewer returns a structured
 verdict (ok / concerns + notes) grounded in the same client context and facts the
 generator used.
@@ -9,7 +9,7 @@ Graceful degradation is the whole point of the ``not_reviewed`` status: when QA
 is disabled (``AI_QA_ENABLED`` off) or the QA provider is unconfigured, ``review``
 returns a clean ``not_reviewed`` passthrough — never an error, never a block. The
 QA provider is chosen with ``AI_QA_PROVIDER`` and defaults to OpenAI (a different
-vendor from the Anthropic generator).
+vendor from the OpenRouter-routed generator).
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from app.ai.features import AiFeature
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
 from app.core.config import get_settings
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import get_llm_client
 from app.integrations.openai.client import OpenAIClient
 from app.prompts.loader import load_prompt, render
 from app.schemas.ai import QAVerdict
@@ -34,11 +34,12 @@ _MAX_NOTES = 5
 def make_qa_client(provider: str, context: AiUsageContext | None = None):
     """Return a QA provider client exposing ``async complete`` + ``is_configured``.
 
-    Defaults to OpenAI (a different vendor from the Anthropic generator). Anthropic
-    is allowed too — useful for testing the wiring against a single available key.
+    Defaults to OpenAI (a different vendor from the OpenRouter-routed generator).
+    ``"openrouter"`` is allowed too — useful for testing the wiring against a
+    single available key.
     """
-    if provider == "anthropic":
-        return AnthropicClient(context)
+    if provider == "openrouter":
+        return get_llm_client(context)
     return OpenAIClient(context)
 
 

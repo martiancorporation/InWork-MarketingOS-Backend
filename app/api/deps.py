@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from functools import lru_cache
 from typing import Annotated
 
 import jwt
@@ -77,11 +78,15 @@ def get_current_admin(
     return user
 
 
+@lru_cache
 def get_storage() -> Storage:
     """Provide the app-wide object-storage backend (S3).
 
-    Overridable in tests via ``app.dependency_overrides[get_storage]``. The S3
-    client itself is created lazily on first call, so this is cheap to build.
+    Overridable in tests via ``app.dependency_overrides[get_storage]`` (an
+    override replaces this callable entirely, so it never touches the cache).
+    Cached process-wide — it's a pure function of settings, and rebuilding a
+    fresh ``S3Storage`` (and its lazily-created boto3 client) on every request
+    was pure overhead.
     """
     return S3Storage(get_settings().storage)
 

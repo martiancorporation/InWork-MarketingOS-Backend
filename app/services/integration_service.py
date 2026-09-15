@@ -29,7 +29,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.exceptions import AppError, BadRequestError, NotFoundError
+from app.core.exceptions import AppError, BadRequestError, NotFoundError, ProviderAuthError
 from app.integrations.crypto import TokenCipher
 from app.integrations.google.ads import GoogleAdsClient
 from app.integrations.google.ga4 import Ga4Client
@@ -379,15 +379,41 @@ class IntegrationService:
         try:
             rows, platform = await self._fetch_insights(integration, key)
         except Exception as exc:
-            integration.status = IntegrationStatus.error
+            # A dead OAuth grant (ProviderAuthError, raised by the provider
+            # clients) needs a reconnect; anything else — a network blip, a
+            # rate limit, a bad request — is worth retrying, so it stays
+            # `error`. Without that split an operator can't tell the two apart
+            # without reading `last_error` prose.
+            integration.status = (
+                IntegrationStatus.needs_reauth
+                if isinstance(exc, ProviderAuthError)
+                else IntegrationStatus.error
+            )
             integration.last_error = str(exc)[:1000]
             self.db.commit()
             raise
-        # Upsert every day's facts for the provider's platform (own transaction).
+        # Upsert every day's facts for the provider's platform. ``commit=False``
+        # so these rows are no longer durably persisted *on their own* ahead of
+        # everything else: a crash before the terminal commit below now leaves
+        # a coherent "this sync didn't happen" state (the next sync re-pulls
+        # the same provider data) instead of orphaned analytics rows next to an
+        # integration that still looks unsynced.
+        #
+        # Caveat, deliberate: for the keys that follow up with an additive sync
+        # (`_sync_platform_insights` / `_sync_analytics_breakdowns`), those
+        # services own their own commit, which lands these rows together with
+        # the insight rows — before the status update below. Only LinkedIn
+        # (neither branch) is fully atomic end-to-end. Closing that last gap
+        # means giving the additive syncs a SAVEPOINT so their best-effort
+        # failure can roll back without discarding these rows; not worth the
+        # redesign for a window whose worst case is a stale `last_sync_at`.
+        #
         # Meta returns one row per day (last_90d); every other provider still
         # returns a single row dated today until they grow day-level pulls too.
         AnalyticsService(self.db).ingest(
-            client_id, [AnalyticsDailyIn(platform=platform, **row) for row in rows]
+            client_id,
+            [AnalyticsDailyIn(platform=platform, **row) for row in rows],
+            commit=False,
         )
         if key in _META_KEYS or key in (IntegrationKey.google_ads, IntegrationKey.google_lsa):
             await self._sync_platform_insights(client_id, key, integration)
@@ -472,7 +498,7 @@ class IntegrationService:
         """
         account = integration.external_account_id or ""
         if key in _META_KEYS:
-            token = self.cipher.decrypt(integration.access_token_encrypted)
+            token = await self._meta_access_token(integration)
             rows = await self.meta_client.fetch_daily_insights(token, account)
             return rows, SocialPlatform.facebook
         if key in _LINKEDIN_KEYS:
@@ -513,7 +539,12 @@ class IntegrationService:
         accounts = await oauth.list_ad_accounts(token)
         account = _select_ad_account(accounts, ad_account_id)
         integration.access_token_encrypted = self.cipher.encrypt(token)
-        integration.refresh_token_encrypted = None  # Meta long-lived tokens self-renew
+        # Meta has no separate refresh token — a long-lived access token
+        # (~60 days) is renewed by re-exchanging itself via the same
+        # fb_exchange_token endpoint (see _meta_access_token), not via a
+        # refresh grant. It does NOT renew on its own; sync() proactively
+        # re-extends it as it approaches expiry.
+        integration.refresh_token_encrypted = None
         integration.token_expires_at = self._expiry(expires_in)
         integration.scopes = get_settings().integrations.meta_scopes
         if account is None:
@@ -619,6 +650,44 @@ class IntegrationService:
         integration.external_account_id = account.get("id")
         integration.account_label = account.get("name") or account.get("id")
         integration.scopes = get_settings().integrations.linkedin_scopes
+
+    async def _meta_access_token(self, integration: Integration) -> str:
+        """Return a valid Meta access token, proactively re-extending it if
+        it's approaching its ~60-day expiry.
+
+        Meta has no refresh-token grant — the same long-lived token is
+        re-exchanged for a fresh one via ``fb_exchange_token`` (the identical
+        call used at initial connect, see ``_complete_meta``), and only works
+        while the current token is *still valid*. A generous 7-day renewal
+        window (vs. the 60-second one used for Google/LinkedIn's short-lived
+        tokens) means a brief outage of this renewal step doesn't strand the
+        integration before the next sync gets another chance.
+        """
+        now = datetime.now(UTC)
+        expires = integration.token_expires_at
+        if expires is not None and expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        current = self.cipher.decrypt(integration.access_token_encrypted)
+        fresh = expires is None or expires > now + timedelta(days=7)
+        if fresh:
+            return current
+        try:
+            renewed = await self.meta_oauth.exchange_long_lived(current)
+        except AppError:
+            logger.warning(
+                "Meta token renewal failed for integration %s — using the "
+                "still-valid stored token for this sync.",
+                integration.id,
+                exc_info=True,
+            )
+            return current
+        token = renewed.get("access_token")
+        if not token:  # renewal failed — fall back to the stored token
+            return current
+        integration.access_token_encrypted = self.cipher.encrypt(token)
+        integration.token_expires_at = self._expiry(renewed.get("expires_in"))
+        self.db.commit()
+        return token
 
     async def _linkedin_access_token(self, integration: Integration) -> str:
         """Return a valid LinkedIn access token, refreshing if near expiry."""

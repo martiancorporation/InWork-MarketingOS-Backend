@@ -1,15 +1,15 @@
 """API tests: Project AI assistant ("Ask AI about this project").
 
-Covers chat CRUD, the ask flow (deterministic fallback when Claude is unconfigured
-+ the real AI path via a monkeypatched client), message ordering, and RBAC
-(unassigned user → 404, unauthenticated → 401).
+Covers chat CRUD, the ask flow (deterministic fallback when the AI provider is
+unconfigured + the real AI path via a monkeypatched client), message ordering,
+and RBAC (unassigned user → 404, unauthenticated → 401).
 """
 
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm.openrouter import OpenRouterClient
 from tests.conftest import API
 from tests.helpers import onboarding_payload
 
@@ -61,11 +61,11 @@ def test_ask_fallback_when_ai_configured_but_call_fails(
     "unconfigured" — otherwise a temporary outage looks like a permanent
     misconfiguration to whoever's chatting."""
 
-    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
+    async def fake_complete(self, *, system, prompt, max_tokens=None, model=None, context=None):
         raise RuntimeError("credit balance too low")
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "complete", fake_complete)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "complete", fake_complete)
 
     cid = _client_id(client, admin_headers, name="Error Path Co.")
     chat = _new_chat(client, admin_headers, cid)
@@ -82,12 +82,12 @@ def test_ask_fallback_when_ai_configured_but_call_fails(
 
 
 def test_ask_uses_ai_when_configured(client: TestClient, admin_headers: dict, monkeypatch):
-    async def fake_complete(self, *, system, prompt, max_tokens=None, context=None):
+    async def fake_complete(self, *, system, prompt, max_tokens=None, model=None, context=None):
         assert "brand voice" in prompt  # the question flows into the prompt
         return "Your brand voice is confident and warm."
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "complete", fake_complete)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "complete", fake_complete)
 
     cid = _client_id(client, admin_headers)
     chat = _new_chat(client, admin_headers, cid)

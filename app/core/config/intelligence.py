@@ -3,8 +3,9 @@
 Controls the post-onboarding pipeline that builds a per-client knowledge profile
 (summary + prioritized directives) and a vector RAG layer. Degrades gracefully:
 when the embedding provider is unconfigured a deterministic local embedder is
-used, and when Claude is unconfigured the agents fall back to a structured,
-deterministic profile — so the pipeline always produces *something* usable.
+used, and when the AI provider is unconfigured the agents fall back to a
+structured, deterministic profile — so the pipeline always produces
+*something* usable.
 """
 
 from __future__ import annotations

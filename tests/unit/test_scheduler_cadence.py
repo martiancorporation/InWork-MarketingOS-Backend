@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.core.config.scheduler import SchedulerSettings
 from app.tasks.scheduler import (
+    AUTO_PLAN_GENERATION_JOB,
     DIGEST_JOB,
     INTEGRATION_SYNC_JOB,
     REPORT_EMAIL_JOB,
@@ -20,6 +21,19 @@ def test_defaults():
     assert jobs[DIGEST_JOB].interval_seconds == 1440 * 60
     assert jobs[SESSION_PURGE_JOB].interval_seconds == 60 * 60
     assert jobs[REPORT_EMAIL_JOB].interval_seconds == 10 * 60
+    assert jobs[AUTO_PLAN_GENERATION_JOB].interval_seconds == 60 * 60
+
+
+def test_auto_plan_generation_can_be_disabled():
+    jobs = {j.name for j in build_jobs(SchedulerSettings(auto_plan_generation_enabled=False))}
+    assert AUTO_PLAN_GENERATION_JOB not in jobs
+    assert WATCHDOG_JOB in jobs
+
+
+def test_auto_plan_generation_custom_interval():
+    s = SchedulerSettings(auto_plan_generation_check_interval_minutes=15)
+    jobs = {j.name: j for j in build_jobs(s)}
+    assert jobs[AUTO_PLAN_GENERATION_JOB].interval_seconds == 15 * 60
 
 
 def test_custom_intervals_are_honored():

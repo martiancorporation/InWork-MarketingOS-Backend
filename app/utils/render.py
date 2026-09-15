@@ -32,6 +32,7 @@ from typing import Any, NamedTuple
 from urllib.parse import urlparse
 
 from app.utils.web import (
+    _CHROME_UA,
     _GENERIC_FONTS,
     _as_hex,
     _clean_str,
@@ -43,10 +44,6 @@ from app.utils.web import (
 logger = logging.getLogger("app.utils.render")
 
 _VIEWPORT = {"width": 1280, "height": 800}
-_CHROME_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-)
 _EXTRA_HEADERS = {"Accept-Language": "en-US,en;q=0.9"}
 _LAUNCH_ARGS = [
     "--disable-blink-features=AutomationControlled",

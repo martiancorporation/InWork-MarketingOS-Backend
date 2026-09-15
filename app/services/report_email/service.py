@@ -22,8 +22,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ai.daily_report import DailyReportAgent
-from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.brevo.client import BrevoClient, BrevoSendError
+from app.integrations.llm import LLMClient
 from app.models.client import Client
 from app.models.enums import ReportEmailStatus, UserRole
 from app.models.report_email_log import ReportEmailLog
@@ -45,7 +45,7 @@ class ReportEmailService:
         self,
         db: Session,
         *,
-        ai_client: AnthropicClient | None = None,
+        ai_client: LLMClient | None = None,
         brevo_client: BrevoClient | None = None,
     ) -> None:
         self.db = db

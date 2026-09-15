@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, timedelta
 
+import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -210,6 +211,109 @@ def test_sync_requires_connection(client, admin_headers: dict, meta_configured):
     cid = _client_id(client, admin_headers)
     resp = client.post(f"{API}/clients/{cid}/integrations/meta/sync", headers=admin_headers)
     assert resp.status_code in (400, 404)  # never connected
+
+
+def _connect_meta(client, admin_headers: dict, cid: str) -> None:
+    start = client.post(
+        f"{API}/clients/{cid}/integrations/meta/oauth/start", headers=admin_headers
+    ).json()
+    resp = client.post(
+        f"{API}/clients/{cid}/integrations/meta/oauth/complete",
+        headers=admin_headers,
+        json={"code": "auth-code-abc", "state": start["state"], "ad_account_id": "act_999"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_sync_marks_integration_error_on_transient_failure(
+    client, admin_headers: dict, meta_configured, fake_meta_oauth, monkeypatch
+):
+    """A network blip (or any non-auth API error) degrades to `status=error`
+    with `last_error` set — never an unhandled 500 — and is distinct from the
+    `needs_reauth` case below."""
+    from app.core.exceptions import AppError
+
+    cid = _client_id(client, admin_headers)
+    _connect_meta(client, admin_headers, cid)
+
+    async def unreachable(self, token, ad_account_id, *, date_preset="last_90d"):
+        raise AppError("Could not reach Meta: timeout", code="meta_unreachable", status_code=502)
+
+    monkeypatch.setattr(MetaClient, "fetch_daily_insights", unreachable)
+    resp = client.post(f"{API}/clients/{cid}/integrations/meta/sync", headers=admin_headers)
+    assert resp.status_code == 502, resp.text  # typed error, not a 500
+
+    state = client.get(f"{API}/clients/{cid}/integrations/meta", headers=admin_headers).json()
+    assert state["status"] == "error"
+    assert "timeout" in state["last_error"]
+
+
+def test_sync_marks_integration_needs_reauth_on_dead_oauth_grant(
+    client, admin_headers: dict, meta_configured, fake_meta_oauth, monkeypatch
+):
+    """A dead OAuth grant is distinguishable from a transient failure —
+    `needs_reauth`, not `error` — so an operator can tell "reconnect now" from
+    "retry later" without reading free-text error messages."""
+    from app.core.exceptions import ProviderAuthError
+
+    cid = _client_id(client, admin_headers)
+    _connect_meta(client, admin_headers, cid)
+
+    async def dead_token(self, token, ad_account_id, *, date_preset="last_90d"):
+        raise ProviderAuthError("Meta rejected our credentials: Error validating access token")
+
+    monkeypatch.setattr(MetaClient, "fetch_daily_insights", dead_token)
+    resp = client.post(f"{API}/clients/{cid}/integrations/meta/sync", headers=admin_headers)
+    assert resp.status_code == 400, resp.text  # typed error, not a 500
+    # The error envelope must not carry provider-internal classification data
+    # (`details` is serialized straight to the caller — see app/core/exceptions.py).
+    assert "details" not in resp.json()["error"]
+
+    state = client.get(f"{API}/clients/{cid}/integrations/meta", headers=admin_headers).json()
+    assert state["status"] == "needs_reauth"
+    assert "access token" in state["last_error"]
+
+
+def test_meta_client_classifies_oauth_exception_as_provider_auth_error(monkeypatch):
+    """The classification itself lives in MetaClient: a Graph `OAuthException`
+    payload must surface as ProviderAuthError, while any other Graph error
+    stays a plain AppError (retryable)."""
+    import asyncio
+
+    from app.core.exceptions import AppError, ProviderAuthError
+
+    class _FakeResponse:
+        def __init__(self, payload: dict, status_code: int = 400) -> None:
+            self._payload = payload
+            self.status_code = status_code
+            self.text = str(payload)
+
+        def json(self) -> dict:
+            return self._payload
+
+    class _FakeHttp:
+        def __init__(self, payload: dict) -> None:
+            self._payload = payload
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc) -> None:
+            return None
+
+        async def get(self, *_args, **_kwargs):
+            return _FakeResponse(self._payload)
+
+    def _run(payload: dict):
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **_kw: _FakeHttp(payload))
+        return asyncio.run(MetaClient()._paginated("https://graph.test/x", {}))
+
+    with pytest.raises(ProviderAuthError):
+        _run({"error": {"type": "OAuthException", "code": 190, "message": "token expired"}})
+
+    with pytest.raises(AppError) as seen:
+        _run({"error": {"type": "GraphMethodException", "code": 100, "message": "bad field"}})
+    assert not isinstance(seen.value, ProviderAuthError)
 
 
 def test_oauth_unconfigured_returns_503(client, admin_headers: dict, meta_configured):

@@ -1,0 +1,9 @@
+Manager's request: {prompt}
+
+Date range: {start_date} to {end_date} ({range_label})
+Today's date is {today} — never generate an item dated before {start_date}.
+
+Existing items already scheduled in this range (avoid duplicating these):
+{existing_items}
+
+Generate the content calendar JSON now.

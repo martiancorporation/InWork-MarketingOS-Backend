@@ -11,52 +11,22 @@ from __future__ import annotations
 import csv
 import io
 
+from app.services.reports.content import (
+    CAMPAIGN_HEADER as _CAMPAIGN_HEADER,
+)
+from app.services.reports.content import (
+    CHANNEL_HEADER as _CHANNEL_HEADER,
+)
+from app.services.reports.content import (
+    PLATFORM_CAMPAIGN_HEADER as _PLATFORM_CAMPAIGN_HEADER,
+)
+from app.services.reports.content import (
+    PLATFORM_ISSUE_HEADER as _PLATFORM_ISSUE_HEADER,
+)
+from app.services.reports.content import (
+    SECTION_TITLES as _SECTION_TITLES,
+)
 from app.services.reports.content import ReportContent
-
-_SECTION_TITLES = {
-    "campaign_performance": "Campaign Performance",
-    "ga_overview": "Channel Overview",
-    "top_ads": "Top-Performing Campaigns",
-    "went_wrong_right": "What Went Right / Wrong",
-    "platform_campaigns": "Live Campaigns",
-    "platform_recommendations": "Recommendations & Delivery Issues",
-}
-
-_CAMPAIGN_HEADER = [
-    "Campaign",
-    "Status",
-    "Spend",
-    "Leads",
-    "CPL",
-    "Target CPL",
-    "CTR %",
-    "Target CTR %",
-]
-_CHANNEL_HEADER = [
-    "Channel",
-    "Impressions",
-    "Clicks",
-    "Conversions",
-    "Leads",
-    "Spend",
-    "Revenue",
-    "CTR %",
-    "CPL",
-    "ROAS",
-]
-_PLATFORM_CAMPAIGN_HEADER = [
-    "Channel",
-    "Campaign",
-    "Status",
-    "Impressions",
-    "Clicks",
-    "CTR %",
-    "Spend",
-    "Conversions",
-    "Revenue",
-    "ROAS",
-]
-_PLATFORM_ISSUE_HEADER = ["Channel", "Type", "Severity/Importance", "Title", "Detail"]
 
 
 def render_csv(content: ReportContent) -> bytes:

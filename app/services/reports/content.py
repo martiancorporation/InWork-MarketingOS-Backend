@@ -10,7 +10,7 @@ directly from the campaign rows already pulled for this same report, not routed
 through ``ExecutiveBriefAgent``/``DashboardService`` (that machinery assembles the
 full live-dashboard signal set + an async AI call, built for a different job).
 Keeping this deterministic means report generation is fast and always available,
-Anthropic configured or not.
+AI provider configured or not.
 """
 
 from __future__ import annotations
@@ -37,6 +37,67 @@ ALL_SECTION_KEYS = (
     "platform_campaigns",
     "platform_recommendations",
 )
+
+# Section titles + column headers shared by all four renderers
+# (render_pdf/render_visual/render_excel/render_csv) — single-sourced here so
+# they can't drift out of sync the way render_excel's labels once did.
+SECTION_TITLES = {
+    "campaign_performance": "Campaign Performance",
+    "ga_overview": "Channel Overview",
+    "top_ads": "Top-Performing Campaigns",
+    "went_wrong_right": "What Went Right / Wrong",
+    "platform_campaigns": "Live Campaigns",
+    "platform_recommendations": "Recommendations & Delivery Issues",
+}
+
+CAMPAIGN_HEADER = [
+    "Campaign",
+    "Status",
+    "Spend",
+    "Leads",
+    "CPL",
+    "Target CPL",
+    "CTR %",
+    "Target CTR %",
+]
+CHANNEL_HEADER = [
+    "Channel",
+    "Impressions",
+    "Clicks",
+    "Conversions",
+    "Leads",
+    "Spend",
+    "Revenue",
+    "CTR %",
+    "CPL",
+    "ROAS",
+]
+PLATFORM_CAMPAIGN_HEADER = [
+    "Channel",
+    "Campaign",
+    "Status",
+    "Impressions",
+    "Clicks",
+    "CTR %",
+    "Spend",
+    "Conversions",
+    "Revenue",
+    "ROAS",
+]
+PLATFORM_ISSUE_HEADER = ["Channel", "Type", "Severity/Importance", "Title", "Detail"]
+
+# render_excel.py's sheet names, not the same dict as SECTION_TITLES above:
+# Excel sheet titles have a hard 31-character limit (openpyxl only warns past
+# that — some spreadsheet apps then fail to open the file), so a couple of
+# these are deliberately shorter, not an accidental drift.
+EXCEL_SHEET_TITLES = {
+    "campaign_performance": "Campaign Performance",
+    "ga_overview": "Channel Overview",
+    "top_ads": "Top Campaigns",
+    "went_wrong_right": "Summary",
+    "platform_campaigns": "Live Campaigns",
+    "platform_recommendations": "Recommendations & Issues",
+}
 
 # Which SocialPlatform bucket(s) an analytics_daily row lands in for a given
 # IntegrationKey — mirrors the sync write path (integration_service.py's Meta

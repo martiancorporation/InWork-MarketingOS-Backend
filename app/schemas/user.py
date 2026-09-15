@@ -26,7 +26,13 @@ class UserCreate(StrictModel):
 
     name: str = Field(min_length=1, max_length=120)
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    # 12 is the length at which a human-chosen password stops being trivially
+    # crackable offline; NIST SP 800-63B's guidance is length over composition
+    # rules, which is why this is the bound that moved and not the (already
+    # weak) letter+digit check. Only gates admin-created users — existing
+    # hashes are unaffected, and `LoginRequest` deliberately has no floor (a
+    # length rule there would hint at which passwords are real).
+    password: str = Field(min_length=12, max_length=128)
     role: UserRole = UserRole.user
 
     @field_validator("password")

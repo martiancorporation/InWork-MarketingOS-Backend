@@ -55,4 +55,6 @@ class SessionRepository(BaseRepository[UserSession]):
             .execution_options(synchronize_session=False)
         )
         result = self.db.execute(stmt)
-        return result.rowcount or 0
+        # `rowcount` is on CursorResult, which a DML execute() returns, but
+        # the stubs type this as the base Result — hence the narrow ignore.
+        return result.rowcount or 0  # type: ignore[attr-defined]

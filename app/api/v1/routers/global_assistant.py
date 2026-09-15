@@ -6,7 +6,7 @@ NOT client-scoped: the assistant reasons over every client the caller can access
 (all clients for an admin, only assigned clients otherwise). That scoping is
 enforced in ``GlobalAssistantService``, so any authenticated user may call this;
 they simply see a smaller portfolio. Degrades to a deterministic summary when
-Claude is unconfigured. Rate-limited as a paid-AI route.
+the AI provider is unconfigured. Rate-limited as a paid-AI route.
 """
 
 from __future__ import annotations

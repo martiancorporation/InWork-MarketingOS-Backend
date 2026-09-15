@@ -6,13 +6,16 @@ resolution). Keep this list in sync when adding a new model file.
 """
 
 from app.models.ai import AiChat, AiChatMessage, AiChatSource, AiSource
+from app.models.ai_model_route import AiModelRoute
 from app.models.ai_usage import AiUsageEvent
 from app.models.alert import Alert
 from app.models.analytics import AnalyticsDaily, StrategyVisual
 from app.models.analytics_breakdown import AnalyticsBreakdown
 from app.models.assignment import ClientAssignment
 from app.models.audit import AuditLog
+from app.models.auto_plan_generation_log import AutoPlanGenerationLog
 from app.models.brand_job import BrandJob
+from app.models.budget import ClientBudget
 from app.models.campaign import Campaign
 from app.models.client import (
     Client,
@@ -42,8 +45,8 @@ from app.models.event import (
 from app.models.integration import Integration
 from app.models.intel_job import IntelJob
 from app.models.knowledge import KnowledgeChunk, KnowledgeSource
-from app.models.notification import Notification
-from app.models.plan import PlanTask
+from app.models.notification import Notification, NotificationPreference
+from app.models.plan import PlanTask, PlanTaskAsset, PlanTaskNote
 from app.models.platform_insight import (
     PlatformAd,
     PlatformAdSet,
@@ -64,18 +67,21 @@ __all__ = [
     "AiChat",
     "AiChatMessage",
     "AiChatSource",
+    "AiModelRoute",
     "AiSource",
     "AiUsageEvent",
     "Alert",
     "AnalyticsBreakdown",
     "AnalyticsDaily",
     "AuditLog",
+    "AutoPlanGenerationLog",
     "BrandJob",
     "Campaign",
     "Client",
     "ClientAssignment",
     "ClientBrandColor",
     "ClientBrandFont",
+    "ClientBudget",
     "ClientContact",
     "ClientDirective",
     "ClientPlatform",
@@ -94,11 +100,14 @@ __all__ = [
     "KnowledgeChunk",
     "KnowledgeSource",
     "Notification",
+    "NotificationPreference",
     "MarketingEvent",
     "Message",
     "MessageAttachment",
     "MessageRecipient",
     "PlanTask",
+    "PlanTaskAsset",
+    "PlanTaskNote",
     "PlatformAd",
     "PlatformAdSet",
     "PlatformCampaign",

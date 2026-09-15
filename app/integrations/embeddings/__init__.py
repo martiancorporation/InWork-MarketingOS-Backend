@@ -1,8 +1,9 @@
 """Pluggable text-embedding backends for the client RAG layer.
 
-Claude has no first-party embeddings API, so this is provider-agnostic. Default
-is Voyage AI (Anthropic's recommended partner); a deterministic local embedder
-is used automatically when no key is configured, so the pipeline always runs.
+The chat LLM provider has no first-party embeddings API, so this is
+provider-agnostic. Default is Voyage AI (Anthropic's recommended embeddings
+partner); a deterministic local embedder is used automatically when no key is
+configured, so the pipeline always runs.
 """
 
 from app.integrations.embeddings.base import EmbeddingClient

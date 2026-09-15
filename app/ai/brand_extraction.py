@@ -13,7 +13,7 @@ Optionally, when the **Brave Search API** is configured, a short web-research
 snippet about the brand is folded into the text the model sees, so the summary
 and tone reflect more than just the landing page.
 
-A single Claude call then writes summary/tone/imagery — *vision* when a
+A single AI provider call then writes summary/tone/imagery — *vision* when a
 screenshot is available (render path), text-only otherwise.
 
 Graceful degradation, in order:
@@ -42,9 +42,9 @@ from anyio import to_thread
 from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
-from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.brave import BraveClient
 from app.integrations.documents.extractor import extract_text
+from app.integrations.llm import LLMClient, get_llm_client
 from app.integrations.scrapingbee import ScrapingBeeClient
 from app.prompts.loader import load_prompt, render
 from app.schemas.onboarding import BrandExtraction, BrandExtractionRequest
@@ -63,7 +63,7 @@ class DocumentInput:
     """A resolved uploaded document to extract a brand theme from.
 
     Either ``text`` (parsed from PDF/DOCX/etc.) or ``image`` bytes (a logo /
-    brand-deck image → Claude vision) drives the extraction.
+    brand-deck image → the AI provider's vision) drives the extraction.
     """
 
     text: str = ""
@@ -88,12 +88,12 @@ class _Signals:
 class BrandExtractionService:
     def __init__(
         self,
-        client: AnthropicClient | None = None,
+        client: LLMClient | None = None,
         *,
         scrapingbee: ScrapingBeeClient | None = None,
         brave: BraveClient | None = None,
     ) -> None:
-        self._client = client or AnthropicClient()
+        self._client = client or get_llm_client()
         self._scrapingbee = scrapingbee or ScrapingBeeClient()
         self._brave = brave or BraveClient()
 
@@ -103,8 +103,9 @@ class BrandExtractionService:
     ) -> DocumentInput:
         """Turn an uploaded file's bytes into a ``DocumentInput``.
 
-        Images (a logo / brand-deck screenshot) go through Claude vision; every
-        other type is parsed to text via the shared document extractor.
+        Images (a logo / brand-deck screenshot) go through the AI provider's
+        vision; every other type is parsed to text via the shared document
+        extractor.
         """
         ctype = (content_type or "").split(";")[0].strip().lower()
         if ctype.startswith("image/"):

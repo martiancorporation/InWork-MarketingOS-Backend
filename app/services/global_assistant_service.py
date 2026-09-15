@@ -3,8 +3,8 @@
 Access scoping is enforced HERE, not at the router: an admin's portfolio is every
 client; everyone else only ever reasons over the clients assigned to them. The
 service assembles a bounded fact sheet from those clients and hands it to
-``GlobalAssistantAgent``, which degrades to a deterministic summary when Claude is
-unconfigured. The endpoint is stateless — nothing is persisted.
+``GlobalAssistantAgent``, which degrades to a deterministic summary when the AI
+provider is unconfigured. The endpoint is stateless — nothing is persisted.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.ai.features import AiFeature
 from app.ai.global_assistant import GlobalAssistantAgent
 from app.ai.usage import AiUsageContext
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import get_llm_client
 from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.client_repository import ClientRepository
@@ -43,7 +43,7 @@ class GlobalAssistantService:
         facts = _portfolio_facts(rows)
 
         agent = GlobalAssistantAgent(
-            ai_client=AnthropicClient(AiUsageContext(feature=AiFeature.ASSISTANT, user_id=user.id))
+            ai_client=get_llm_client(AiUsageContext(feature=AiFeature.ASSISTANT, user_id=user.id))
         )
         answer = await agent.answer(
             content,
@@ -55,7 +55,7 @@ class GlobalAssistantService:
             answer=answer,
             scope=scope_label,
             clients_considered=len(rows),
-            ai_generated=AnthropicClient().is_configured,
+            ai_generated=get_llm_client().is_configured,
         )
 
     def _accessible_clients(self, user: User) -> list:

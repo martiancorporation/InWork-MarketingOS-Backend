@@ -21,7 +21,7 @@ from typing import Any
 from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import LLMClient, get_llm_client
 from app.models.client import Client
 from app.models.enums import DirectiveTier, DirectiveType
 from app.prompts.loader import load_prompt, render
@@ -74,8 +74,8 @@ class Directive:
 
 
 class DirectivesAgent:
-    def __init__(self, client: AnthropicClient | None = None) -> None:
-        self._client = client or AnthropicClient()
+    def __init__(self, client: LLMClient | None = None) -> None:
+        self._client = client or get_llm_client()
 
     async def extract(
         self,

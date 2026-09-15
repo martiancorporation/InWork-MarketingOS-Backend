@@ -37,7 +37,7 @@ def test_review_good_content(client: TestClient, admin_headers: dict):
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["ai_generated"] is False  # no Claude key in tests
+    assert body["ai_generated"] is False  # no OpenRouter key in tests
     assert 0 <= body["seo"]["score"] <= 100
     assert body["compliance"]["passed"] is True
     assert body["brand_voice_aligned"] is None  # AI judge didn't run
@@ -75,13 +75,13 @@ def test_review_seo_flags_short_no_cta_no_hashtags(client: TestClient, admin_hea
 
 
 def test_review_uses_ai_when_configured(client: TestClient, admin_headers: dict, monkeypatch):
-    from app.integrations.anthropic.client import AnthropicClient
+    from app.integrations.llm.openrouter import OpenRouterClient
 
     async def fake_complete(self, *, system, prompt, max_tokens=None, model=None, context=None):
         return '{"brand_voice_aligned": false, "issues": ["Tone is too casual"], "suggestions": ["Match the confident brand voice"]}'
 
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-    monkeypatch.setattr(AnthropicClient, "complete", fake_complete)
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(OpenRouterClient, "complete", fake_complete)
 
     cid = _client_id(client, admin_headers)
     resp = client.post(

@@ -45,7 +45,7 @@ class AiUsageEvent(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     )  # origin, e.g. "onboarding.brand_extraction"
 
     # --- provider / model / call type ---
-    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="anthropic")
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="openrouter")
     model: Mapped[str] = mapped_column(String(80), nullable=False)
     operation: Mapped[str] = mapped_column(
         String(40), nullable=False

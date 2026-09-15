@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from app.core.config import get_settings
 from app.core.config.scheduler import SchedulerSettings
 from app.db.session import get_session_factory
+from app.services.notification_email_service import NotificationEmailService
 from app.services.scheduler_service import SchedulerService
 
 logger = logging.getLogger("app.scheduler")
@@ -22,6 +23,9 @@ INTEGRATION_SYNC_JOB = "integration_sync"
 DIGEST_JOB = "daily_digest"
 SESSION_PURGE_JOB = "session_purge"
 REPORT_EMAIL_JOB = "daily_report_email"
+AUDIT_LOG_PURGE_JOB = "audit_log_purge"
+NOTIFICATION_EMAIL_JOB = "notification_email"
+AUTO_PLAN_GENERATION_JOB = "auto_plan_generation"
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,11 @@ def build_jobs(settings: SchedulerSettings | None = None) -> list[ScheduledJob]:
             s.session_purge_interval_minutes * 60,
             "Delete expired auth sessions (user_sessions)",
         ),
+        ScheduledJob(
+            AUDIT_LOG_PURGE_JOB,
+            s.audit_log_purge_interval_minutes * 60,
+            "Delete audit_log rows past the retention window",
+        ),
     ]
     if s.digest_enabled:
         jobs.append(
@@ -67,6 +76,22 @@ def build_jobs(settings: SchedulerSettings | None = None) -> list[ScheduledJob]:
                 "Send the daily report email to clients whose local 23:30 has passed",
             )
         )
+    if s.notification_email_enabled:
+        jobs.append(
+            ScheduledJob(
+                NOTIFICATION_EMAIL_JOB,
+                s.notification_email_interval_minutes * 60,
+                "Email opted-in users their new warning/critical notifications",
+            )
+        )
+    if s.auto_plan_generation_enabled:
+        jobs.append(
+            ScheduledJob(
+                AUTO_PLAN_GENERATION_JOB,
+                s.auto_plan_generation_check_interval_minutes * 60,
+                "Auto-draft next month's content plan once a client's local day reaches the 15th",
+            )
+        )
     return jobs
 
 
@@ -80,7 +105,7 @@ async def run_job(name: str) -> None:
     try:
         service = SchedulerService(session)
         if name == WATCHDOG_JOB:
-            result = service.run_watchdog_sweep()
+            result = await service.run_watchdog_sweep()
             logger.info(
                 "watchdog sweep: clients=%d opened=%d updated=%d resolved=%d",
                 result.clients,
@@ -102,6 +127,9 @@ async def run_job(name: str) -> None:
         elif name == SESSION_PURGE_JOB:
             deleted = service.purge_expired_sessions()
             logger.info("session purge: deleted %d expired session(s)", deleted)
+        elif name == AUDIT_LOG_PURGE_JOB:
+            deleted = service.purge_expired_audit_logs()
+            logger.info("audit log purge: deleted %d row(s) past retention", deleted)
         elif name == REPORT_EMAIL_JOB:
             sweep = await service.send_daily_reports_sweep()
             logger.info(
@@ -110,6 +138,18 @@ async def run_job(name: str) -> None:
                 sweep.sent,
                 sweep.skipped,
                 sweep.failed,
+            )
+        elif name == NOTIFICATION_EMAIL_JOB:
+            sent = await NotificationEmailService(session).send_pending_emails()
+            logger.info("notification email digest: users emailed=%d", sent)
+        elif name == AUTO_PLAN_GENERATION_JOB:
+            auto_plan = await service.run_auto_plan_generation_sweep()
+            logger.info(
+                "auto plan generation sweep: clients=%d generated=%d skipped=%d failed=%d",
+                auto_plan.clients,
+                auto_plan.generated,
+                auto_plan.skipped,
+                auto_plan.failed,
             )
         else:
             logger.warning("Unknown scheduled job: %s", name)

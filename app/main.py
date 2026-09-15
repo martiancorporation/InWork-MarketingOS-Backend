@@ -53,11 +53,17 @@ def create_app() -> FastAPI:
 
     app.add_middleware(RequestIdMiddleware)
 
-    # True outermost: reject an oversized body before routing/auth/parsing —
-    # added last so Starlette wraps it around everything else.
+    # Reject an oversized body before routing/auth/parsing.
     from app.core.middleware import BodySizeLimitMiddleware
 
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.app.max_request_body_bytes)
+
+    # True outermost (added last, so Starlette wraps it around everything):
+    # security headers must also land on responses the inner layers never
+    # produce — the 413 above, and Starlette's own 500 handler.
+    from app.core.middleware import SecurityHeadersMiddleware
+
+    app.add_middleware(SecurityHeadersMiddleware)
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.app.api_v1_prefix)

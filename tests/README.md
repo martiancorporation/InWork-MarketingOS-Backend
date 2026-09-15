@@ -21,9 +21,9 @@ make test              # or: .venv/bin/python -m pytest
   dialect-portable), created via a `db_session` fixture and wired in by
   overriding the `get_db` dependency — no Postgres required.
 - Config is pinned to a `test` environment in `conftest.py` **before** the app
-  imports, so `.env.*` files never leak in. `ANTHROPIC_API_KEY` is forced empty
+  imports, so `.env.*` files never leak in. `OPENROUTER_API_KEY` is forced empty
   so the AI path never makes a network call; the one test that covers the
-  AI-configured branch monkeypatches the Anthropic client.
+  AI-configured branch monkeypatches the OpenRouter client.
 
 ## Fixtures
 - `client` — a `TestClient` bound to the fresh test DB.

@@ -51,8 +51,8 @@ def test_non_member_gets_404(client, admin_headers, make_user):
 ```
 
 ## Faking external services
-- **Anthropic:** the suite runs with `ANTHROPIC_API_KEY=""` so AI takes its deterministic
-  fallback. To test the configured path, monkeypatch the client's methods.
+- **OpenRouter (LLM):** the suite runs with `OPENROUTER_API_KEY=""` so AI takes its
+  deterministic fallback. To test the configured path, monkeypatch the client's methods.
 - **S3:** override the `get_storage` dependency with a fake (see `tests/unit/test_upload_service.py`).
 - **Embeddings:** `INTEL_EMBEDDING_PROVIDER=fake` (local deterministic embedder).
 - Keep new global side-effects behind an env flag so the suite stays hermetic.

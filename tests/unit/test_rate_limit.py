@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from app.core.exceptions import TooManyRequestsError
-from app.core.rate_limit import RateLimit, reset
+from app.core.rate_limit import MemoryRateLimitStore, RateLimit, reset
 
 
 class _FakeClient:
@@ -71,3 +73,41 @@ def test_disabled_is_a_noop(monkeypatch):
         limiter(req)  # never raises when disabled
 
     get_settings.cache_clear()
+
+
+# ---- MemoryRateLimitStore internals ----
+
+
+def test_store_prunes_buckets_by_age_not_emptiness():
+    """A key seen once and never again keeps a NON-empty deque forever —
+    nothing revisits it to expire its entries. Pruning only "empty" buckets
+    would therefore free nothing at all, which is exactly the leak this
+    guards."""
+    store = MemoryRateLimitStore()
+    for i in range(1000):
+        store.allow("login-account", f"user{i}@test.com", times=5, seconds=60)
+    assert len(store._hits["login-account"]) == 1000
+
+    # Jump past the bucket TTL and force a sweep on the next call.
+    store._last_sweep_at = 0.0
+    later = time.monotonic() + store._BUCKET_TTL_SECONDS + 1
+    store._prune(later)
+    assert store._hits.get("login-account", {}) == {}
+
+
+def test_store_caps_keys_per_scope():
+    store = MemoryRateLimitStore()
+    store._MAX_KEYS_PER_SCOPE = 50
+    for i in range(200):
+        store.allow("login-account", f"user{i}@test.com", times=5, seconds=60)
+    assert len(store._hits["login-account"]) <= 50
+
+
+def test_store_forget_refunds_a_key():
+    store = MemoryRateLimitStore()
+    for _ in range(3):
+        assert store.allow("login-account", "a@test.com", times=3, seconds=60)
+    assert not store.allow("login-account", "a@test.com", times=3, seconds=60)
+
+    store.forget("login-account", "a@test.com")
+    assert store.allow("login-account", "a@test.com", times=3, seconds=60)

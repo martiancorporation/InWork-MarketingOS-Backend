@@ -14,7 +14,7 @@ import os
 os.environ["APP_ENV"] = "test"
 # Force the AI provider "not configured" so the suite is hermetic (no network).
 # Tests that exercise the AI-configured branch monkeypatch the client instead.
-os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["OPENROUTER_API_KEY"] = ""
 os.environ["STORAGE_S3_BUCKET"] = ""
 os.environ["STORAGE_S3_REGION"] = ""
 # Scraping/research providers off so brand extraction stays hermetic (no live
@@ -52,7 +52,7 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 os.environ["AI_USAGE_ENABLED"] = "false"
 # Client intelligence: use the deterministic local embedder so the RAG pipeline
 # runs hermetically (no Voyage key, no network). Agents fall back to their
-# deterministic path because ANTHROPIC_API_KEY is empty (above).
+# deterministic path because OPENROUTER_API_KEY is empty (above).
 os.environ["INTEL_EMBEDDING_PROVIDER"] = "fake"
 # Demo seeding fires on client creation, so leaving it on would give every test
 # that onboards a client a synthetic history — tests asserting "a new client has
@@ -122,13 +122,13 @@ def admin_headers(client: TestClient, db_session: Session) -> dict[str, str]:
         User(
             email="admin@test.com",
             name="Admin",
-            password_hash=hash_password("adminPass1"),
+            password_hash=hash_password("adminPass1234"),
             role=UserRole.admin,
         )
     )
     db_session.commit()
     resp = client.post(
-        f"{API}/auth/login", json={"email": "admin@test.com", "password": "adminPass1"}
+        f"{API}/auth/login", json={"email": "admin@test.com", "password": "adminPass1234"}
     )
     assert resp.status_code == 200, resp.text
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
@@ -142,7 +142,7 @@ def make_user(
 
     def _make(
         email: str = "user@test.com",
-        password: str = "userPass1",
+        password: str = "userPass1234",
         role: str = "user",
         name: str = "Normal User",
     ) -> tuple[dict, dict]:

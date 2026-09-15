@@ -2,8 +2,9 @@
 
 Prioritized, actionable recommendations with a rationale, confidence, and
 expected impact. Each carries a stable ``id`` (rec_key) so a human accept/modify/
-reject decision can be recorded against it (``recommendation_actions``). Claude
-when configured; deterministic fallback grounded in the client's real signals.
+reject decision can be recorded against it (``recommendation_actions``). AI
+provider when configured; deterministic fallback grounded in the client's real
+signals.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from app.ai.features import AiFeature
 from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
 from app.ai.usage import AiUsageContext
-from app.integrations.anthropic.client import AnthropicClient
+from app.integrations.llm import LLMClient, get_llm_client
 from app.models.client import Client
 from app.prompts.loader import load_prompt, render
 from app.schemas.ai import Recommendation
@@ -27,8 +28,8 @@ logger = logging.getLogger("app.ai.recommendations")
 class RecommendationsAgent:
     feature = AiFeature.RECOMMENDATION
 
-    def __init__(self, ai_client: AnthropicClient | None = None) -> None:
-        self._client = ai_client or AnthropicClient()
+    def __init__(self, ai_client: LLMClient | None = None) -> None:
+        self._client = ai_client or get_llm_client()
 
     async def generate(
         self,

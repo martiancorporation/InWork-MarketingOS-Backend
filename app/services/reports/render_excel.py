@@ -14,56 +14,26 @@ from __future__ import annotations
 import io
 from typing import TYPE_CHECKING
 
+from app.services.reports.content import (
+    CAMPAIGN_HEADER as _CAMPAIGN_HEADER,
+)
+from app.services.reports.content import (
+    CHANNEL_HEADER as _CHANNEL_HEADER,
+)
+from app.services.reports.content import (
+    EXCEL_SHEET_TITLES as _SECTION_TITLES,
+)
+from app.services.reports.content import (
+    PLATFORM_CAMPAIGN_HEADER as _PLATFORM_CAMPAIGN_HEADER,
+)
+from app.services.reports.content import (
+    PLATFORM_ISSUE_HEADER as _PLATFORM_ISSUE_HEADER,
+)
 from app.services.reports.content import ReportContent
 
 if TYPE_CHECKING:
     from openpyxl import Workbook
     from openpyxl.worksheet.worksheet import Worksheet
-
-_SECTION_TITLES = {
-    "campaign_performance": "Campaign Performance",
-    "ga_overview": "Channel Overview",
-    "top_ads": "Top Campaigns",
-    "went_wrong_right": "Summary",
-    "platform_campaigns": "Live Campaigns",
-    "platform_recommendations": "Recommendations & Issues",
-}
-
-_CAMPAIGN_HEADER = [
-    "Campaign",
-    "Status",
-    "Spend",
-    "Leads",
-    "CPL",
-    "Target CPL",
-    "CTR %",
-    "Target CTR %",
-]
-_CHANNEL_HEADER = [
-    "Channel",
-    "Impressions",
-    "Clicks",
-    "Conversions",
-    "Leads",
-    "Spend",
-    "Revenue",
-    "CTR %",
-    "CPL",
-    "ROAS",
-]
-_PLATFORM_CAMPAIGN_HEADER = [
-    "Channel",
-    "Campaign",
-    "Status",
-    "Impressions",
-    "Clicks",
-    "CTR %",
-    "Spend",
-    "Conversions",
-    "Revenue",
-    "ROAS",
-]
-_PLATFORM_ISSUE_HEADER = ["Channel", "Type", "Severity/Importance", "Title", "Detail"]
 
 
 def _write_header(ws: Worksheet, header: list[str]) -> None:

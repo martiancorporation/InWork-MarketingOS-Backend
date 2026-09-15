@@ -81,6 +81,15 @@ class DirectiveStatus(str, enum.Enum):
     active = "active"
     superseded = "superseded"
     conflicted = "conflicted"  # opposing rules; needs human resolution
+    #: A newly-extracted `must`/`must_not` directive, held back from the
+    #: enforced preamble until an admin approves it via the same
+    #: resolve-directive endpoint `conflicted` uses. Content pulled from a
+    #: client's own documents becomes a binding, machine-enforced rule for
+    #: every future AI action on that client — a legitimate preference and an
+    #: injected instruction can be textually indistinguishable to the
+    #: extraction model, so the highest-stakes directive types get a human
+    #: gate before going live rather than auto-committing on every rebuild.
+    pending_review = "pending_review"
 
 
 class ProfileStatus(str, enum.Enum):
@@ -145,6 +154,11 @@ class IntegrationStatus(str, enum.Enum):
     disconnected = "disconnected"
     error = "error"
     pending = "pending"
+    #: A sync failed for a reason that specifically means the OAuth grant
+    #: itself is dead (revoked/expired token, invalid_grant, HTTP 401) —
+    #: distinct from ``error``, which also covers transient/network failures
+    #: that are worth retrying rather than re-authenticating.
+    needs_reauth = "needs_reauth"
 
 
 class ComplianceKind(str, enum.Enum):
@@ -227,6 +241,13 @@ class TaskStatus(str, enum.Enum):
     in_progress = "in_progress"
     blocked = "blocked"
     done = "done"
+
+
+class TaskPriority(str, enum.Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    urgent = "urgent"
 
 
 class TaskCategory(str, enum.Enum):

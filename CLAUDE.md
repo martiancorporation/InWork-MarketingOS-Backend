@@ -34,7 +34,7 @@ This file holds the rules and commands an assistant can't infer from the code.
 - **Errors:** raise typed exceptions from `app/core/exceptions.py` (`NotFoundError`, `AuthError`,
   `ForbiddenError`, `ConflictError`, `TooManyRequestsError`, …). Never build HTTP responses in
   services. The central handlers produce the `{"error": {...}}` envelope.
-- **Graceful degradation:** AI (Anthropic), storage (S3), and embeddings (Voyage) must each keep
+- **Graceful degradation:** AI (OpenRouter), storage (S3), and embeddings (Voyage) must each keep
   working via their deterministic fallback when unconfigured — don't hard-require them.
 - **Async routes must not block the event loop:** if an `async def` handler calls sync I/O
   (S3, blocking DB), offload it with `anyio.to_thread.run_sync`. Plain `def` handlers are fine
@@ -58,8 +58,9 @@ Follow the existing vertical slice (model → migration → schema → repositor
 - The hermetic suite pins `APP_ENV=test` and disables audit, ai-usage, and rate limiting in
   `tests/conftest.py`. Keep new global side-effects behind an env flag so tests stay hermetic.
 - `SECRET_KEY` must be ≥32 chars and `CORS_ORIGINS` may not be `*` — config validation rejects both.
-- Token revocation is **not** implemented; JWTs are stateless until expiry. `UserSession` is unused
-  scaffolding — don't assume logout works.
+- Token revocation **is** implemented: login mints a `jti` + a matching `UserSession` row,
+  `POST /auth/logout` deletes it, and `get_current_user` rejects a `jti` whose session is gone.
+  A scheduled job purges expired sessions. See `app/services/auth_service.py`.
 
 ## Do not
 - Do not commit real secrets or point non-prod env files at the production database.

@@ -4,24 +4,37 @@
 - ``POST   /clients/{id}/assistant/chats``                    — start a chat
 - ``GET    /clients/{id}/assistant/chats/{chat_id}``          — chat + messages
 - ``POST   /clients/{id}/assistant/chats/{chat_id}/messages`` — ask a question (AI reply)
+- ``POST   /clients/{id}/assistant/chats/{chat_id}/messages/stream``               — same, streamed (SSE)
+- ``POST   /clients/{id}/assistant/chats/{chat_id}/messages/{mid}/approve-plan``   — approve a chat-drafted content plan
+- ``POST   /clients/{id}/assistant/chats/{chat_id}/messages/{mid}/reject-plan``    — discard a chat-drafted content plan
 - ``DELETE /clients/{id}/assistant/chats/{chat_id}``          — delete a chat
 
 Every route is client-access-scoped via ``ClientService.get_client`` (admin or
 assigned user); an inaccessible client returns 404. The assistant is grounded in
 the client's intelligence profile + RAG knowledge and degrades to a deterministic
-reply when Claude is unconfigured. The ask endpoint is rate-limited (paid-AI).
+reply when the AI provider is unconfigured. The ask endpoint is rate-limited (paid-AI).
 """
 
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import CurrentUser, DbSession, Pagination, RequireClient, StorageDep
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    Pagination,
+    RequireClient,
+    StorageDep,
+    require_capability,
+)
 from app.core.pagination import PaginationParams
 from app.core.rate_limit import RateLimit
+from app.models.client import Client
+from app.models.enums import ClientCapability
 from app.schemas.assistant import (
     AssistantAskRequest,
     AssistantAskResponse,
@@ -29,6 +42,8 @@ from app.schemas.assistant import (
     AssistantChatDetail,
     AssistantChatListResponse,
     AssistantChatRead,
+    AssistantMessageRead,
+    AssistantRejectPlanRequest,
 )
 from app.schemas.common import MessageResponse
 from app.services.assistant_service import AssistantService
@@ -133,10 +148,10 @@ async def ask_stream(
     then a ``done`` frame with the persisted message id + full text. Access +
     chat-existence are checked (404) before the stream opens."""
     service = AssistantService(db)
-    ctx = service.begin_stream(
+    ctx = await service.begin_stream(
         client_id,
         chat_id,
-        user.id,
+        user,
         data.content,
         attachment_upload_ids=data.attachment_upload_ids,
     )
@@ -144,6 +159,42 @@ async def ask_stream(
         service.stream_events(ctx),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post(
+    "/chats/{chat_id}/messages/{message_id}/approve-plan",
+    response_model=AssistantMessageRead,
+    summary="Approve a content-plan draft the AI generated inside this chat",
+)
+def approve_plan(
+    client_id: uuid.UUID,
+    chat_id: uuid.UUID,
+    message_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    # Same responsibility gate as the manual "Generate with AI" flow (BE-03).
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_calendar))],
+) -> AssistantMessageRead:
+    return AssistantService(db).approve_plan_draft(client_id, chat_id, message_id, actor=user)
+
+
+@router.post(
+    "/chats/{chat_id}/messages/{message_id}/reject-plan",
+    response_model=AssistantMessageRead,
+    summary="Discard a content-plan draft the AI generated inside this chat",
+)
+def reject_plan(
+    client_id: uuid.UUID,
+    chat_id: uuid.UUID,
+    message_id: uuid.UUID,
+    data: AssistantRejectPlanRequest,
+    user: CurrentUser,
+    db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_calendar))],
+) -> AssistantMessageRead:
+    return AssistantService(db).reject_plan_draft(
+        client_id, chat_id, message_id, data.reason, actor=user
     )
 
 

@@ -46,6 +46,15 @@ class Settings(BaseSettings):
             raise ValueError("SECRET_KEY must be set to a strong value when APP_ENV=production.")
         return self
 
+    @model_validator(mode="after")
+    def _forbid_demo_seed_in_prod(self) -> Settings:
+        if self.app.is_production and self.demo.seed_on_create:
+            raise ValueError(
+                "DEMO_SEED_ON_CREATE must not be enabled when APP_ENV=production — it "
+                "fabricates synthetic spend/leads data for real clients."
+            )
+        return self
+
 
 @lru_cache
 def get_settings() -> Settings:

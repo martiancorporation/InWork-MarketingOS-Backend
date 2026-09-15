@@ -18,10 +18,11 @@ jobs:
           cache: pip
 
       - name: Install dependencies
+        # requirements-dev.txt pins the tooling (ruff/mypy/pip-audit/pytest-cov)
+        # too — an unpinned linter can turn CI red on unchanged code.
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install ruff mypy pip-audit
+          pip install -r requirements-dev.txt
 
       - name: Lint (ruff)
         run: ruff check .

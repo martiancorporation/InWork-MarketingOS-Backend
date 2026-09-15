@@ -37,10 +37,10 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.exceptions import AppError
+from app.integrations.google.ads import _BASE
 
 logger = logging.getLogger("app.integrations.google.lsa")
 
-_BASE = "https://googleads.googleapis.com/{version}"
 _TIMEOUT = 30.0
 _CAMPAIGN_GAQL = (
     "SELECT segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros "

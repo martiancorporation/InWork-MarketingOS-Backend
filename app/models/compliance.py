@@ -43,7 +43,7 @@ class ComplianceDoc(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         GUID, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
     )
     document_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+        GUID, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     client: Mapped[Client] = relationship(back_populates="compliance_docs")

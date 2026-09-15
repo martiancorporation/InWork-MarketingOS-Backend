@@ -135,8 +135,8 @@ def test_delete_upload(client: TestClient, admin_headers, storage) -> None:
 
 
 def test_user_cannot_access_others_upload(client: TestClient, storage, make_user) -> None:
-    _, a_headers = make_user(email="a@test.com", password="passwordA1")
-    _, b_headers = make_user(email="b@test.com", password="passwordB1")
+    _, a_headers = make_user(email="a@test.com", password="passwordA12345")
+    _, b_headers = make_user(email="b@test.com", password="passwordB12345")
 
     created = _upload(client, a_headers, name="a.pdf")
     upload_id = created.json()["id"]

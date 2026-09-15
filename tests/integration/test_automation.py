@@ -6,10 +6,12 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.integrations.crypto import TokenCipher
 from app.integrations.meta.client import MetaClient
+from app.models.dashboard_snapshot import DashboardSnapshot
 from app.models.enums import IntegrationKey, IntegrationStatus
 from app.models.integration import Integration
 from tests.conftest import API
@@ -94,6 +96,71 @@ def test_integration_sync_sweep_nothing_connected(client, admin_headers: dict):
     resp = client.post(f"{API}/automation/integrations/sync", headers=admin_headers)
     assert resp.status_code == 200
     assert resp.json()["synced"] == 0
+
+
+def test_integration_sync_sweep_prewarms_dashboard_for_synced_clients(
+    client, admin_headers: dict, db_session: Session, monkeypatch
+):
+    """A client with a real connected integration gets its dashboard snapshot
+    pre-computed by the sweep itself — the fix for the client's complaint that
+    the dashboard makes live AI calls on page load."""
+    cid = _client_id(client, admin_headers)
+    db_session.add(
+        Integration(
+            client_id=uuid.UUID(cid),
+            key=IntegrationKey.meta,
+            status=IntegrationStatus.connected,
+            external_account_id="act_1",
+            access_token_encrypted=TokenCipher().encrypt("tok"),
+        )
+    )
+    db_session.commit()
+
+    async def fake_daily_insights(self, token, ad_account_id, *, date_preset="last_90d"):
+        return [
+            {
+                "date": date.today(),
+                "impressions": 100,
+                "clicks": 5,
+                "spend": 10.0,
+                "leads": 1,
+                "conversions": 0,
+                "revenue": 0.0,
+            }
+        ]
+
+    monkeypatch.setattr(MetaClient, "fetch_daily_insights", fake_daily_insights)
+
+    snapshot_before = db_session.scalar(
+        select(DashboardSnapshot).where(DashboardSnapshot.client_id == uuid.UUID(cid))
+    )
+    assert snapshot_before is None
+
+    resp = client.post(f"{API}/automation/integrations/sync", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["synced"] == 1
+
+    db_session.expire_all()
+    snapshot_after = db_session.scalar(
+        select(DashboardSnapshot).where(DashboardSnapshot.client_id == uuid.UUID(cid))
+    )
+    assert snapshot_after is not None
+    assert snapshot_after.computed_at is not None
+
+
+def test_integration_sync_sweep_skips_prewarm_with_nothing_connected(
+    client, admin_headers: dict, db_session: Session
+):
+    cid = _client_id(client, admin_headers)
+    resp = client.post(f"{API}/automation/integrations/sync", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["synced"] == 0
+
+    db_session.expire_all()
+    snapshot = db_session.scalar(
+        select(DashboardSnapshot).where(DashboardSnapshot.client_id == uuid.UUID(cid))
+    )
+    assert snapshot is None
 
 
 def test_client_digest(client, admin_headers: dict):

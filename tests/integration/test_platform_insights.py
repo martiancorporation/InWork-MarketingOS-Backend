@@ -394,9 +394,7 @@ def fake_google_ads_full(monkeypatch):
             ],
         }
 
-    async def campaign_metrics(
-        self, access_token, customer_id, *, login_customer_id=None, days=90
-    ):
+    async def campaign_metrics(self, access_token, customer_id, *, login_customer_id=None, days=90):
         return [
             {
                 "campaign": {"id": "cmp_1"},
@@ -467,9 +465,7 @@ def test_connect_syncs_google_ads_platform_insights(
     assert campaign.effective_status == "MISCONFIGURED"
     assert float(campaign.daily_budget) == 5.0  # micros -> currency
 
-    ad_set = db_session.scalar(
-        select(PlatformAdSet).where(PlatformAdSet.client_id == client_uuid)
-    )
+    ad_set = db_session.scalar(select(PlatformAdSet).where(PlatformAdSet.client_id == client_uuid))
     assert ad_set is not None
     assert ad_set.campaign_id == campaign.id
     assert ad_set.external_id == "adg_1"
@@ -629,9 +625,7 @@ def test_connect_syncs_google_lsa_platform_insights(
 
     # No ad-group/ad rows for LSA.
     assert (
-        db_session.scalar(
-            select(PlatformAdSet).where(PlatformAdSet.client_id == client_uuid)
-        )
+        db_session.scalar(select(PlatformAdSet).where(PlatformAdSet.client_id == client_uuid))
         is None
     )
 
@@ -646,3 +640,20 @@ def test_connect_syncs_google_lsa_platform_insights(
     assert metric.impressions == 500
     assert float(metric.spend) == 80.0
     assert metric.conversions == 4
+
+
+def test_unassigned_user_gets_404(client, admin_headers: dict, make_user):
+    cid = _client_id(client, admin_headers)
+    _user, user_headers = make_user()
+    resp = client.get(f"{API}/clients/{cid}/platform-insights/meta/campaigns", headers=user_headers)
+    assert resp.status_code == 404
+
+
+def test_assigned_user_can_read(client, admin_headers: dict, make_user):
+    cid = _client_id(client, admin_headers)
+    user, user_headers = make_user()
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
+    resp = client.get(f"{API}/clients/{cid}/platform-insights/meta/campaigns", headers=user_headers)
+    assert resp.status_code == 200, resp.text

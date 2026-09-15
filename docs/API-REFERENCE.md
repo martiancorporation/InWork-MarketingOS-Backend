@@ -193,7 +193,7 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 ---
 
 ## Module 2 — Users & Access (Admin)
-**Screen:** Users & Access (agency admin). **Role:** Admin only. **Frontend notes:** Show this screen and the "Create user" button **only to admins**. Roles offered: `admin`, `manager`, `user`. `PATCH` is used both to edit a profile/role and to deactivate (`is_active=false`) — there is no hard-delete of users. Password must be ≥ 8 chars with at least one letter and one digit.
+**Screen:** Users & Access (agency admin). **Role:** Admin only. **Frontend notes:** Show this screen and the "Create user" button **only to admins**. Roles offered: `admin`, `manager`, `user`. `PATCH` is used both to edit a profile/role and to deactivate (`is_active=false`) — there is no hard-delete of users. Password must be ≥ 12 chars with at least one letter and one digit.
 
 ### `POST /api/v1/users`
 - **Auth:** Admin only.
@@ -201,7 +201,7 @@ On exceed → `429`. The frontend should surface a friendly "please slow down" t
 - **Request payload:** `UserCreate` (JSON)
   - `name` — `str` — **required**, `min_length=1`, `max_length=120`
   - `email` — `EmailStr` — **required**
-  - `password` — `str` — **required**, `min_length=8`, `max_length=128`, must contain ≥1 letter and ≥1 digit
+  - `password` — `str` — **required**, `min_length=12`, `max_length=128`, must contain ≥1 letter and ≥1 digit
   - `role` — `UserRole` — optional, default `user` (`admin`/`manager`/`user`)
 - **Success `201`:** `UserRead`.
 - **Errors:** `401`; `403` non-admin; `409` email already exists; `422` validation / weak password.
@@ -507,10 +507,10 @@ Base path: `/clients` (+ `/{client_id}/...`).
 
 ### `POST /api/v1/clients/{client_id}/directives/{directive_id}/resolve`
 - **Auth:** **Admin only.** **Rate limited:** No.
-- **Query params:** `activate` (`bool`, default `true`) — keep active vs dismiss.
+- **Query params:** `activate` (`bool`, default `true`) — activate vs dismiss.
 - **Success `200`:** `DirectiveRead`.
 - **Errors:** `401`; `403`; `404` client or directive.
-- **Why/when:** Resolve a conflicted directive (two opposing rules) by keeping or dismissing it.
+- **Why/when:** Decide a directive that isn't being enforced yet — either a `pending_review` rule (a newly-extracted `must`/`must_not`, or any rule carrying a capability flag, held for admin sign-off before it becomes binding) or a `conflicted` one (two opposing rules). Activating makes it binding and recompiles the profile's `capability_flags`; dismissing supersedes it.
 
 ### `GET /api/v1/clients/{client_id}/context`  *(admin-only debug)*
 - **Auth:** **Admin only.** **Rate limited:** No.
@@ -1059,7 +1059,7 @@ Base path: `/notifications`.
 ---
 
 ## Module 21 — Automation / Platform Ops (Admin)
-**Screen:** No dedicated end-user screen — these are **admin, platform-wide** operations that also run automatically on a cadence by the scheduler process (`python -m app.scheduler`) — the cadence (watchdog / sync / daily-digest intervals) is configurable via `SCHEDULER_*` env vars. Expose them behind an admin "Ops / Automation" panel if you want manual triggers. **Role:** Admin only; **not** assignment-scoped — an admin can act on any client. **Frontend notes:** Use the digest endpoints to build an admin overview of all clients (open alerts, integration/onboarding status). The two `POST` sweeps are manual "run now" triggers of jobs the scheduler already runs.
+**Screen:** No dedicated end-user screen — these are **admin, platform-wide** operations that also run automatically on a cadence by the scheduler process (`python -m app.scheduler`) — the cadence (watchdog / sync / daily-digest intervals) is configurable via `SCHEDULER_*` env vars. Expose them behind an admin "Ops / Automation" panel if you want manual triggers. **Role:** Admin only; **not** assignment-scoped — an admin can act on any client. **Frontend notes:** Use the digest endpoints to build an admin overview of all clients (open alerts, integration/onboarding status). The `POST` sweeps are manual "run now" triggers of jobs the scheduler already runs.
 
 Base path: `/automation`.
 
@@ -1286,7 +1286,8 @@ Base path: `/support-tickets`.
 | `ReportFormat` | `pdf`, `excel`, `visual` | Reports |
 | `RecommendationDecision` | `accepted`, `modified`, `rejected` | Dashboard recommendations |
 | `IntegrationKey` | `ga4`, `search_console`, `google_ads`, `google_lsa`, `meta`, `linkedin` | Integrations |
-| `IntegrationStatus` | `disconnected`, `connected`, `error` (+ pending states) | Integrations |
+| `IntegrationStatus` | `disconnected`, `connected`, `pending`, `error`, `needs_reauth` | Integrations — `needs_reauth` means the OAuth grant is dead (reconnect); `error` is retryable |
+| `DirectiveStatus` | `active`, `pending_review`, `conflicted`, `superseded` | Client intelligence — only `active` directives are enforced |
 | `NotificationLevel` | `info`, `warning`, `critical` | Notifications |
 | `TicketCategory` | `bug`, `feature_request`, `billing`, `account`, `technical_support`, `feedback`, `other` | Support Tickets |
 | `TicketPriority` | `low`, `medium`, `high`, `urgent` | Support Tickets |

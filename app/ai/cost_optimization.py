@@ -1,41 +1,26 @@
 """AI cost-optimization heuristics.
 
 Analyzes recorded AI usage (``ai_usage_events``, rolled up per feature+model) and
-produces concrete, deterministic suggestions to reduce spend — chiefly routing
-high-volume "data-gathering" steps from an expensive model to a cheaper one, and
-enabling prompt caching where a feature re-sends large stable prompts.
+produces concrete, deterministic suggestions to reduce spend — chiefly flagging
+usage recorded on a model OTHER than what ``app.ai.model_router.model_for``
+currently routes that feature's category to, and enabling prompt caching where
+a feature re-sends large stable prompts.
 
 Pure: it takes rolled-up rows and returns a report, so it is trivially testable
 and needs no live provider. Savings are estimates recomputed from the same
 pricing table used to bill the tokens, and are a ceiling, not a guarantee.
+Tied directly to live routing (``model_for``) rather than a separate static
+tier list, so this advisory report and the model a real call actually uses can
+never drift apart.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from decimal import Decimal
 
-from app.ai.model_router import CHEAP_TIER_FEATURES as _DATA_GATHERING_FEATURES
+from app.ai.model_router import category_for, model_for
 from app.ai.pricing import MODEL_PRICING, UsageBreakdown, price
-from app.core.config import get_settings
 from app.schemas.ai_usage import CostOptimizationReport, CostSuggestion
-
-# Features whose calls mostly gather/normalize data (not client-facing prose):
-# safe to run on the cheapest capable model. Shared with app/ai/model_router.py
-# (the module that actually routes live calls) so the advisory report here and
-# live routing can never drift apart.
-# Model tiers (expensive → cheap/mid) come from config, not hard-coded here —
-# see AISettings.cheap_model / mid_model / expensive_models.
-
-
-@dataclass(frozen=True)
-class _ModelTiers:
-    """Configured model tiers the router suggests moving between."""
-
-    cheap: str
-    mid: str
-    expensive: frozenset[str]
-
 
 # Don't bother suggesting for trivial amounts.
 _MIN_SAVINGS = Decimal("0.01")
@@ -49,12 +34,9 @@ def build_report(rows: list[dict]) -> CostOptimizationReport:
     analyzed_requests = sum(int(r.get("requests", 0)) for r in rows)
     analyzed_cost = sum(float(r.get("total_cost", 0.0)) for r in rows)
 
-    ai = get_settings().ai
-    tiers = _ModelTiers(cheap=ai.cheap_model, mid=ai.mid_model, expensive=ai.expensive_model_set)
-
     suggestions: list[CostSuggestion] = []
     for r in rows:
-        suggestions.extend(_row_suggestions(r, tiers))
+        suggestions.extend(_row_suggestions(r))
 
     suggestions.sort(key=lambda s: s.estimated_savings, reverse=True)
     potential = round(sum(s.estimated_savings for s in suggestions), 6)
@@ -66,7 +48,7 @@ def build_report(rows: list[dict]) -> CostOptimizationReport:
     )
 
 
-def _row_suggestions(r: dict, tiers: _ModelTiers) -> list[CostSuggestion]:
+def _row_suggestions(r: dict) -> list[CostSuggestion]:
     feature = str(r.get("feature") or "")
     model = str(r.get("model") or "")
     requests = int(r.get("requests", 0))
@@ -77,34 +59,41 @@ def _row_suggestions(r: dict, tiers: _ModelTiers) -> list[CostSuggestion]:
 
     out: list[CostSuggestion] = []
 
-    # ---- 1. cheaper-model routing off the expensive tier ----
-    if model in tiers.expensive and cost > 0:
-        target = tiers.cheap if feature in _DATA_GATHERING_FEATURES else tiers.mid
-        if target in MODEL_PRICING:
-            projected = price(
-                target,
-                UsageBreakdown(input_tokens=input_tokens, output_tokens=output_tokens),
-            ).total_cost
-            savings = cost - projected
-            if savings >= _MIN_SAVINGS:
-                pct = int(savings / cost * 100) if cost else 0
-                out.append(
-                    CostSuggestion(
-                        id=f"route-cheaper-model:{feature}:{model}",
-                        title=f"Route '{feature}' to {target}",
-                        detail=(
-                            f"'{feature}' ran {requests} time(s) on {model}. "
-                            f"{'This is a data-gathering step; ' if feature in _DATA_GATHERING_FEATURES else ''}"
-                            f"routing it to {target} would cut cost with negligible quality risk."
-                        ),
-                        feature=feature,
-                        current_model=model,
-                        suggested_model=target,
-                        estimated_savings=round(float(savings), 6),
-                        savings_pct=pct,
-                        confidence=80 if feature in _DATA_GATHERING_FEATURES else 60,
-                    )
+    # ---- 1. route to what the live router actually recommends for this
+    # feature's category, if the recorded usage was on a different model ----
+    category = category_for(feature)
+    recommended = model_for(feature)
+    if (
+        category is not None
+        and recommended
+        and recommended != model
+        and cost > 0
+        and recommended in MODEL_PRICING
+    ):
+        projected = price(
+            recommended,
+            UsageBreakdown(input_tokens=input_tokens, output_tokens=output_tokens),
+        ).total_cost
+        savings = cost - projected
+        if savings >= _MIN_SAVINGS:
+            pct = int(savings / cost * 100) if cost else 0
+            out.append(
+                CostSuggestion(
+                    id=f"route-cheaper-model:{feature}:{model}",
+                    title=f"Route '{feature}' to {recommended}",
+                    detail=(
+                        f"'{feature}' ran {requests} time(s) on {model}, but the "
+                        f"'{category}' category is currently routed to {recommended} — "
+                        "switching would cut cost with negligible quality risk."
+                    ),
+                    feature=feature,
+                    current_model=model,
+                    suggested_model=recommended,
+                    estimated_savings=round(float(savings), 6),
+                    savings_pct=pct,
+                    confidence=80,
                 )
+            )
 
     # ---- 2. prompt caching for high-volume, large, uncached prompts ----
     if (
