@@ -25,6 +25,7 @@ SESSION_PURGE_JOB = "session_purge"
 REPORT_EMAIL_JOB = "daily_report_email"
 AUDIT_LOG_PURGE_JOB = "audit_log_purge"
 NOTIFICATION_EMAIL_JOB = "notification_email"
+AUTO_PLAN_GENERATION_JOB = "auto_plan_generation"
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,14 @@ def build_jobs(settings: SchedulerSettings | None = None) -> list[ScheduledJob]:
                 "Email opted-in users their new warning/critical notifications",
             )
         )
+    if s.auto_plan_generation_enabled:
+        jobs.append(
+            ScheduledJob(
+                AUTO_PLAN_GENERATION_JOB,
+                s.auto_plan_generation_check_interval_minutes * 60,
+                "Auto-draft next month's content plan once a client's local day reaches the 15th",
+            )
+        )
     return jobs
 
 
@@ -133,6 +142,15 @@ async def run_job(name: str) -> None:
         elif name == NOTIFICATION_EMAIL_JOB:
             sent = await NotificationEmailService(session).send_pending_emails()
             logger.info("notification email digest: users emailed=%d", sent)
+        elif name == AUTO_PLAN_GENERATION_JOB:
+            auto_plan = await service.run_auto_plan_generation_sweep()
+            logger.info(
+                "auto plan generation sweep: clients=%d generated=%d skipped=%d failed=%d",
+                auto_plan.clients,
+                auto_plan.generated,
+                auto_plan.skipped,
+                auto_plan.failed,
+            )
         else:
             logger.warning("Unknown scheduled job: %s", name)
     finally:

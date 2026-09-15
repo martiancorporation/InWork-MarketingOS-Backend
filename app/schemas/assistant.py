@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.ai.attachments import MAX_ATTACHMENTS
 from app.models.enums import AiRole
-from app.schemas.common import ORMModel, StrictModel
+from app.schemas.common import MAX_TEXT, ORMModel, StrictModel
 
 _MAX_QUESTION = 4000
 _MAX_HISTORY_TURNS = 20
@@ -36,6 +36,28 @@ class AssistantAttachmentRead(BaseModel):
     download_url: str | None = None
 
 
+class PlanDraftItemSummary(BaseModel):
+    """One drafted calendar item, just enough to preview in the chat card."""
+
+    task_id: uuid.UUID
+    title: str
+    event_date: date
+
+
+class PlanDraftAction(BaseModel):
+    """Attached to an assistant message when the chat generated a content-plan
+    draft — the card the frontend renders inline, with Approve/Discard.
+    Persisted in ``AiChatMessage.meta["action"]`` (see ``app.models.ai``); this
+    schema is how it reaches the API response."""
+
+    type: Literal["plan_draft"] = "plan_draft"
+    status: Literal["pending", "approved", "rejected"] = "pending"
+    start_date: date
+    end_date: date
+    task_ids: list[uuid.UUID]
+    items: list[PlanDraftItemSummary] = []
+
+
 class AssistantMessageRead(ORMModel):
     id: uuid.UUID
     role: AiRole
@@ -43,6 +65,10 @@ class AssistantMessageRead(ORMModel):
     tokens: int | None = None
     created_at: datetime
     attachments: list[AssistantAttachmentRead] = []
+    #: Populated by AssistantService from AiChatMessage.meta["action"] — not a
+    #: real ORM column, hence the default (see AiUsageEventRead.feature_label
+    #: for the same "sidecar field, not from_attributes" pattern).
+    action: PlanDraftAction | None = None
 
 
 class AssistantChatRead(ORMModel):
@@ -89,6 +115,10 @@ class AssistantAskRequest(StrictModel):
 class AssistantAskResponse(BaseModel):
     message: AssistantMessageRead
     sources: list[str] = []
+
+
+class AssistantRejectPlanRequest(StrictModel):
+    reason: str = Field(default="Discarded from chat.", max_length=MAX_TEXT)
 
 
 # ---- Global (platform-wide) assistant ----

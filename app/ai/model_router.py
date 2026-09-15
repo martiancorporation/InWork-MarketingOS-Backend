@@ -84,6 +84,10 @@ FEATURE_CATEGORY: dict[str, str] = {
     AiFeature.PROJECT_AI: AiTaskCategory.CONVERSATIONAL,
     AiFeature.ASSISTANT: AiTaskCategory.CONVERSATIONAL,
     AiFeature.DAY_CHAT: AiTaskCategory.CONVERSATIONAL,
+    # Small, cheap "does this chat message want a content plan, and is the
+    # date range clear" check that runs ahead of every Ask AI turn — see
+    # app/ai/plan_chat_intent.py. Classification-shaped, not conversational.
+    AiFeature.PLAN_CHAT_INTENT: AiTaskCategory.CLASSIFICATION,
 }
 
 # Research-backed starting point (Sept 2026 OpenRouter catalog + pricing —

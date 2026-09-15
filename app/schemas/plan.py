@@ -14,7 +14,11 @@ from typing import Self
 from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import TaskCategory, TaskPriority, TaskStatus
-from app.schemas.common import MAX_TEXT, ORMModel, StrictModel
+from app.schemas.common import MAX_LONG_LINE, MAX_TEXT, ORMModel, StrictModel
+
+#: A supporting link is a URL, not free text — capped shorter than MAX_TEXT.
+_MAX_URL = 2000
+_MAX_ASSETS_PER_TASK = 20
 
 
 def _check_ranges(start: date | None, end: date | None, t0: time | None, t1: time | None) -> None:
@@ -38,6 +42,7 @@ def _check_ranges(start: date | None, end: date | None, t0: time | None, t1: tim
 class PlanTaskCreate(StrictModel):
     title: str = Field(min_length=1, max_length=200)
     description: str | None = Field(None, max_length=MAX_TEXT)
+    requirements: str | None = Field(None, max_length=MAX_TEXT)
     category: TaskCategory = TaskCategory.strategy
     status: TaskStatus = TaskStatus.todo
     priority: TaskPriority = TaskPriority.medium
@@ -64,6 +69,7 @@ class PlanTaskUpdate(StrictModel):
 
     title: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=MAX_TEXT)
+    requirements: str | None = Field(default=None, max_length=MAX_TEXT)
     category: TaskCategory | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
@@ -72,6 +78,7 @@ class PlanTaskUpdate(StrictModel):
     due_date: date | None = None
     start_time: time | None = None
     end_time: time | None = None
+    archived: bool | None = None
 
     @model_validator(mode="after")
     def _validate_ranges(self) -> Self:
@@ -94,6 +101,7 @@ class PlanTaskRead(ORMModel):
     client_id: uuid.UUID
     title: str
     description: str | None = None
+    requirements: str | None = None
     category: TaskCategory
     status: TaskStatus
     priority: TaskPriority
@@ -106,6 +114,7 @@ class PlanTaskRead(ORMModel):
     start_time: time | None = None
     end_time: time | None = None
     created_by: uuid.UUID | None = None
+    archived: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -115,3 +124,41 @@ class PlanTaskListResponse(BaseModel):
     total: int
     page: int = 1
     page_size: int = 20
+
+
+# --------------------------------------------------------------------------- #
+# Supporting links + notes (context-menu actions; detail view only)
+# --------------------------------------------------------------------------- #
+
+
+class PlanTaskAssetCreate(StrictModel):
+    url: str = Field(min_length=1, max_length=_MAX_URL)
+    label: str | None = Field(default=None, max_length=MAX_LONG_LINE)
+
+
+class PlanTaskAssetRead(ORMModel):
+    id: uuid.UUID
+    url: str
+    label: str | None = None
+    position: int
+    created_at: datetime
+
+
+class PlanTaskNoteCreate(StrictModel):
+    body: str = Field(min_length=1, max_length=MAX_TEXT)
+
+
+class PlanTaskNoteRead(ORMModel):
+    id: uuid.UUID
+    user_id: uuid.UUID | None = None
+    body: str
+    created_at: datetime
+
+
+class PlanTaskDetailRead(PlanTaskRead):
+    """The task-detail view: everything a board card has, plus its supporting
+    links and comment thread (left off the list response — those would mean
+    an N+1 join on every row of a table that can have hundreds)."""
+
+    assets: list[PlanTaskAssetRead] = []
+    notes: list[PlanTaskNoteRead] = []

@@ -19,11 +19,14 @@ from app.core.exceptions import BadRequestError, NotFoundError
 from app.core.pagination import PaginationParams
 from app.core.request_context import set_audit_changes
 from app.models.enums import TaskCategory, TaskPriority, TaskStatus
-from app.models.plan import PlanTask
+from app.models.plan import PlanTask, PlanTaskAsset, PlanTaskNote
 from app.repositories.plan_repository import PlanTaskRepository
 from app.schemas.plan import (
+    PlanTaskAssetCreate,
     PlanTaskCreate,
+    PlanTaskDetailRead,
     PlanTaskListResponse,
+    PlanTaskNoteCreate,
     PlanTaskRead,
     PlanTaskUpdate,
 )
@@ -33,6 +36,7 @@ from app.services.audit_service import created_changes, deleted_changes, field_c
 _MUTABLE = (
     "title",
     "description",
+    "requirements",
     "category",
     "status",
     "priority",
@@ -41,7 +45,9 @@ _MUTABLE = (
     "due_date",
     "start_time",
     "end_time",
+    "archived",
 )
+_MAX_ASSETS_PER_TASK = 20
 
 
 def _audit_value(value: object) -> object:
@@ -76,6 +82,7 @@ class PlanService:
         start: date | None = None,
         end: date | None = None,
         include_undated: bool = False,
+        include_archived: bool = False,
     ) -> PlanTaskListResponse:
         if start is not None and end is not None and start > end:
             raise BadRequestError("start must be on or before end")
@@ -88,6 +95,7 @@ class PlanService:
             start=start,
             end=end,
             include_undated=include_undated,
+            include_archived=include_archived,
             offset=pagination.offset,
             limit=pagination.limit,
         )
@@ -105,6 +113,10 @@ class PlanService:
             raise NotFoundError("Task not found.")
         return task
 
+    def get_task_detail(self, client_id: uuid.UUID, task_id: uuid.UUID) -> PlanTaskDetailRead:
+        task = self.get_task(client_id, task_id)
+        return PlanTaskDetailRead.model_validate(task)
+
     # ---- writes -------------------------------------------------------- #
 
     def create_task(
@@ -114,6 +126,7 @@ class PlanService:
             client_id=client_id,
             title=data.title,
             description=data.description,
+            requirements=data.requirements,
             category=data.category,
             status=data.status,
             priority=data.priority,
@@ -176,3 +189,76 @@ class PlanService:
         )
         self.db.delete(task)
         self.db.commit()
+
+    def duplicate_task(
+        self, client_id: uuid.UUID, task_id: uuid.UUID, *, created_by: uuid.UUID
+    ) -> PlanTask:
+        """The context-menu "Duplicate" action — a fresh, unassigned, todo copy
+        of an existing task (title/description/requirements/category/priority/
+        dates carried over; status and assignee deliberately reset, since a
+        duplicate is a new piece of work, not a clone of someone's in-progress
+        item)."""
+        source = self.get_task(client_id, task_id)
+        copy = PlanTask(
+            client_id=client_id,
+            title=f"{source.title} (copy)"[:200],
+            description=source.description,
+            requirements=source.requirements,
+            category=source.category,
+            status=TaskStatus.todo,
+            priority=source.priority,
+            start_date=source.start_date,
+            due_date=source.due_date,
+            start_time=source.start_time,
+            end_time=source.end_time,
+            created_by=created_by,
+        )
+        self.tasks.add(copy)
+        self.tasks.flush()
+        set_audit_changes(created_changes({"title": copy.title, "category": copy.category}))
+        self.db.commit()
+        return self.get_task(client_id, copy.id)
+
+    # ---- supporting links ------------------------------------------------ #
+
+    def add_asset(
+        self, client_id: uuid.UUID, task_id: uuid.UUID, data: PlanTaskAssetCreate
+    ) -> PlanTaskAsset:
+        task = self.get_task(client_id, task_id)
+        if len(task.assets) >= _MAX_ASSETS_PER_TASK:
+            raise BadRequestError(
+                f"A task can have at most {_MAX_ASSETS_PER_TASK} supporting links."
+            )
+        asset = PlanTaskAsset(
+            task_id=task.id,
+            url=data.url,
+            label=data.label,
+            position=self.tasks.next_asset_position(task.id),
+        )
+        self.tasks.add_asset(asset)
+        self.db.commit()
+        return asset
+
+    def remove_asset(self, client_id: uuid.UUID, task_id: uuid.UUID, asset_id: uuid.UUID) -> None:
+        self.get_task(client_id, task_id)  # 404 for an inaccessible/missing task
+        asset = self.tasks.get_asset(task_id, asset_id)
+        if asset is None:
+            raise NotFoundError("Supporting link not found.")
+        self.tasks.remove_asset(asset)
+        self.db.commit()
+
+    # ---- notes -------------------------------------------------------------- #
+
+    def add_note(
+        self,
+        client_id: uuid.UUID,
+        task_id: uuid.UUID,
+        data: PlanTaskNoteCreate,
+        *,
+        user_id: uuid.UUID,
+    ) -> PlanTaskNote:
+        task = self.get_task(client_id, task_id)
+        note = PlanTaskNote(task_id=task.id, user_id=user_id, body=data.body)
+        self.tasks.add_note(note)
+        self.db.commit()
+        return note

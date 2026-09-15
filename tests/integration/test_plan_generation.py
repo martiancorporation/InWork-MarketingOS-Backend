@@ -24,7 +24,9 @@ def _assign_user(client, admin_headers, cid, uid, caps=None):
     assert resp.status_code == 201, resp.text
 
 
-def _propose(client, headers, cid, prompt="Create a content calendar for this month", month="2026-09"):
+def _propose(
+    client, headers, cid, prompt="Create a content calendar for this month", month="2026-09"
+):
     return client.post(
         f"{API}/clients/{cid}/plan/ai/propose",
         headers=headers,
@@ -102,7 +104,9 @@ def test_propose_unassigned_user_gets_404(client: TestClient, admin_headers: dic
     assert resp.status_code == 404
 
 
-def test_propose_requires_manage_calendar_capability(client: TestClient, admin_headers: dict, make_user):
+def test_propose_requires_manage_calendar_capability(
+    client: TestClient, admin_headers: dict, make_user
+):
     user, user_headers = make_user()
     cid = _client_id(client, admin_headers)
     _assign_user(client, admin_headers, cid, user["id"], caps=["review_results"])
@@ -240,3 +244,101 @@ def test_propose_unknown_field_rejected(client: TestClient, admin_headers: dict)
         json={"prompt": "x", "month": "2026-09", "extra": "nope"},
     )
     assert resp.status_code == 422
+
+
+def test_propose_empty_prompt_is_accepted(client: TestClient, admin_headers: dict):
+    """The AI prompt is optional (BE-request): the client's brand/goals/
+    strategy already ground the agent, so a blank prompt must still generate
+    a plan rather than 422ing."""
+    cid = _client_id(client, admin_headers)
+    resp = _propose(client, admin_headers, cid, prompt="")
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["items"]) > 0
+
+
+def test_propose_current_month_never_generates_before_today(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
+    """Regression guard for the past-date bug: generating "this month" must
+    never place an item before today, even when the AI itself returns one."""
+    from calendar import monthrange
+    from datetime import date
+
+    from app.integrations.llm.openrouter import OpenRouterClient
+
+    today = date.today()
+    current_month = f"{today.year:04d}-{today.month:02d}"
+    last_day = monthrange(today.year, today.month)[1]
+
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(
+        OpenRouterClient,
+        "complete",
+        _fake_month_complete(
+            [
+                # Deliberately dated on the 1st of the month — before "today"
+                # on every day of the month except the 1st itself.
+                {
+                    "title": "Backdated item",
+                    "event_date": f"{today.year:04d}-{today.month:02d}-01",
+                    "platform": "instagram",
+                    "content_format": "static",
+                    "category": "content",
+                    "caption": "should never land before today",
+                    "hashtags": "",
+                    "suggested_role": "content creator",
+                },
+                {
+                    "title": "Last day of month item",
+                    "event_date": f"{today.year:04d}-{today.month:02d}-{last_day:02d}",
+                    "platform": "instagram",
+                    "content_format": "static",
+                    "category": "content",
+                    "caption": "a real future/today date",
+                    "hashtags": "",
+                    "suggested_role": "content creator",
+                },
+            ]
+        ),
+    )
+    cid = _client_id(client, admin_headers)
+    resp = _propose(client, admin_headers, cid, month=current_month)
+    assert resp.status_code == 200, resp.text
+    for item in resp.json()["items"]:
+        event_date = date.fromisoformat(item["content"]["event_date"])
+        assert event_date >= today, f"{item['title']} was dated {event_date}, before today {today}"
+
+
+def test_propose_past_month_is_unaffected_by_the_today_floor(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
+    """Explicitly generating an already-past month (e.g. backfilling history)
+    must still allow dates throughout that month — the floor only applies
+    when the requested month is the *current* one."""
+    from app.integrations.llm.openrouter import OpenRouterClient
+
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(
+        OpenRouterClient,
+        "complete",
+        _fake_month_complete(
+            [
+                {
+                    "title": "Early-January item",
+                    "event_date": "2020-01-02",
+                    "platform": "instagram",
+                    "content_format": "static",
+                    "category": "content",
+                    "caption": "a long-past date, still valid for a past month",
+                    "hashtags": "",
+                    "suggested_role": "content creator",
+                }
+            ]
+        ),
+    )
+    cid = _client_id(client, admin_headers)
+    resp = _propose(client, admin_headers, cid, month="2020-01")
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["content"]["event_date"] == "2020-01-02"

@@ -19,7 +19,10 @@ from app.schemas.plan import PlanTaskRead
 
 
 class PlanGenerationPropose(StrictModel):
-    prompt: str = Field(min_length=1, max_length=MAX_TEXT)
+    #: Optional — additional instructions on top of the client's existing
+    #: brand voice, goals, and strategy. Blank is fine: the AI already has
+    #: enough context to generate a sensible plan without a prompt.
+    prompt: str = Field(default="", max_length=MAX_TEXT)
     #: Target month, "YYYY-MM"; defaults to the current month client-side if omitted.
     month: str = Field(min_length=7, max_length=7, description="YYYY-MM")
 

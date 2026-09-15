@@ -60,3 +60,12 @@ class SchedulerSettings(BaseSettings):
     # their new warning/critical notifications since the last sweep.
     notification_email_enabled: bool = True  # SCHEDULER_NOTIFICATION_EMAIL_ENABLED
     notification_email_interval_minutes: int = 15  # SCHEDULER_NOTIFICATION_EMAIL_INTERVAL_MINUTES
+
+    # Automatic month-ahead content plan generation — once a client's local
+    # day reaches the 15th, auto-draft next month's plan so management has
+    # time to review before it starts. Checked frequently (like the report-
+    # email job); the real "once a month" gate is due-day + a dedupe log.
+    auto_plan_generation_enabled: bool = True  # SCHEDULER_AUTO_PLAN_GENERATION_ENABLED
+    auto_plan_generation_check_interval_minutes: int = (
+        60  # SCHEDULER_AUTO_PLAN_GENERATION_CHECK_INTERVAL_MINUTES
+    )

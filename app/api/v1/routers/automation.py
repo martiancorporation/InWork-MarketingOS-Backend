@@ -6,6 +6,7 @@
 - ``GET  /automation/clients/{id}/digest`` — daily digest for one client
 - ``POST /automation/report-email/run``    — run the daily report email sweep now
 - ``POST /automation/clients/{id}/report-email/send`` — send one client's report now (QA)
+- ``POST /automation/auto-plan-generation/run`` — run the month-ahead content-plan auto-generation sweep now
 
 These are platform-wide operations, so they require an administrator. The same
 service methods are driven on a cadence by the scheduler process
@@ -33,6 +34,7 @@ from app.core.exceptions import NotFoundError
 from app.core.rate_limit import RateLimit
 from app.models.client import Client
 from app.schemas.automation import (
+    AutoPlanGenerationSweepResult,
     ClientDigest,
     DailyReportSweepResult,
     DigestList,
@@ -109,3 +111,15 @@ async def send_client_report_email(client_id: uuid.UUID, admin: AdminUser, db: D
     report_date: date = datetime.now(UTC).astimezone(tz).date()
     log = await ReportEmailService(db).send_daily_report(client, report_date)
     return {"status": log.status, "report_date": log.report_date.isoformat()}
+
+
+@router.post(
+    "/auto-plan-generation/run",
+    dependencies=[Depends(_SWEEP_RATE_LIMIT)],
+    response_model=AutoPlanGenerationSweepResult,
+    summary="Run the month-ahead content-plan auto-generation sweep now (admin, for QA)",
+)
+async def run_auto_plan_generation_sweep(
+    admin: AdminUser, db: DbSession
+) -> AutoPlanGenerationSweepResult:
+    return await SchedulerService(db).run_auto_plan_generation_sweep()

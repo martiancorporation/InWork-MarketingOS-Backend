@@ -11,9 +11,10 @@ cost) — it summarizes what already exists.
 from __future__ import annotations
 
 import asyncio
+import calendar as _calendar
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import anyio
 from sqlalchemy import select
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import NotFoundError
+from app.models.auto_plan_generation_log import AutoPlanGenerationLog
 from app.models.client import Client
 from app.models.enums import (
     AlertStatus,
@@ -30,11 +32,14 @@ from app.models.enums import (
 )
 from app.repositories.alert_repository import AlertRepository
 from app.repositories.audit_repository import AuditRepository
+from app.repositories.auto_plan_generation_log_repository import AutoPlanGenerationLogRepository
 from app.repositories.campaign_repository import CampaignRepository
 from app.repositories.session_repository import SessionRepository
 from app.schemas.alert import AlertEvaluateResult
 from app.schemas.automation import (
     AlertBrief,
+    AutoPlanGenerationRow,
+    AutoPlanGenerationSweepResult,
     ClientDigest,
     ClientSweepRow,
     DailyReportSweepResult,
@@ -45,11 +50,14 @@ from app.schemas.automation import (
     WatchdogSweepResult,
 )
 from app.services.alert_service import AlertService
+from app.services.auto_plan_generation_timing import auto_generation_due
 from app.services.dashboard_service import DashboardService
 from app.services.integration_service import _REAL_KEYS, IntegrationService
 from app.services.notification_service import NotificationService
+from app.services.plan_generation_service import PlanGenerationService
 from app.services.report_email.service import ReportEmailService
 from app.services.report_email.timing import due_report_dates
+from app.utils.timezones import client_local_today
 
 logger = logging.getLogger("app.scheduler")
 
@@ -383,6 +391,116 @@ class SchedulerService:
             failed=failed,
             details=rows,
         )
+
+    # ---- automatic month-ahead content plan generation ------------------ #
+
+    async def run_auto_plan_generation_sweep(self) -> AutoPlanGenerationSweepResult:
+        """Once a client's local calendar day reaches the 15th, auto-draft
+        *next* month's content plan — the same generation path a manager
+        triggers manually (:meth:`PlanGenerationService.propose_range`,
+        ``user=None`` since nothing was manually requested), so management
+        gets the rest of the month to review/approve/assign before it starts.
+
+        Catch-up safe (``auto_generation_due`` fires on or after the 15th, not
+        only exactly on it) but never duplicates: ``AutoPlanGenerationLog``'s
+        unique ``(client_id, period)`` constraint is the real dedupe guard,
+        checked before generating and recorded right after — a repeated tick
+        within the same month is a cheap no-op, isolated per client exactly
+        like every other sweep in this file.
+        """
+        clients = self._active_clients()
+        semaphore = self._sweep_semaphore()
+        now_utc = datetime.now(UTC)
+
+        async def _one(client: Client) -> AutoPlanGenerationRow | None:
+            if not auto_generation_due(client.timezone, now_utc):
+                return None
+            today = client_local_today(client.timezone, now_utc=now_utc)
+            period, start_date, end_date = _next_month_range(today)
+
+            async with semaphore:
+                session = self._new_session()
+                try:
+                    log_repo = AutoPlanGenerationLogRepository(session)
+                    if log_repo.exists(client.id, period):
+                        return AutoPlanGenerationRow(
+                            client_id=client.id,
+                            client_name=client.name,
+                            period=period,
+                            status="already_generated",
+                        )
+                    try:
+                        items = await PlanGenerationService(session).propose_range(
+                            client.id, "", start_date=start_date, end_date=end_date, user=None
+                        )
+                        log_repo.add(
+                            AutoPlanGenerationLog(
+                                client_id=client.id,
+                                period=period,
+                                item_count=len(items),
+                                generated_at=now_utc,
+                            )
+                        )
+                        session.commit()
+                    except Exception as exc:  # isolate per-client failures
+                        logger.warning(
+                            "Auto plan generation failed: client=%s period=%s",
+                            client.id,
+                            period,
+                            exc_info=True,
+                        )
+                        return AutoPlanGenerationRow(
+                            client_id=client.id,
+                            client_name=client.name,
+                            period=period,
+                            status="failed",
+                            error=str(exc)[:300],
+                        )
+
+                    NotificationService(session).notify_client_team(
+                        client.id,
+                        title=f"{client.name}: next month's content plan is ready for review",
+                        kind="plan",
+                        level=NotificationLevel.info,
+                        body=(
+                            f"{len(items)} draft item(s) were auto-generated for "
+                            f"{period} — review, approve, and assign before next month starts."
+                        ),
+                        link=f"/clients/{client.id}/plan",
+                        rec_key=f"auto_plan_generated:{client.id}:{period}",
+                    )
+                    return AutoPlanGenerationRow(
+                        client_id=client.id,
+                        client_name=client.name,
+                        period=period,
+                        status="generated",
+                        item_count=len(items),
+                    )
+                finally:
+                    session.close()
+
+        results = await asyncio.gather(*(_one(c) for c in clients))
+        rows = [r for r in results if r is not None]
+        generated = sum(1 for r in rows if r.status == "generated")
+        failed = sum(1 for r in rows if r.status == "failed")
+        skipped = len(rows) - generated - failed
+        return AutoPlanGenerationSweepResult(
+            clients=len(clients),
+            generated=generated,
+            skipped=skipped,
+            failed=failed,
+            details=rows,
+        )
+
+
+def _next_month_range(today: date) -> tuple[str, date, date]:
+    """The ``("YYYY-MM", first_day, last_day)`` of the month after ``today``."""
+    if today.month == 12:
+        year, month = today.year + 1, 1
+    else:
+        year, month = today.year, today.month + 1
+    last_day = _calendar.monthrange(year, month)[1]
+    return f"{year:04d}-{month:02d}", date(year, month, 1), date(year, month, last_day)
 
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}

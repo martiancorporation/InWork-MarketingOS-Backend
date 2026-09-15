@@ -13,10 +13,9 @@ result.
 
 from __future__ import annotations
 
-import calendar as _calendar
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from app.ai.features import AiFeature
 from app.ai.model_router import model_for
@@ -31,7 +30,11 @@ _VALID_PLATFORMS = {p.value for p in SocialPlatform}
 _VALID_CATEGORIES = {c.value for c in TaskCategory}
 _DEFAULT_PLATFORM = SocialPlatform.instagram.value
 _DEFAULT_CATEGORY = TaskCategory.content.value
-_MAX_MONTH_ITEMS = 40  # a sane cap on one AI response, regardless of what the model returns
+_MAX_RANGE_ITEMS = 40  # a sane cap on one AI response, regardless of what the model returns
+_NO_PROMPT_TEXT = (
+    "(No specific instructions were given — use the client's brand voice, goals, "
+    "and active campaign strategy above to decide what to post.)"
+)
 
 
 @dataclass
@@ -51,22 +54,38 @@ class ProposedItem:
 class PlanGenerationAgent(ClientAgent):
     feature = AiFeature.PLAN_GENERATION
 
-    async def generate_month(
-        self, prompt: str, *, year: int, month: int, existing_titles: list[str]
+    async def generate_range(
+        self,
+        prompt: str,
+        *,
+        start_date: date,
+        end_date: date,
+        existing_titles: list[str],
+        today: date | None = None,
     ) -> list[ProposedItem]:
-        """Propose a month of calendar items for ``prompt``. Never raises — falls
-        back to a small deterministic placeholder plan on any failure."""
-        if not self.ai.is_configured:
-            return _fallback_month(year, month)
+        """Propose calendar items for ``[start_date, end_date]`` (inclusive).
 
-        month_label = date(year, month, 1).strftime("%B %Y")
+        ``start_date`` is the caller's responsibility to have already floored at
+        "today" when relevant (see ``PlanGenerationService.propose_month`` /
+        ``propose_range``) — this agent additionally never accepts a model-
+        returned date before ``start_date`` (``_parse_and_clamp_date``), so a
+        model that ignores the instruction still can't produce a past-dated
+        item. Never raises — falls back to a small deterministic placeholder
+        plan on any failure.
+        """
+        if not self.ai.is_configured:
+            return _fallback_range(start_date, end_date)
+
+        range_label = _format_range_label(start_date, end_date)
         existing = "\n".join(f"- {t}" for t in existing_titles[:100]) or "(none yet)"
         user_prompt = render(
             load_prompt("plan_generation/user_template.txt"),
             {
-                "prompt": prompt.strip(),
-                "month": f"{year:04d}-{month:02d}",
-                "month_label": month_label,
+                "prompt": prompt.strip() or _NO_PROMPT_TEXT,
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "range_label": range_label,
+                "today": (today or start_date).isoformat(),
                 "existing_items": existing,
             },
         )
@@ -74,16 +93,22 @@ class PlanGenerationAgent(ClientAgent):
             raw = await self.ai.complete(
                 system=self.system_prompt(load_prompt("plan_generation/system.txt")),
                 prompt=user_prompt,
+                # A range can hold up to _MAX_RANGE_ITEMS structured items (title,
+                # caption, hashtags, format each), and the routed model may be a
+                # reasoning model that spends tokens on chain-of-thought before it
+                # emits any JSON — the 1024-token global default truncates before
+                # real content comes out. Sized like app/ai/summary.py's 8000.
+                max_tokens=8000,
                 model=model_for(self.feature),
             )
         except Exception:
             logger.warning("Plan generation failed for client %s", self.client_id, exc_info=True)
-            return _fallback_month(year, month)
+            return _fallback_range(start_date, end_date)
 
         payload = parse_json_object(raw) or {}
         raw_items = payload.get("items")
-        items = _parse_items(raw_items, year, month) if isinstance(raw_items, list) else []
-        return items or _fallback_month(year, month)
+        items = _parse_items(raw_items, start_date, end_date) if isinstance(raw_items, list) else []
+        return items or _fallback_range(start_date, end_date)
 
     async def regenerate_item(
         self,
@@ -114,6 +139,10 @@ class PlanGenerationAgent(ClientAgent):
             raw = await self.ai.complete(
                 system=self.system_prompt(load_prompt("plan_generation/single_item_system.txt")),
                 prompt=user_prompt,
+                # One item is much smaller than a full month, but still needs
+                # headroom for a reasoning model's chain-of-thought before the
+                # JSON answer — see the max_tokens comment in generate_month.
+                max_tokens=2000,
                 model=model_for(self.feature),
             )
         except Exception:
@@ -154,43 +183,60 @@ def _parse_one_item(payload: dict, event_date: date) -> ProposedItem | None:
     )
 
 
-def _parse_items(raw_items: list, year: int, month: int) -> list[ProposedItem]:
-    last_day = _calendar.monthrange(year, month)[1]
+def _parse_items(raw_items: list, start_date: date, end_date: date) -> list[ProposedItem]:
     items: list[ProposedItem] = []
-    for raw in raw_items[:_MAX_MONTH_ITEMS]:
+    for raw in raw_items[:_MAX_RANGE_ITEMS]:
         if not isinstance(raw, dict):
             continue
-        event_date = _parse_and_clamp_date(raw.get("event_date"), year, month, last_day)
+        event_date = _parse_and_clamp_date(raw.get("event_date"), start_date, end_date)
         item = _parse_one_item(raw, event_date)
         if item is not None:
             items.append(item)
     return items
 
 
-def _parse_and_clamp_date(raw: object, year: int, month: int, last_day: int) -> date:
-    """Best-effort parse of a model-supplied date, clamped into the target
-    month — a model that drifts outside the requested month (or returns
-    garbage) must never produce a task the calendar can't place correctly."""
+def _parse_and_clamp_date(raw: object, start_date: date, end_date: date) -> date:
+    """Best-effort parse of a model-supplied date, clamped into
+    ``[start_date, end_date]`` — a model that drifts outside the requested
+    range (or ignores the "never before start_date" instruction, or returns
+    garbage) must never produce a task the calendar can't place correctly, and
+    must never land before ``start_date`` (the caller's already-floored-at-today
+    boundary — this is the actual bug fix, not just cosmetic clamping)."""
     if isinstance(raw, str):
         try:
             parsed = date.fromisoformat(raw)
-            if parsed.year == year and parsed.month == month:
+            if start_date <= parsed <= end_date:
                 return parsed
         except ValueError:
             pass
-    return date(year, month, min(last_day, 15))  # mid-month default when unparseable
+    midpoint_offset = (end_date - start_date).days // 2
+    return start_date + timedelta(days=midpoint_offset)  # mid-range default when unparseable
 
 
-def _fallback_month(year: int, month: int) -> list[ProposedItem]:
+def _format_range_label(start_date: date, end_date: date) -> str:
+    """Human-readable range label, e.g. 'September 15–30, 2026' or
+    'September 20, 2026 – October 5, 2026'. Avoids strftime's non-portable
+    '%-d' (Linux/macOS only) by pulling ``.day`` directly."""
+    if start_date.year == end_date.year and start_date.month == end_date.month:
+        return f"{start_date.strftime('%B')} {start_date.day}–{end_date.day}, {end_date.year}"
+    return (
+        f"{start_date.strftime('%B')} {start_date.day}, {start_date.year} – "
+        f"{end_date.strftime('%B')} {end_date.day}, {end_date.year}"
+    )
+
+
+def _fallback_range(start_date: date, end_date: date) -> list[ProposedItem]:
     """Deterministic placeholder plan when AI is unconfigured or fails — a
     handful of evenly-spaced draft slots the manager can edit by hand, so the
-    feature never dead-ends on an empty result."""
-    last_day = _calendar.monthrange(year, month)[1]
-    days = list(range(3, last_day + 1, 5))[:6] or [1]
+    feature never dead-ends on an empty result. Spaced across the actual
+    requested range (never before ``start_date``), not a fixed calendar month."""
+    span_days = (end_date - start_date).days + 1
+    step = 5 if span_days > 10 else max(1, span_days // 6 or 1)
+    offsets = list(range(0, span_days, step))[:6] or [0]
     return [
         ProposedItem(
             title=f"Content idea #{i + 1} (draft — AI unavailable, edit before approving)",
-            event_date=date(year, month, d),
+            event_date=start_date + timedelta(days=offset),
             platform=_DEFAULT_PLATFORM,
             category=_DEFAULT_CATEGORY,
             content_format="static",
@@ -198,7 +244,7 @@ def _fallback_month(year: int, month: int) -> list[ProposedItem]:
             hashtags=None,
             suggested_role="content creator",
         )
-        for i, d in enumerate(days)
+        for i, offset in enumerate(offsets)
     ]
 
 

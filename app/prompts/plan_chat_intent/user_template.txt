@@ -1,0 +1,8 @@
+Today's date is {today}.
+
+Recent conversation (oldest first):
+{history}
+
+Manager's latest message: {message}
+
+Respond with the JSON object now.

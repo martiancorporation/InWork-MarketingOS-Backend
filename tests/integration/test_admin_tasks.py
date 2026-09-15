@@ -91,3 +91,73 @@ def test_overdue_only_filter(client: TestClient, admin_headers: dict):
 
 def test_requires_auth(client: TestClient):
     assert client.get(f"{API}/admin/tasks").status_code == 401
+
+
+def test_due_within_days_filter(client: TestClient, admin_headers: dict):
+    cid = _client_id(client, admin_headers)
+    soon = (date.today() + timedelta(days=2)).isoformat()
+    far = (date.today() + timedelta(days=30)).isoformat()
+    _create_task(client, admin_headers, cid, title="Due soon", due_date=soon)
+    _create_task(client, admin_headers, cid, title="Due later", due_date=far)
+
+    resp = client.get(
+        f"{API}/admin/tasks",
+        headers=admin_headers,
+        params={"client_id": cid, "due_within_days": 7},
+    )
+    assert resp.status_code == 200, resp.text
+    titles = {item["title"] for item in resp.json()["items"]}
+    assert titles == {"Due soon"}
+
+
+def test_archived_tasks_excluded_by_default(client: TestClient, admin_headers: dict):
+    cid = _client_id(client, admin_headers)
+    task = _create_task(client, admin_headers, cid, title="Will be archived")
+    client.patch(
+        f"{API}/clients/{cid}/plan/tasks/{task['id']}",
+        headers=admin_headers,
+        json={"archived": True},
+    )
+
+    default = client.get(
+        f"{API}/admin/tasks", headers=admin_headers, params={"client_id": cid}
+    ).json()
+    assert not any(t["title"] == "Will be archived" for t in default["items"])
+
+    with_archived = client.get(
+        f"{API}/admin/tasks",
+        headers=admin_headers,
+        params={"client_id": cid, "include_archived": True},
+    ).json()
+    assert any(t["title"] == "Will be archived" for t in with_archived["items"])
+
+
+def test_workload_counts_open_and_overdue_per_assignee(
+    client: TestClient, admin_headers: dict, make_user
+):
+    user, _ = make_user(email="workload@test.com")
+    cid = _client_id(client, admin_headers)
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": user["id"]}
+    )
+    past = (date.today() - timedelta(days=1)).isoformat()
+    future = (date.today() + timedelta(days=5)).isoformat()
+    _create_task(client, admin_headers, cid, title="Open 1", assignee_id=user["id"])
+    _create_task(
+        client, admin_headers, cid, title="Overdue 1", assignee_id=user["id"], due_date=past
+    )
+    _create_task(
+        client, admin_headers, cid, title="Done task", assignee_id=user["id"], status="done"
+    )
+    _create_task(client, admin_headers, cid, title="Unassigned", due_date=future)
+
+    resp = client.get(f"{API}/admin/tasks/workload", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    row = next(r for r in resp.json()["items"] if r["user_id"] == user["id"])
+    assert row["user_name"]
+    assert row["open_tasks"] == 2  # done + unassigned excluded
+    assert row["overdue_tasks"] == 1
+
+
+def test_workload_requires_auth(client: TestClient):
+    assert client.get(f"{API}/admin/tasks/workload").status_code == 401

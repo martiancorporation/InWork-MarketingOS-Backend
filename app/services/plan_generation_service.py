@@ -22,6 +22,7 @@ from app.ai.usage import AiUsageContext
 from app.core.exceptions import BadRequestError, NotFoundError
 from app.integrations.embeddings import get_embedder
 from app.integrations.llm import get_llm_client
+from app.models.client import Client
 from app.models.enums import (
     ApprovalStatus,
     EventStage,
@@ -43,6 +44,7 @@ from app.schemas.plan_generation import (
     PlanTaskContentRead,
 )
 from app.services.notification_service import NotificationService
+from app.utils.timezones import client_local_today
 
 
 class PlanGenerationService:
@@ -53,14 +55,58 @@ class PlanGenerationService:
     async def propose_month(
         self, client_id: uuid.UUID, prompt: str, month: str, *, user: User
     ) -> list[GeneratedPlanTaskRead]:
+        """Thin wrapper over :meth:`propose_range`: turns a ``"YYYY-MM"`` month
+        into a concrete ``[start, end]`` range, flooring the start at *today*
+        (in the client's own timezone) when the requested month is the current
+        one — so "generate this month" on the 15th only ever drafts from the
+        15th onward, never re-generating already-past days. A future or past
+        month is unaffected (its start stays the 1st)."""
         year, mon = (int(p) for p in month.split("-"))
-        existing_titles = self._existing_titles(client_id, year, mon)
+        last_day = _calendar.monthrange(year, mon)[1]
+        month_start = date(year, mon, 1)
+        month_end = date(year, mon, last_day)
 
-        agent = self._agent(client_id, user)
-        proposed_items = await agent.generate_month(
-            prompt, year=year, month=mon, existing_titles=existing_titles
+        client = self.db.get(Client, client_id)
+        today = client_local_today(client.timezone if client else None)
+        start_date = max(month_start, today) if today <= month_end else month_start
+
+        return await self.propose_range(
+            client_id, prompt, start_date=start_date, end_date=month_end, user=user
         )
 
+    async def propose_range(
+        self,
+        client_id: uuid.UUID,
+        prompt: str,
+        *,
+        start_date: date,
+        end_date: date,
+        user: User | None,
+    ) -> list[GeneratedPlanTaskRead]:
+        """The real workhorse behind ``propose_month`` — also called directly
+        by chat-driven generation (an explicit date range from the
+        conversation) and the automatic monthly scheduler job (``user=None``,
+        since nothing was manually requested; both ``MarketingEvent.created_by``
+        and ``PlanTask.created_by`` are nullable for exactly this case)."""
+        if end_date < start_date:
+            raise BadRequestError("End date must be on or after the start date.")
+
+        existing_titles = self._existing_titles(client_id, start_date, end_date)
+        client_local_today_for_client = None
+        if user is None:
+            client = self.db.get(Client, client_id)
+            client_local_today_for_client = client_local_today(client.timezone if client else None)
+
+        agent = self._agent(client_id, user)
+        proposed_items = await agent.generate_range(
+            prompt,
+            start_date=start_date,
+            end_date=end_date,
+            existing_titles=existing_titles,
+            today=client_local_today_for_client,
+        )
+
+        created_by = user.id if user is not None else None
         created: list[GeneratedPlanTaskRead] = []
         for proposed in proposed_items:
             event = MarketingEvent(
@@ -72,7 +118,7 @@ class PlanGenerationService:
                 event_time=time(9, 0),
                 stage=EventStage.draft,
                 approval_status=ApprovalStatus.pending,
-                created_by=user.id,
+                created_by=created_by,
                 post=EventPost(
                     caption=proposed.caption,
                     hashtags=proposed.hashtags,
@@ -91,7 +137,7 @@ class PlanGenerationService:
                 event_id=event.id,
                 start_date=proposed.event_date,
                 due_date=proposed.event_date,
-                created_by=user.id,
+                created_by=created_by,
             )
             self.tasks.add(task)
             self.tasks.flush()
@@ -126,7 +172,9 @@ class PlanGenerationService:
             event.approved_by = actor.id
             event.stage = EventStage.scheduled
             event.activity.append(
-                EventActivity(action="status_change", note="approved via assignment", user_id=actor.id)
+                EventActivity(
+                    action="status_change", note="approved via assignment", user_id=actor.id
+                )
             )
         self.db.commit()
 
@@ -158,6 +206,58 @@ class PlanGenerationService:
             )
         self.db.commit()
         return _read(task, event)
+
+    def approve_batch(
+        self, client_id: uuid.UUID, task_ids: list[uuid.UUID], *, actor: User
+    ) -> list[GeneratedPlanTaskRead]:
+        """Approve a whole batch of drafted items in one action — the "Approve"
+        button on a chat-generated plan draft. Deliberately does NOT assign
+        anyone (unlike :meth:`assign`, which bundles approval with assignment
+        for the manual review-dialog flow): a chat approval just confirms the
+        content itself is good; who executes it is a separate step via the
+        normal task board/admin panel."""
+        results: list[GeneratedPlanTaskRead] = []
+        for task_id in task_ids:
+            task = self._require_task(client_id, task_id)
+            event = task.event
+            if event is not None:
+                event.approval_status = ApprovalStatus.approved
+                event.approved_by = actor.id
+                event.stage = EventStage.scheduled
+                event.activity.append(
+                    EventActivity(
+                        action="status_change", note="approved via chat", user_id=actor.id
+                    )
+                )
+            results.append(_read(task, event))
+        self.db.commit()
+        return results
+
+    def reject_batch(
+        self, client_id: uuid.UUID, task_ids: list[uuid.UUID], reason: str, *, actor: User
+    ) -> list[GeneratedPlanTaskRead]:
+        """Discard a whole batch of drafted items — the "Discard" button on a
+        chat-generated plan draft. Mirrors the single-item :meth:`reject`
+        exactly (never hard-deletes; a manager can still revise it later from
+        the normal Plan page)."""
+        results: list[GeneratedPlanTaskRead] = []
+        for task_id in task_ids:
+            task = self._require_task(client_id, task_id)
+            task.status = TaskStatus.blocked
+            event = task.event
+            if event is not None:
+                event.approval_status = ApprovalStatus.rejected
+                event.approval_note = reason
+                event.activity.append(
+                    EventActivity(
+                        action="status_change",
+                        note=f"rejected via chat: {reason}",
+                        user_id=actor.id,
+                    )
+                )
+            results.append(_read(task, event))
+        self.db.commit()
+        return results
 
     async def regenerate_item(
         self,
@@ -216,13 +316,17 @@ class PlanGenerationService:
 
     # ---- helpers --------------------------------------------------------- #
 
-    def _agent(self, client_id: uuid.UUID, user: User) -> PlanGenerationAgent:
+    def _agent(self, client_id: uuid.UUID, user: User | None) -> PlanGenerationAgent:
         return PlanGenerationAgent(
             self.db,
             client_id,
             embedder=get_embedder(),
             ai_client=get_llm_client(
-                AiUsageContext(feature=AiFeature.PLAN_GENERATION, client_id=client_id, user_id=user.id)
+                AiUsageContext(
+                    feature=AiFeature.PLAN_GENERATION,
+                    client_id=client_id,
+                    user_id=user.id if user is not None else None,
+                )
             ),
         )
 
@@ -232,12 +336,11 @@ class PlanGenerationService:
             raise NotFoundError("Task not found.")
         return task
 
-    def _existing_titles(self, client_id: uuid.UUID, year: int, month: int) -> list[str]:
-        last_day = _calendar.monthrange(year, month)[1]
+    def _existing_titles(self, client_id: uuid.UUID, start_date: date, end_date: date) -> list[str]:
         rows, _ = self.tasks.list_for_client(
             client_id,
-            start=date(year, month, 1),
-            end=date(year, month, last_day),
+            start=start_date,
+            end=end_date,
             include_undated=False,
             offset=0,
             limit=200,

@@ -85,6 +85,13 @@ class AiChatRepository(BaseRepository[AiChat]):
         self.db.flush()
         return message
 
+    def get_message(self, chat_id: uuid.UUID, message_id: uuid.UUID) -> AiChatMessage | None:
+        return self.db.scalar(
+            select(AiChatMessage).where(
+                AiChatMessage.id == message_id, AiChatMessage.chat_id == chat_id
+            )
+        )
+
     def list_messages(self, chat_id: uuid.UUID, *, limit: int | None = None) -> list[AiChatMessage]:
         """Full (or ``limit``-capped) message history, oldest first.
 
