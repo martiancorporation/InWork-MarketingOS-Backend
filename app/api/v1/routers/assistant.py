@@ -178,12 +178,20 @@ async def turn(
     data: CommandTurnRequest,
     user: CurrentUser,
     db: DbSession,
+    storage: StorageDep,
     _client: RequireClient,
 ) -> CommandTurnResponse:
     """Runs the AI command layer for one chat turn. Any mutation the model
     attempted comes back as a ``proposal`` on the response — nothing is
     written until a human calls ``POST .../proposals/{id}/approve``."""
-    return await AssistantService(db).run_command_turn(client_id, chat_id, user, data.content)
+    return await AssistantService(db).run_command_turn(
+        client_id,
+        chat_id,
+        user,
+        data.content,
+        attachment_upload_ids=data.attachment_upload_ids,
+        storage=storage,
+    )
 
 
 @router.post(
@@ -197,6 +205,7 @@ async def turn_stream(
     data: CommandTurnRequest,
     user: CurrentUser,
     db: DbSession,
+    storage: StorageDep,
     _client: RequireClient,
 ) -> StreamingResponse:
     """Server-Sent Events: a ``delta`` frame per token of the model's own
@@ -204,9 +213,18 @@ async def turn_stream(
     ``done`` frame with the persisted message id, full reply text, and any
     staged ``proposal`` — nothing is written to the database until a human
     calls ``POST .../proposals/{id}/approve``. Access + chat-existence are
-    checked (404) before the stream opens, same as ``ask_stream``."""
+    checked (404) before the stream opens, same as ``ask_stream``. A turn with
+    files attached still comes back as a single immediate frame (vision
+    completion isn't a token stream here) rather than not being accepted."""
     service = AssistantService(db)
-    ctx = await service.begin_command_stream(client_id, chat_id, user, data.content)
+    ctx = await service.begin_command_stream(
+        client_id,
+        chat_id,
+        user,
+        data.content,
+        attachment_upload_ids=data.attachment_upload_ids,
+        storage=storage,
+    )
     return StreamingResponse(
         service.stream_command_events(ctx),
         media_type="text/event-stream",

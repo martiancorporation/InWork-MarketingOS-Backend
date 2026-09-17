@@ -17,7 +17,7 @@ from app.core.pagination import PaginationParams
 from app.core.request_context import set_audit_changes
 from app.models.assignment import ClientAssignment
 from app.models.client import Client
-from app.models.enums import ClientCapability, ClientStatus, DocumentKind, UserRole
+from app.models.enums import ClientCapability, ClientStatus, DocumentKind, IntelJobType, UserRole
 from app.models.user import User
 from app.repositories.assignment_repository import AssignmentRepository
 from app.repositories.client_repository import ClientRepository
@@ -25,6 +25,7 @@ from app.repositories.document_repository import DocumentRepository
 from app.schemas.client import ClientListItem, ClientListResponse, ClientUpdate
 from app.schemas.document import DocumentListResponse, DocumentRead
 from app.services.audit_service import field_changes
+from app.services.intelligence.job_queue import JobQueue
 
 
 def _audit_value(value: Any) -> Any:
@@ -157,7 +158,19 @@ class ClientService:
             if attr in fields:
                 setattr(client, attr, getattr(data, attr))
         after = {f: _audit_value(getattr(client, f)) for f in self._UPDATE_FIELDS}
-        return client, field_changes(before, after)
+        changes = field_changes(before, after)
+        if changes:
+            # Keep the intelligence profile (and anything the AI chat grounds
+            # itself in) from ever going stale relative to the profile/status
+            # fields just saved — same transactional-outbox pattern as
+            # OnboardingService's own enqueues.
+            JobQueue(self.db).enqueue(
+                client_id,
+                IntelJobType.incremental.value,
+                changed_keys=sorted(changes),
+                debounce_seconds=5,
+            )
+        return client, changes
 
     def _can_access(self, user: User, client_id: uuid.UUID) -> bool:
         return user.role == UserRole.admin or self.assignments.exists(client_id, user.id)

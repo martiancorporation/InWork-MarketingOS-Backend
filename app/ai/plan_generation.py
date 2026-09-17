@@ -20,6 +20,7 @@ from datetime import date, timedelta
 from app.ai.features import AiFeature
 from app.ai.model_router import model_for
 from app.ai.parsers import parse_json_object
+from app.models.client import Client
 from app.models.enums import SocialPlatform, TaskCategory
 from app.prompts.loader import load_prompt, render
 from app.services.intelligence.client_agent import ClientAgent
@@ -87,6 +88,7 @@ class PlanGenerationAgent(ClientAgent):
                 "range_label": range_label,
                 "today": (today or start_date).isoformat(),
                 "existing_items": existing,
+                "brand_snapshot": self._brand_snapshot(),
             },
         )
         try:
@@ -109,6 +111,30 @@ class PlanGenerationAgent(ClientAgent):
         raw_items = payload.get("items")
         items = _parse_items(raw_items, start_date, end_date) if isinstance(raw_items, list) else []
         return items or _fallback_range(start_date, end_date)
+
+    def _brand_snapshot(self) -> str:
+        """A live read of this client's brand/goal fields, straight off the
+        row — not the versioned directive preamble, which only reflects
+        whatever the async intelligence pipeline last finished processing.
+
+        A brand/goals edit saved seconds ago is picked up immediately here,
+        even if that edit's rebuild job hasn't run (or finished) yet. See
+        ``ClientAgent.system_prompt``/``self.context.preamble`` for the
+        (still-included) versioned rules this supplements, not replaces.
+        """
+        client = self.db.get(Client, self.client_id)
+        if client is None:
+            return "(none)"
+        fields = {
+            "Industry": client.industry,
+            "Business type": client.business_type,
+            "About the brand": client.about_brand,
+            "Brand voice": client.brand_voice,
+            "Goals": client.goals,
+            "Target markets": client.markets,
+        }
+        lines = [f"- {label}: {value}" for label, value in fields.items() if value]
+        return "\n".join(lines) or "(none on file)"
 
     async def regenerate_item(
         self,

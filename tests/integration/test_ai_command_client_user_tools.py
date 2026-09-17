@@ -53,12 +53,22 @@ def _scripted(responses: list[ToolCallResponse]):
     return fake_complete_with_tools
 
 
-def test_no_create_user_tool_is_exposed_to_the_model():
-    """Documented Phase 2 scope decision: account creation needs a password,
-    which has no safe path through the proposal engine's JSON payload — see
-    ``ProposalService.stage_update_user``'s docstring."""
+def test_no_access_management_tools_are_exposed_to_the_model():
+    """Client isolation, hard boundary: nothing in this chat can grant/change/
+    remove access to a client, or touch a user's account/role — that's handled
+    in the agency dashboard, outside any single client's context (see
+    ``app/ai/tools/registry.py``'s comment on this). Account creation was never
+    exposed either — it needs a password, which has no safe path through the
+    proposal engine's JSON payload (see ``ProposalService.stage_update_user``'s
+    docstring). The underlying ``ProposalService`` methods still exist and are
+    tested directly below/elsewhere — they're just never reachable from the
+    model's tool list."""
     assert "propose_create_user" not in TOOLS
-    assert "propose_update_user" in TOOLS
+    assert "propose_update_user" not in TOOLS
+    assert "propose_assign_user_to_client" not in TOOLS
+    assert "propose_set_client_capabilities" not in TOOLS
+    assert "propose_unassign_user_from_client" not in TOOLS
+    assert "get_client_assignments" not in TOOLS
 
 
 def test_propose_and_approve_client_update(client: TestClient, admin_headers: dict, db_session):

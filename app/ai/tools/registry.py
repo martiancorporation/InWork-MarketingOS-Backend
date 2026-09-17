@@ -85,10 +85,13 @@ _TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="search_users",
         description=(
-            "Search users who have access to this client, by name or email. Always "
-            "call this before assigning anyone — if more than one result matches, "
-            "you MUST call request_clarification and show the user their names and "
-            "emails rather than guessing which one was meant."
+            "Search team members who already have access to this client, by name or "
+            "email — to find who to assign a plan task to. Always call this before "
+            "assigning anyone; if more than one result matches, you MUST call "
+            "request_clarification and show the user their names and emails rather "
+            "than guessing which one was meant. This is NOT for managing who has "
+            "access to the client itself — that is handled outside this chat, in the "
+            "agency dashboard."
         ),
         parameters=_obj(
             {
@@ -101,12 +104,40 @@ _TOOLS: list[ToolSpec] = [
         progress_label="Searching users",
     ),
     ToolSpec(
-        name="get_client_assignments",
-        description="List every user currently assigned to this client, with their capabilities.",
-        parameters=_obj({}),
+        name="search_knowledge_base",
+        description=(
+            "Search this client's own knowledge — brand voice, goals, compliance "
+            "rules, onboarding answers, uploaded documents. Call this to answer any "
+            "question about the client (\"what's our brand voice\", \"what are we not "
+            "allowed to say\", \"what are this client's goals\") instead of guessing "
+            "or answering from general knowledge."
+        ),
+        parameters=_obj({"query": {"type": "string"}}, required=["query"]),
         kind="read",
-        handler=handlers.get_client_assignments,
-        progress_label="Checking who has access",
+        handler=handlers.search_knowledge_base,
+        progress_label="Searching client knowledge",
+    ),
+    ToolSpec(
+        name="get_performance_summary",
+        description=(
+            "Real ad-performance numbers for this client (spend, impressions, clicks, "
+            "leads, conversions, revenue, ROAS) over a trailing window. Call this for "
+            "\"how are my ads doing\" / \"what's our spend\" style questions."
+        ),
+        parameters=_obj(
+            {
+                "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 90,
+                    "default": 30,
+                    "description": "Trailing window size in days.",
+                }
+            }
+        ),
+        kind="read",
+        handler=handlers.get_performance_summary,
+        progress_label="Checking performance data",
     ),
     ToolSpec(
         name="get_client",
@@ -260,74 +291,15 @@ _TOOLS: list[ToolSpec] = [
         handler=handlers.propose_add_plan_task_note,
         progress_label="Drafting the note",
     ),
-    ToolSpec(
-        name="propose_assign_user_to_client",
-        description=(
-            "Give a user (from search_users) access to this client, optionally scoped "
-            "to a subset of capabilities. Administrator privileges required."
-        ),
-        parameters=_obj(
-            {
-                "user_id": {"type": "string"},
-                "capabilities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": [
-                            "manage_integrations",
-                            "review_results",
-                            "review_creatives",
-                            "manage_calendar",
-                            "manage_compliance",
-                            "manage_campaigns",
-                            "admin",
-                        ],
-                    },
-                    "description": "Omit for full access.",
-                },
-            },
-            required=["user_id"],
-        ),
-        kind="write",
-        handler=handlers.propose_assign_user_to_client,
-        progress_label="Drafting the access grant",
-    ),
-    ToolSpec(
-        name="propose_set_client_capabilities",
-        description="Change the capability set an already-assigned user holds on this client. Administrator privileges required.",
-        parameters=_obj(
-            {
-                "user_id": {"type": "string"},
-                "capabilities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": [
-                            "manage_integrations",
-                            "review_results",
-                            "review_creatives",
-                            "manage_calendar",
-                            "manage_compliance",
-                            "manage_campaigns",
-                            "admin",
-                        ],
-                    },
-                },
-            },
-            required=["user_id", "capabilities"],
-        ),
-        kind="write",
-        handler=handlers.propose_set_client_capabilities,
-        progress_label="Drafting the capability change",
-    ),
-    ToolSpec(
-        name="propose_unassign_user_from_client",
-        description="Remove a user's access to this client entirely. Administrator privileges required.",
-        parameters=_obj({"user_id": {"type": "string"}}, required=["user_id"]),
-        kind="write",
-        handler=handlers.propose_unassign_user_from_client,
-        progress_label="Drafting the access removal",
-    ),
+    # Deliberately NOT registered as tools, even though the underlying
+    # ProposalService methods exist and are tested: propose_assign_user_to_client
+    # / propose_set_client_capabilities / propose_unassign_user_from_client /
+    # propose_update_user. Client access and user administration are handled in
+    # the agency dashboard, outside any one client's context — this chat only
+    # ever sees and changes data belonging to the single client it's scoped to
+    # (see command_agent/system.txt). Re-registering them here would let this
+    # per-client chat grant/revoke access to itself or manage global accounts,
+    # which is exactly the boundary the client asked us to keep.
     ToolSpec(
         name="propose_update_client",
         description=(
@@ -391,29 +363,6 @@ _TOOLS: list[ToolSpec] = [
         kind="write",
         handler=handlers.propose_update_brand,
         progress_label="Drafting brand changes",
-    ),
-    ToolSpec(
-        name="propose_update_user",
-        description=(
-            "Change an existing user's name, role, or active status (a user id from "
-            "search_users). Does not create new accounts. Administrator privileges "
-            "required."
-        ),
-        parameters=_obj(
-            {
-                "user_id": {"type": "string"},
-                "name": {"type": "string"},
-                "role": {"type": "string", "enum": ["admin", "manager", "user"]},
-                "is_active": {
-                    "type": "boolean",
-                    "description": "false deactivates the account (cannot log in).",
-                },
-            },
-            required=["user_id"],
-        ),
-        kind="write",
-        handler=handlers.propose_update_user,
-        progress_label="Drafting the user change",
     ),
     # ---- control ----------------------------------------------------------- #
     ToolSpec(

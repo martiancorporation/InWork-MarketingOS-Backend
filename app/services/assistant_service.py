@@ -13,7 +13,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from anyio import to_thread
@@ -95,16 +95,25 @@ def _sse(payload: dict) -> str:
 
 @dataclass
 class CommandStreamContext:
-    """Prepared state for a streamed command-layer turn (built before the SSE
-    body starts, mirroring ``StreamContext``'s "validate before streaming"
-    contract for the ask-flow)."""
+    """Prepared state for a streamed chat turn (built before the SSE body
+    starts, mirroring ``StreamContext``'s "validate before streaming" contract).
+
+    ``agent``/``history`` are set for the normal path (answered or acted on via
+    ``CommandAgent``); a message that turned out to be a content-plan request
+    (a clarifying question, or an already-generated draft — see
+    ``_maybe_handle_plan_request``) instead sets ``immediate_result``/
+    ``immediate_meta``, delivered as a single SSE frame rather than streamed
+    token-by-token, since there's nothing to stream.
+    """
 
     client_id: uuid.UUID
     chat_id: uuid.UUID
     user: User
     content: str
-    agent: CommandAgent
-    history: list[tuple[str, str]]
+    agent: CommandAgent | None = None
+    history: list[tuple[str, str]] = field(default_factory=list)
+    immediate_result: CommandTurnResult | None = None
+    immediate_meta: dict | None = None
 
 
 class AssistantService:
@@ -255,26 +264,60 @@ class AssistantService:
         return AssistantAskResponse(message=self._message_read(assistant_msg), sources=sources)
 
     async def run_command_turn(
-        self, client_id: uuid.UUID, chat_id: uuid.UUID, user: User, content: str
+        self,
+        client_id: uuid.UUID,
+        chat_id: uuid.UUID,
+        user: User,
+        content: str,
+        *,
+        attachment_upload_ids: list[uuid.UUID] | None = None,
+        storage: Storage | None = None,
     ) -> CommandTurnResponse:
-        """The natural-language command layer's chat turn: read tools run
-        inline, and any write the model attempted comes back as one
-        ``ChangeProposal`` — nothing is applied until a human approves it via
+        """The one unified chat turn: answers questions, drafts a content plan
+        (the existing chat-drafted-calendar special case), or proposes a
+        change — whichever the message actually calls for, in one flow with no
+        mode to pick. A drafted mutation comes back as one ``ChangeProposal``;
+        nothing is applied until a human approves it via
         ``ProposalService.approve``. See ``app/ai/command_agent.py``."""
         self._require_chat(client_id, chat_id)
         history = [
             (m.role.value, m.content)
             for m in self.chats.list_messages(chat_id, limit=_MAX_LLM_HISTORY_MESSAGES)
         ]
-        self.chats.add_message(chat_id, AiRole.user, content)
+        bundle, meta = await self._resolve_attachments(user, attachment_upload_ids, storage)
+        self.chats.add_message(chat_id, AiRole.user, content, meta=meta)
         self.db.commit()
+
+        plan_reply = await self._maybe_handle_plan_request(client_id, content, history, actor=user)
+        if plan_reply is not None:
+            reply_text, action_payload = plan_reply
+            result = CommandTurnResult(reply=reply_text)
+            extra_meta = {"action": action_payload} if action_payload else None
+            return self._finalize_command_turn(
+                client_id, chat_id, user, content, result, extra_meta=extra_meta
+            )
+
+        if bundle is not None:
+            # The tool-calling command loop is text-only (no vision support) —
+            # a turn with files attached is answered directly, grounded in the
+            # attachments + knowledge base, same as it always was. It can't
+            # stage a proposal in the same turn; ask a follow-up to do that.
+            result = await self._answer_with_attachments(client_id, user, content, history, bundle)
+            return self._finalize_command_turn(client_id, chat_id, user, content, result)
 
         agent = self._command_agent(client_id, user)
         result = await agent.run_turn(content, history=history)
         return self._finalize_command_turn(client_id, chat_id, user, content, result)
 
     async def begin_command_stream(
-        self, client_id: uuid.UUID, chat_id: uuid.UUID, user: User, content: str
+        self,
+        client_id: uuid.UUID,
+        chat_id: uuid.UUID,
+        user: User,
+        content: str,
+        *,
+        attachment_upload_ids: list[uuid.UUID] | None = None,
+        storage: Storage | None = None,
     ) -> CommandStreamContext:
         """Validate + persist the user turn before any streaming starts (same
         404-before-stream contract as ``begin_stream``). Call this, then feed
@@ -284,8 +327,35 @@ class AssistantService:
             (m.role.value, m.content)
             for m in self.chats.list_messages(chat_id, limit=_MAX_LLM_HISTORY_MESSAGES)
         ]
-        self.chats.add_message(chat_id, AiRole.user, content)
+        bundle, meta = await self._resolve_attachments(user, attachment_upload_ids, storage)
+        self.chats.add_message(chat_id, AiRole.user, content, meta=meta)
         self.db.commit()
+
+        plan_reply = await self._maybe_handle_plan_request(client_id, content, history, actor=user)
+        if plan_reply is not None:
+            reply_text, action_payload = plan_reply
+            return CommandStreamContext(
+                client_id=client_id,
+                chat_id=chat_id,
+                user=user,
+                content=content,
+                immediate_result=CommandTurnResult(reply=reply_text),
+                immediate_meta={"action": action_payload} if action_payload else None,
+            )
+
+        if bundle is not None:
+            # Vision completion isn't a token stream in this codebase — deliver
+            # it as one immediate frame, same as the plan-request short-circuit
+            # above, rather than not supporting attachments on this endpoint at all.
+            result = await self._answer_with_attachments(client_id, user, content, history, bundle)
+            return CommandStreamContext(
+                client_id=client_id,
+                chat_id=chat_id,
+                user=user,
+                content=content,
+                immediate_result=result,
+            )
+
         agent = self._command_agent(client_id, user)
         return CommandStreamContext(
             client_id=client_id,
@@ -296,12 +366,55 @@ class AssistantService:
             history=history,
         )
 
+    async def _answer_with_attachments(
+        self,
+        client_id: uuid.UUID,
+        user: User,
+        content: str,
+        history: list[tuple[str, str]],
+        bundle: AttachmentBundle,
+    ) -> CommandTurnResult:
+        agent = ProjectAssistantAgent(
+            self.db,
+            client_id,
+            embedder=get_embedder(),
+            ai_client=get_llm_client(
+                AiUsageContext(feature=AiFeature.PROJECT_AI, client_id=client_id, user_id=user.id)
+            ),
+        )
+        answer, _sources = await agent.answer(content, history=history, attachments=bundle)
+        return CommandTurnResult(reply=answer)
+
     async def stream_command_events(self, ctx: CommandStreamContext) -> AsyncIterator[str]:
-        """SSE for one command-layer turn: a ``delta`` frame per token as the
-        model's own reply is generated, a ``tool_progress`` frame as each tool
-        call is dispatched, and a ``done`` frame with the persisted message id,
-        the full reply, and any staged proposal — nothing is written to the
-        database until a human approves it (``ProposalService.approve``)."""
+        """SSE for one chat turn: a ``delta`` frame per token as the model's
+        own reply is generated, a ``tool_progress`` frame as each tool call is
+        dispatched, and a ``done`` frame with the persisted message id, the
+        full reply, and any staged proposal — nothing is written to the
+        database until a human approves it (``ProposalService.approve``). A
+        content-plan turn (see ``begin_command_stream``) has nothing to
+        animate, so it's delivered as one immediate ``delta`` + ``done`` pair
+        instead, same as ``stream_events`` does for the old ask-only path."""
+        if ctx.immediate_result is not None:
+            yield _sse({"type": "delta", "text": ctx.immediate_result.reply})
+            response = self._finalize_command_turn(
+                ctx.client_id,
+                ctx.chat_id,
+                ctx.user,
+                ctx.content,
+                ctx.immediate_result,
+                extra_meta=ctx.immediate_meta,
+            )
+            yield _sse(
+                {
+                    "type": "done",
+                    "message_id": str(response.message_id),
+                    "content": response.reply,
+                    "proposal": None,
+                }
+            )
+            return
+
+        assert ctx.agent is not None
         result: CommandTurnResult | None = None
         async for event in ctx.agent.run_turn_stream(ctx.content, history=ctx.history):
             if event.type == "delta":
@@ -341,13 +454,23 @@ class AssistantService:
         user: User,
         content: str,
         result: CommandTurnResult,
+        *,
+        extra_meta: dict | None = None,
     ) -> CommandTurnResponse:
         """Persist the assembled assistant turn and, if the model staged any
         mutation, create the ``ChangeProposal`` for it — shared by the plain
-        and streamed turn paths so they behave identically."""
+        and streamed turn paths so they behave identically.
+
+        ``extra_meta`` carries the content-plan special case's
+        ``{"action": ...}`` payload (see ``_maybe_handle_plan_request``) so the
+        existing ``PlanDraftCard`` UI keeps working once that flow is folded
+        into this same unified entry point.
+        """
         chat = self._require_chat(client_id, chat_id)
         assistant_msg = self.chats.add_message(chat_id, AiRole.assistant, result.reply)
         chat.updated_at = datetime.now(UTC)
+        if extra_meta:
+            assistant_msg.meta = {**(assistant_msg.meta or {}), **extra_meta}
 
         proposal_read: ChangeProposalRead | None = None
         if result.operations:

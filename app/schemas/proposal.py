@@ -9,6 +9,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.ai.attachments import MAX_ATTACHMENTS
 from app.models.enums import ProposalStatus, ProposedOperationStatus, ProposedOperationType
 from app.schemas.common import MAX_TEXT, ORMModel, StrictModel
 
@@ -46,7 +47,16 @@ class ChangeProposalRead(ORMModel):
 
 
 class CommandTurnRequest(StrictModel):
-    content: str = Field(min_length=1, max_length=MAX_TEXT)
+    """One unified chat turn: text, attachments, or both — the same message
+    box handles questions, content-plan requests, and change requests alike.
+
+    ``content`` may be empty *only* when files are attached, matching
+    ``AssistantAskRequest`` (dropping a report in with no question is a
+    legitimate way to ask "what's in this?").
+    """
+
+    content: str = Field(default="", max_length=MAX_TEXT)
+    attachment_upload_ids: list[uuid.UUID] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
 
 
 class CommandTurnResponse(BaseModel):

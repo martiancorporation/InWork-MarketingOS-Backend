@@ -164,9 +164,67 @@ def get_editable_schema(_db: Session, _client_id: uuid.UUID, _user: User) -> dic
             "status": [c.value for c in TaskStatus],
             "priority": [c.value for c in TaskPriority],
         },
-        "client_assignment": {"capabilities": [c.value for c in ClientCapability]},
         "client": {"status": [c.value for c in ClientStatus]},
-        "user": {"role": [c.value for c in UserRole]},
+    }
+
+
+def search_knowledge_base(
+    db: Session, client_id: uuid.UUID, _user: User, *, query: str
+) -> dict:
+    """Semantic search over this client's own indexed knowledge (brand voice,
+    goals, compliance rules, onboarding answers, uploaded documents) — call
+    this to answer any question about the client rather than guessing. Hard
+    client-scoped: the retrieval query is filtered by ``client_id`` at the SQL
+    level (``KnowledgeChunkRepository.search``), so this can never surface
+    another client's data regardless of what is asked."""
+    from app.integrations.embeddings import get_embedder
+    from app.services.intelligence.context_service import ContextService
+
+    result = ContextService(db, get_embedder()).build(client_id, query=query, top_k=6)
+    snippets = [chunk.text for chunk, _score in result.retrieved]
+    if not snippets:
+        return {"snippets": [], "note": "No indexed knowledge matched this query."}
+    return {"snippets": snippets}
+
+
+def get_performance_summary(
+    db: Session, client_id: uuid.UUID, _user: User, *, days: int = 30
+) -> dict:
+    """Real ad-performance numbers (spend, leads, conversions, ...) for this
+    client over the trailing window — call this for "how are my ads doing"
+    style questions."""
+    from datetime import date, timedelta
+
+    from app.services.analytics_service import AnalyticsService
+
+    window = max(1, min(days, 90))
+    end = date.today()
+    start = end - timedelta(days=window)
+    summary = AnalyticsService(db).summary(client_id, start=start, end=end)
+    t = summary.totals
+    return {
+        "window_days": window,
+        "data_as_of": summary.data_as_of.isoformat() if summary.data_as_of else None,
+        "stale": summary.stale,
+        "spend": t.spend,
+        "impressions": t.impressions,
+        "clicks": t.clicks,
+        "ctr_percent": t.ctr,
+        "leads": t.leads,
+        "cost_per_lead": t.cpl,
+        "conversions": t.conversions,
+        "revenue": t.revenue,
+        "roas": t.roas,
+        "by_platform": [
+            {
+                "platform": p.platform.value,
+                "spend": p.spend,
+                "impressions": p.impressions,
+                "clicks": p.clicks,
+                "leads": p.leads,
+            }
+            for p in summary.by_platform
+        ],
     }
 
 
