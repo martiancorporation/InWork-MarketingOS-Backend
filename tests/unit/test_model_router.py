@@ -72,12 +72,15 @@ def test_every_mapped_feature_has_a_builtin_default():
 
 
 def test_conversational_features_route_off_the_flagship_default():
-    # Regression guard: PROJECT_AI (Ask AI) and ASSISTANT (global) used to
-    # never consult model_for() at all, so they silently ran on the flagship
-    # default model on every single call — the client's core cost complaint.
+    # Regression guard: PROJECT_AI (Ask AI), ASSISTANT (global), and
+    # COMMAND_AGENT (the unified chat's tool-calling loop — see
+    # app/ai/command_agent.py) each independently used to never consult
+    # model_for() at all, so they silently ran on the flagship default model
+    # on every single call — the client's core cost/speed complaint, twice.
     conversational_default = builtin_default(AiTaskCategory.CONVERSATIONAL)
     assert model_for(AiFeature.PROJECT_AI) == conversational_default
     assert model_for(AiFeature.ASSISTANT) == conversational_default
+    assert model_for(AiFeature.COMMAND_AGENT) == conversational_default
     assert conversational_default is not None
 
 

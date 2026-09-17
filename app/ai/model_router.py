@@ -84,6 +84,13 @@ FEATURE_CATEGORY: dict[str, str] = {
     AiFeature.PROJECT_AI: AiTaskCategory.CONVERSATIONAL,
     AiFeature.ASSISTANT: AiTaskCategory.CONVERSATIONAL,
     AiFeature.DAY_CHAT: AiTaskCategory.CONVERSATIONAL,
+    # The natural-language command layer's tool-calling loop (the AI chat's
+    # actual engine since Ask/Command were unified into one flow) — same
+    # repeat of the PROJECT_AI/ASSISTANT bug below: it used to never consult
+    # model_for() either, so every command turn silently ran on the raw
+    # ceiling default (AISettings.model) instead of this category's tuned
+    # model. See app/ai/command_agent.py.
+    AiFeature.COMMAND_AGENT: AiTaskCategory.CONVERSATIONAL,
     # Small, cheap "does this chat message want a content plan, and is the
     # date range clear" check that runs ahead of every Ask AI turn — see
     # app/ai/plan_chat_intent.py. Classification-shaped, not conversational.
@@ -94,13 +101,25 @@ FEATURE_CATEGORY: dict[str, str] = {
 # see app/ai/pricing.py for the verified per-token rates). A first pass for
 # the team to tune from real output-quality testing, not a final verdict;
 # change it any time via the /admin/ai-model-routes API — no deploy needed.
+#
+# CONVERSATIONAL was re-picked 2026-09-17 after a client cost/speed complaint
+# traced to AiFeature.COMMAND_AGENT (the unified chat's tool-calling loop —
+# see its comment in FEATURE_CATEGORY above) silently bypassing this table
+# entirely and running every turn on the flagship ceiling default. Once wired
+# in, "openai/gpt-5.6-luna" ($0.20/$1.20 per 1M) was swapped for
+# "deepseek/deepseek-v4.1-flash" ($0.15/$0.60 per 1M): cheaper, "flash"-tier
+# (fast), and already the trusted choice here for EXTRACTION and
+# STRUCTURED_GENERATION — the closest proxy for tool-calling reliability
+# (both are "produce well-formed structured output from instructions"), which
+# is the core skill this category's heaviest caller (the command agent) needs
+# alongside plain conversational replies.
 _BUILTIN_DEFAULTS: dict[str, str] = {
     AiTaskCategory.CLASSIFICATION: "qwen/qwen3.7-flash",
     AiTaskCategory.EXTRACTION: "deepseek/deepseek-v4.1-flash",
     AiTaskCategory.SUMMARIZATION: "z-ai/glm-5.3-flash",
     AiTaskCategory.STRUCTURED_GENERATION: "deepseek/deepseek-v4.1-flash",
     AiTaskCategory.ANALYSIS: "minimax/minimax-m3",
-    AiTaskCategory.CONVERSATIONAL: "openai/gpt-5.6-luna",
+    AiTaskCategory.CONVERSATIONAL: "deepseek/deepseek-v4.1-flash",
     AiTaskCategory.REASONING_COMPLEX: "anthropic/claude-sonnet-5",
 }
 

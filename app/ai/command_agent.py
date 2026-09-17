@@ -25,6 +25,8 @@ from typing import Literal
 
 from sqlalchemy.orm import Session
 
+from app.ai.features import AiFeature
+from app.ai.model_router import model_for
 from app.ai.tools.registry import (
     REQUEST_CLARIFICATION,
     TOOLS,
@@ -82,6 +84,8 @@ class CommandStreamEvent:
 
 
 class CommandAgent:
+    feature = AiFeature.COMMAND_AGENT
+
     def __init__(self, db: Session, client_id: uuid.UUID, user: User, ai_client: LLMClient) -> None:
         self.db = db
         self.client_id = client_id
@@ -98,7 +102,9 @@ class CommandAgent:
 
         for _round in range(_MAX_ROUNDS):
             try:
-                response = await self.ai.complete_with_tools(messages=messages, tools=tools)
+                response = await self.ai.complete_with_tools(
+                    messages=messages, tools=tools, model=model_for(self.feature)
+                )
             except AppError:
                 logger.warning("Command agent LLM call failed", exc_info=True)
                 return CommandTurnResult(reply=_PROVIDER_ERROR_REPLY, operations=staged)
@@ -148,7 +154,9 @@ class CommandAgent:
             content_parts: list[str] = []
             round_tool_calls: list[ToolCall] = []
             try:
-                async for delta in self.ai.stream_with_tools(messages=messages, tools=tools):
+                async for delta in self.ai.stream_with_tools(
+                    messages=messages, tools=tools, model=model_for(self.feature)
+                ):
                     if delta.text:
                         content_parts.append(delta.text)
                         yield CommandStreamEvent(type="delta", text=delta.text)

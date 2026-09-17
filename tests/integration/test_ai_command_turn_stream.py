@@ -13,6 +13,8 @@ import json
 
 from fastapi.testclient import TestClient
 
+from app.ai.features import AiFeature
+from app.ai.model_router import AiTaskCategory, builtin_default, model_for
 from app.integrations.llm.base import StreamDelta, ToolCall
 from app.integrations.llm.openrouter import OpenRouterClient
 from tests.conftest import API
@@ -178,3 +180,37 @@ def test_turn_stream_tool_progress_then_proposal_on_done(
     listed_after = client.get(f"{API}/clients/{cid}/plan/tasks", headers=admin_headers)
     assert listed_after.json()["total"] == 1
     assert listed_after.json()["items"][0]["title"] == "Q4 Launch"
+
+
+def test_turn_stream_routes_off_the_conversational_model(
+    client: TestClient, admin_headers: dict, monkeypatch
+):
+    """Regression guard: the command agent used to never pass a ``model`` to
+    ``stream_with_tools`` at all, so every turn silently ran on the raw
+    ceiling default (``AISettings.model``) instead of the admin-tunable
+    ``conversational`` route — see app/ai/model_router.py's FEATURE_CATEGORY
+    comment on AiFeature.COMMAND_AGENT."""
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    received_models: list[str | None] = []
+
+    async def fake_stream_with_tools(
+        self, *, messages, tools, tool_choice="auto", max_tokens=None, model=None, context=None
+    ):
+        received_models.append(model)
+        yield StreamDelta(text="Here you go.")
+
+    monkeypatch.setattr(OpenRouterClient, "stream_with_tools", fake_stream_with_tools)
+
+    cid = _client_id(client, admin_headers, name="Stream Cmd Routing Co.")
+    chat_id = _chat_id(client, admin_headers, cid)
+    resp = client.post(
+        f"{API}/clients/{cid}/assistant/chats/{chat_id}/turn/stream",
+        headers=admin_headers,
+        json={"content": "What's on the plan board?"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    assert received_models == [builtin_default(AiTaskCategory.CONVERSATIONAL)]
+    assert received_models[0] is not None
+    # And it's actually routed via COMMAND_AGENT's category, not a coincidence.
+    assert received_models[0] == model_for(AiFeature.COMMAND_AGENT)
