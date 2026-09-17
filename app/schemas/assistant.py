@@ -69,6 +69,11 @@ class AssistantMessageRead(ORMModel):
     #: real ORM column, hence the default (see AiUsageEventRead.feature_label
     #: for the same "sidecar field, not from_attributes" pattern).
     action: PlanDraftAction | None = None
+    #: Populated from AiChatMessage.meta["proposal_id"] when this turn staged
+    #: an AI change proposal (see ProposalService) — the frontend fetches the
+    #: full ChangeProposal via GET .../proposals/{id} to render the approval
+    #: card, including on a reloaded chat history, not just the live turn.
+    proposal_id: uuid.UUID | None = None
 
 
 class AssistantChatRead(ORMModel):

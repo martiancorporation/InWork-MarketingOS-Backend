@@ -108,6 +108,7 @@ class AuditService:
         actor_user_id: uuid.UUID | None = None,
         entity_id: uuid.UUID | None = None,
         client_id: uuid.UUID | None = None,
+        proposal_id: uuid.UUID | None = None,
         target_label: str | None = None,
         meta: dict | None = None,
         changes: dict | None = None,
@@ -115,6 +116,7 @@ class AuditService:
         row = AuditLog(
             actor_user_id=actor_user_id,
             client_id=client_id,
+            proposal_id=proposal_id,
             entity=entity,
             entity_id=entity_id,
             action=action,
@@ -135,6 +137,7 @@ class AuditService:
         entity: str | None = None,
         actor_user_id: uuid.UUID | None = None,
         client_id: uuid.UUID | None = None,
+        proposal_id: uuid.UUID | None = None,
     ) -> AuditLogListResponse:
         rows, total = self.repo.list(
             offset=pagination.offset,
@@ -143,6 +146,7 @@ class AuditService:
             entity=entity,
             actor_user_id=actor_user_id,
             client_id=client_id,
+            proposal_id=proposal_id,
         )
         return AuditLogListResponse(
             items=[AuditLogRead.model_validate(r) for r in rows],

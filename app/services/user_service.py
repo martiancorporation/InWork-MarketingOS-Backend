@@ -12,6 +12,12 @@ from app.core.security import hash_password
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserCreate, UserListResponse, UserRead, UserUpdate
+from app.services.audit_service import field_changes
+
+
+def _audit_value(value: object) -> object:
+    """JSON-safe scalar for a diff (enum -> ``.value``)."""
+    return getattr(value, "value", value)
 
 
 class UserService:
@@ -43,15 +49,25 @@ class UserService:
         )
 
     def update_user(self, user_id: uuid.UUID, data: UserUpdate) -> User:
+        user, _changes = self._apply_update_user(user_id, data)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
+    def _apply_update_user(self, user_id: uuid.UUID, data: UserUpdate) -> tuple[User, dict | None]:
+        """Everything ``update_user`` does short of the commit — the reusable
+        core the AI proposal engine dry-runs inside a rolled-back SAVEPOINT
+        (see ``ProposalService``) and replays for real at execution time."""
         user = self.users.get(user_id)
         if user is None:
             raise NotFoundError("User not found.")
+        tracked = ("name", "role", "is_active")
+        before = {f: _audit_value(getattr(user, f)) for f in tracked}
         if data.name is not None:
             user.name = data.name
         if data.role is not None:
             user.role = data.role
         if data.is_active is not None:
             user.is_active = data.is_active
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        after = {f: _audit_value(getattr(user, f)) for f in tracked}
+        return user, field_changes(before, after)

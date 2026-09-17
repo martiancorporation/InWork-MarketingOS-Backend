@@ -16,6 +16,7 @@ class AuditLogRead(ORMModel):
     client_id: uuid.UUID | None = None
     entity: str
     entity_id: uuid.UUID | None = None
+    proposal_id: uuid.UUID | None = None
     action: str
     target_label: str | None = None
     meta: dict | None = None

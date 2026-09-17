@@ -55,6 +55,7 @@ from app.models.platform_insight import (
     PlatformMetricDaily,
     PlatformRecommendation,
 )
+from app.models.proposal import ChangeProposal, ProposedOperation
 from app.models.recommendation import RecommendationAction
 from app.models.report import Report
 from app.models.report_email_log import ReportEmailLog
@@ -86,6 +87,7 @@ __all__ = [
     "ClientDirective",
     "ClientPlatform",
     "ClientProfile",
+    "ChangeProposal",
     "ComplianceDoc",
     "ComplianceEntry",
     "Conversation",
@@ -114,6 +116,7 @@ __all__ = [
     "PlatformDeliveryIssue",
     "PlatformMetricDaily",
     "PlatformRecommendation",
+    "ProposedOperation",
     "RecommendationAction",
     "Report",
     "ReportEmailLog",

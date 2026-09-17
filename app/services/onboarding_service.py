@@ -51,6 +51,7 @@ from app.schemas.onboarding import (
     OnboardingRequest,
     OnboardingStepUpdate,
 )
+from app.services.audit_service import field_changes
 from app.services.intelligence.job_queue import JobQueue
 from app.services.readiness_service import ReadinessService
 from app.utils.slug import slugify, unique_slug
@@ -327,6 +328,42 @@ class OnboardingService:
             ]
         if "fonts" in brand.model_fields_set and brand.fonts is not None:
             client.brand_fonts = [ClientBrandFont(family=f) for f in brand.fonts if f.strip()]
+
+    def _apply_update_brand(self, client: Client, brand: BrandUpdate) -> dict | None:
+        """A brand-only, non-committing counterpart to ``update_step`` — the
+        reusable core the AI proposal engine dry-runs inside a rolled-back
+        SAVEPOINT (see ``ProposalService``) and replays for real at execution
+        time. Reuses ``_apply_brand`` verbatim (no duplicated mutation logic)
+        and enqueues the same incremental intelligence rebuild a human's
+        autosave would.
+
+        Note: unlike ``ClientService.update_client``, colors/fonts live on
+        child tables (``ClientBrandColor``/``Font``), not scalar columns —
+        replacing *only* those doesn't bump ``clients.updated_at`` (no UPDATE
+        is emitted on that row), so the AI proposal engine's whole-row
+        staleness check can miss a concurrent colors/fonts-only edit. The
+        real-execution replay of ``_apply_brand`` still fully overwrites the
+        collections from the proposed data either way — the same
+        last-write-wins exposure ``client_assignment`` already has.
+        """
+        before = self._brand_snapshot(client)
+        self._apply_brand(client, brand)
+        after = self._brand_snapshot(client)
+        self._enqueue_build(
+            client.id, IntelJobType.incremental.value, changed_keys=["brand"], debounce_seconds=5
+        )
+        return field_changes(before, after)
+
+    @staticmethod
+    def _brand_snapshot(client: Client) -> dict:
+        return {
+            "about_brand": client.about_brand,
+            "brand_voice": client.brand_voice,
+            "color_guidelines": client.color_guidelines,
+            "logo_url": client.logo_url,
+            "colors": [c.hex for c in client.brand_colors],
+            "fonts": [f.family for f in client.brand_fonts],
+        }
 
     @staticmethod
     def _apply_compliance(client: Client, compliance: ComplianceIn, admin: User) -> None:

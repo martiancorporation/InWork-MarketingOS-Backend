@@ -24,6 +24,7 @@ class AuditRepository(BaseRepository[AuditLog]):
         entity: str | None = None,
         actor_user_id: uuid.UUID | None = None,
         client_id: uuid.UUID | None = None,
+        proposal_id: uuid.UUID | None = None,
     ) -> tuple[list[AuditLog], int]:
         base: Select = select(AuditLog)
         if action:
@@ -34,6 +35,8 @@ class AuditRepository(BaseRepository[AuditLog]):
             base = base.where(AuditLog.actor_user_id == actor_user_id)
         if client_id is not None:
             base = base.where(AuditLog.client_id == client_id)
+        if proposal_id is not None:
+            base = base.where(AuditLog.proposal_id == proposal_id)
 
         total = int(self.db.scalar(select(func.count()).select_from(base.subquery())) or 0)
         rows = list(

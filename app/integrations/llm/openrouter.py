@@ -36,6 +36,7 @@ from app.ai.pricing import UsageBreakdown
 from app.ai.usage import AiUsageContext, record_usage
 from app.core.config import get_settings
 from app.core.exceptions import ServiceUnavailableError
+from app.integrations.llm.base import StreamDelta, ToolCall, ToolCallResponse
 
 _PROVIDER = "openrouter"
 
@@ -216,6 +217,145 @@ class OpenRouterClient:
         )
         return _text_of(body)
 
+    async def complete_with_tools(
+        self,
+        *,
+        messages: list[dict],
+        tools: list[dict],
+        tool_choice: str = "auto",
+        max_tokens: int | None = None,
+        model: str | None = None,
+        context: AiUsageContext | None = None,
+    ) -> ToolCallResponse:
+        """One round of an OpenAI-style tool-calling conversation.
+
+        OpenRouter proxies ``tools``/``tool_choice`` through unmodified to any
+        underlying model that supports OpenAI-style function calling (every
+        current frontier model does) — this is a thin passthrough, not a new
+        wire format.
+        """
+        body = await self._invoke(
+            {
+                "model": model or self._settings.model,
+                "max_tokens": max_tokens or self._settings.max_tokens,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": tool_choice,
+            },
+            operation="complete_with_tools",
+            context=context,
+        )
+        return _tool_response_of(body)
+
+    async def stream_with_tools(
+        self,
+        *,
+        messages: list[dict],
+        tools: list[dict],
+        tool_choice: str = "auto",
+        max_tokens: int | None = None,
+        model: str | None = None,
+        context: AiUsageContext | None = None,
+    ):
+        """Streaming counterpart to ``complete_with_tools`` (see ``base.py``).
+
+        Tool-call arguments arrive as incremental JSON-string fragments keyed
+        by an ``index`` (their position among this round's tool calls, not a
+        stable id) — accumulated here per index and only yielded, fully
+        parsed, once the provider's ``finish_reason`` closes that choice. Text
+        tokens are yielded as they arrive, same as ``stream``.
+        """
+        if not self.is_configured:
+            raise ServiceUnavailableError("AI provider is not configured.")
+        ctx = context or self._context
+        model = model or self._settings.model
+        payload = {
+            "model": model,
+            "max_tokens": max_tokens or self._settings.max_tokens,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        url = self._settings.base_url.rstrip("/") + "/chat/completions"
+        started = time.perf_counter()
+        usage: UsageBreakdown | None = None
+        request_id: str | None = None
+        # Keyed by the provider's per-round tool-call `index` — `id`/`name`
+        # normally arrive only in that call's first chunk, `arguments` grows
+        # across every subsequent chunk for the same index.
+        accumulating: dict[int, dict[str, str]] = {}
+        try:
+            async with self._new_http_client() as http:
+                async with http.stream("POST", url, json=payload, headers=self._headers()) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[len("data:") :].strip()
+                        if not data or data == "[DONE]":
+                            continue
+                        chunk = json.loads(data)
+                        request_id = chunk.get("id") or request_id
+                        if chunk.get("usage"):
+                            usage = _usage_from_body(chunk)
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+                        choice = choices[0] or {}
+                        delta = choice.get("delta") or {}
+                        text = delta.get("content")
+                        if text:
+                            yield StreamDelta(text=text)
+                        for tc in delta.get("tool_calls") or []:
+                            slot = accumulating.setdefault(
+                                tc.get("index", 0), {"id": "", "name": "", "arguments": ""}
+                            )
+                            if tc.get("id"):
+                                slot["id"] = tc["id"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                slot["name"] = fn["name"]
+                            if fn.get("arguments"):
+                                slot["arguments"] += fn["arguments"]
+                        if choice.get("finish_reason"):
+                            for slot in accumulating.values():
+                                if not slot["name"]:
+                                    continue
+                                try:
+                                    arguments = json.loads(slot["arguments"] or "{}")
+                                except json.JSONDecodeError:
+                                    arguments = {}
+                                yield StreamDelta(
+                                    tool_call=ToolCall(
+                                        id=slot["id"], name=slot["name"], arguments=arguments
+                                    )
+                                )
+                            accumulating = {}
+        except Exception as exc:
+            record_usage(
+                context=ctx,
+                provider=_PROVIDER,
+                model=model,
+                operation="stream_with_tools",
+                usage=None,
+                status="error",
+                error=str(exc)[:500],
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+            raise ServiceUnavailableError(f"AI provider request failed: {exc}") from exc
+        record_usage(
+            context=ctx,
+            provider=_PROVIDER,
+            model=model,
+            operation="stream_with_tools",
+            usage=usage,
+            status="success",
+            request_id=request_id,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+
     async def stream(
         self,
         *,
@@ -300,6 +440,25 @@ def _text_of(body: dict) -> str:
         return ""
     message = (choices[0] or {}).get("message") or {}
     return str(message.get("content") or "")
+
+
+def _tool_response_of(body: dict) -> ToolCallResponse:
+    choices = body.get("choices") or []
+    if not choices:
+        return ToolCallResponse(content=None, tool_calls=[])
+    message = (choices[0] or {}).get("message") or {}
+    content = message.get("content")
+    calls: list[ToolCall] = []
+    for raw in message.get("tool_calls") or []:
+        fn = raw.get("function") or {}
+        try:
+            arguments = json.loads(fn.get("arguments") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            arguments = {}
+        calls.append(
+            ToolCall(id=raw.get("id") or "", name=fn.get("name") or "", arguments=arguments)
+        )
+    return ToolCallResponse(content=content, tool_calls=calls)
 
 
 def _usage_from_body(body: dict) -> UsageBreakdown:

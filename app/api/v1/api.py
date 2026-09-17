@@ -32,6 +32,7 @@ from app.api.v1.routers import (
     plan_generation,
     plans,
     platform_insights,
+    proposals,
     reports,
     strategy,
     support_tickets,
@@ -64,6 +65,7 @@ api_router.include_router(alerts.router)
 api_router.include_router(integrations.router)
 api_router.include_router(plans.router)
 api_router.include_router(plan_generation.router)
+api_router.include_router(proposals.router)
 api_router.include_router(platform_insights.router)
 api_router.include_router(automation.router)
 api_router.include_router(notifications.router)

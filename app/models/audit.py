@@ -37,6 +37,12 @@ class AuditLog(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     client_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("clients.id", ondelete="SET NULL"), index=True
     )
+    # Which AI change proposal produced this row, when applicable — lets "who
+    # approved this, and what did the AI actually change" be answered with an
+    # indexed lookup instead of scanning ``meta``.
+    proposal_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("change_proposals.id", ondelete="SET NULL"), index=True
+    )
     entity: Mapped[str] = mapped_column(String(60), nullable=False)  # e.g. client, event
     entity_id: Mapped[uuid.UUID | None] = mapped_column(GUID)
     action: Mapped[str] = mapped_column(String(80), nullable=False)

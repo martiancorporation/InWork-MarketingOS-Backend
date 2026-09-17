@@ -119,36 +119,45 @@ class ClientService:
             page_size=pagination.page_size,
         )
 
+    #: Fields ``update_client`` may move, and which the audit/proposal diff tracks.
+    _UPDATE_FIELDS = (
+        "name",
+        "business_type",
+        "industry",
+        "website",
+        "location",
+        "language",
+        "timezone",
+        "markets",
+        "status",
+    )
+
     def update_client(self, client_id: uuid.UUID, data: ClientUpdate) -> Client:
         """Admin edit of status / basic profile fields (partial). Scoping is
         enforced at the router via the ``AdminUser`` dependency."""
-        client = self.clients.get(client_id)
-        if client is None:
-            raise NotFoundError("Client not found.")
-        fields = data.model_fields_set
-        tracked = (
-            "name",
-            "business_type",
-            "industry",
-            "website",
-            "location",
-            "language",
-            "timezone",
-            "markets",
-            "status",
-        )
-        before = {f: _audit_value(getattr(client, f)) for f in tracked}
-        for attr in tracked:
-            if attr in fields:
-                setattr(client, attr, getattr(data, attr))
-        after = {f: _audit_value(getattr(client, f)) for f in tracked}
-        # Record the before/after diff so the audit log shows what changed.
-        changes = field_changes(before, after)
+        client, changes = self._apply_update_client(client_id, data)
         if changes:
             set_audit_changes(changes)
         self.db.commit()
         self.db.refresh(client)
         return client
+
+    def _apply_update_client(
+        self, client_id: uuid.UUID, data: ClientUpdate
+    ) -> tuple[Client, dict | None]:
+        """Everything ``update_client`` does short of the commit — the reusable
+        core the AI proposal engine dry-runs inside a rolled-back SAVEPOINT
+        (see ``ProposalService``) and replays for real at execution time."""
+        client = self.clients.get(client_id)
+        if client is None:
+            raise NotFoundError("Client not found.")
+        fields = data.model_fields_set
+        before = {f: _audit_value(getattr(client, f)) for f in self._UPDATE_FIELDS}
+        for attr in self._UPDATE_FIELDS:
+            if attr in fields:
+                setattr(client, attr, getattr(data, attr))
+        after = {f: _audit_value(getattr(client, f)) for f in self._UPDATE_FIELDS}
+        return client, field_changes(before, after)
 
     def _can_access(self, user: User, client_id: uuid.UUID) -> bool:
         return user.role == UserRole.admin or self.assignments.exists(client_id, user.id)

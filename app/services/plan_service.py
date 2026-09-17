@@ -122,6 +122,18 @@ class PlanService:
     def create_task(
         self, client_id: uuid.UUID, data: PlanTaskCreate, *, created_by: uuid.UUID
     ) -> PlanTask:
+        task, changes = self._apply_create_task(client_id, data, created_by=created_by)
+        if changes:
+            set_audit_changes(changes)
+        self.db.commit()
+        return self.get_task(client_id, task.id)
+
+    def _apply_create_task(
+        self, client_id: uuid.UUID, data: PlanTaskCreate, *, created_by: uuid.UUID
+    ) -> tuple[PlanTask, dict | None]:
+        """Everything ``create_task`` does short of the commit — the reusable
+        core the AI proposal engine dry-runs inside a rolled-back SAVEPOINT
+        (see ``ProposalService``) and replays for real at execution time."""
         task = PlanTask(
             client_id=client_id,
             title=data.title,
@@ -139,25 +151,31 @@ class PlanService:
         )
         self.tasks.add(task)
         self.tasks.flush()  # assign the id before returning
-        set_audit_changes(
-            created_changes(
-                {
-                    "title": task.title,
-                    "category": task.category,
-                    "status": task.status,
-                    # Coerced: ``created_changes`` only unwraps enums, so a raw
-                    # date would break the JSONB insert.
-                    "start_date": _audit_value(task.start_date),
-                    "due_date": _audit_value(task.due_date),
-                }
-            )
+        changes = created_changes(
+            {
+                "title": task.title,
+                "category": task.category,
+                "status": task.status,
+                # Coerced: ``created_changes`` only unwraps enums, so a raw
+                # date would break the JSONB insert.
+                "start_date": _audit_value(task.start_date),
+                "due_date": _audit_value(task.due_date),
+            }
         )
-        self.db.commit()
-        return self.get_task(client_id, task.id)
+        return task, changes
 
     def update_task(
         self, client_id: uuid.UUID, task_id: uuid.UUID, data: PlanTaskUpdate
     ) -> PlanTask:
+        task, changes = self._apply_update_task(client_id, task_id, data)
+        if changes:
+            set_audit_changes(changes)
+        self.db.commit()
+        return self.get_task(client_id, task.id)
+
+    def _apply_update_task(
+        self, client_id: uuid.UUID, task_id: uuid.UUID, data: PlanTaskUpdate
+    ) -> tuple[PlanTask, dict | None]:
         task = self.get_task(client_id, task_id)
         fields = data.model_fields_set
         touched = [a for a in _MUTABLE if a in fields]
@@ -178,17 +196,24 @@ class PlanService:
         for attr in touched:
             setattr(task, attr, getattr(data, attr))
         after = {a: _audit_value(getattr(task, a)) for a in touched}
-        set_audit_changes(field_changes(before, after))
-        self.db.commit()
-        return self.get_task(client_id, task.id)
+        return task, field_changes(before, after)
 
     def delete_task(self, client_id: uuid.UUID, task_id: uuid.UUID) -> None:
+        _task, changes = self._apply_delete_task(client_id, task_id)
+        if changes:
+            set_audit_changes(changes)
+        self.db.commit()
+
+    def _apply_delete_task(
+        self, client_id: uuid.UUID, task_id: uuid.UUID
+    ) -> tuple[PlanTask, dict | None]:
         task = self.get_task(client_id, task_id)
-        set_audit_changes(
-            deleted_changes({"title": task.title, "category": task.category, "status": task.status})
+        changes = deleted_changes(
+            {"title": task.title, "category": task.category, "status": task.status}
         )
         self.db.delete(task)
-        self.db.commit()
+        self.db.flush()
+        return task, changes
 
     def duplicate_task(
         self, client_id: uuid.UUID, task_id: uuid.UUID, *, created_by: uuid.UUID
@@ -198,6 +223,15 @@ class PlanService:
         dates carried over; status and assignee deliberately reset, since a
         duplicate is a new piece of work, not a clone of someone's in-progress
         item)."""
+        copy, changes = self._apply_duplicate_task(client_id, task_id, created_by=created_by)
+        if changes:
+            set_audit_changes(changes)
+        self.db.commit()
+        return self.get_task(client_id, copy.id)
+
+    def _apply_duplicate_task(
+        self, client_id: uuid.UUID, task_id: uuid.UUID, *, created_by: uuid.UUID
+    ) -> tuple[PlanTask, dict | None]:
         source = self.get_task(client_id, task_id)
         copy = PlanTask(
             client_id=client_id,
@@ -215,9 +249,8 @@ class PlanService:
         )
         self.tasks.add(copy)
         self.tasks.flush()
-        set_audit_changes(created_changes({"title": copy.title, "category": copy.category}))
-        self.db.commit()
-        return self.get_task(client_id, copy.id)
+        changes = created_changes({"title": copy.title, "category": copy.category})
+        return copy, changes
 
     # ---- supporting links ------------------------------------------------ #
 
@@ -257,8 +290,20 @@ class PlanService:
         *,
         user_id: uuid.UUID,
     ) -> PlanTaskNote:
+        note, _task = self._apply_add_note(client_id, task_id, data, user_id=user_id)
+        self.db.commit()
+        return note
+
+    def _apply_add_note(
+        self,
+        client_id: uuid.UUID,
+        task_id: uuid.UUID,
+        data: PlanTaskNoteCreate,
+        *,
+        user_id: uuid.UUID,
+    ) -> tuple[PlanTaskNote, PlanTask]:
         task = self.get_task(client_id, task_id)
         note = PlanTaskNote(task_id=task.id, user_id=user_id, body=data.body)
         self.tasks.add_note(note)
-        self.db.commit()
-        return note
+        self.tasks.flush()
+        return note, task

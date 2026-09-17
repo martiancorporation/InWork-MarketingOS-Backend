@@ -5,6 +5,8 @@
 - ``GET    /clients/{id}/assistant/chats/{chat_id}``          — chat + messages
 - ``POST   /clients/{id}/assistant/chats/{chat_id}/messages`` — ask a question (AI reply)
 - ``POST   /clients/{id}/assistant/chats/{chat_id}/messages/stream``               — same, streamed (SSE)
+- ``POST   /clients/{id}/assistant/chats/{chat_id}/turn``          — natural-language command turn (proposes changes)
+- ``POST   /clients/{id}/assistant/chats/{chat_id}/turn/stream``   — same, streamed (SSE)
 - ``POST   /clients/{id}/assistant/chats/{chat_id}/messages/{mid}/approve-plan``   — approve a chat-drafted content plan
 - ``POST   /clients/{id}/assistant/chats/{chat_id}/messages/{mid}/reject-plan``    — discard a chat-drafted content plan
 - ``DELETE /clients/{id}/assistant/chats/{chat_id}``          — delete a chat
@@ -46,6 +48,7 @@ from app.schemas.assistant import (
     AssistantRejectPlanRequest,
 )
 from app.schemas.common import MessageResponse
+from app.schemas.proposal import CommandTurnRequest, CommandTurnResponse
 from app.services.assistant_service import AssistantService
 
 router = APIRouter(prefix="/clients/{client_id}/assistant", tags=["assistant"])
@@ -157,6 +160,55 @@ async def ask_stream(
     )
     return StreamingResponse(
         service.stream_events(ctx),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post(
+    "/chats/{chat_id}/turn",
+    response_model=CommandTurnResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Natural-language command turn — proposes changes, never applies them",
+    dependencies=[Depends(RateLimit("assistant_ask", times=30, seconds=60))],
+)
+async def turn(
+    client_id: uuid.UUID,
+    chat_id: uuid.UUID,
+    data: CommandTurnRequest,
+    user: CurrentUser,
+    db: DbSession,
+    _client: RequireClient,
+) -> CommandTurnResponse:
+    """Runs the AI command layer for one chat turn. Any mutation the model
+    attempted comes back as a ``proposal`` on the response — nothing is
+    written until a human calls ``POST .../proposals/{id}/approve``."""
+    return await AssistantService(db).run_command_turn(client_id, chat_id, user, data.content)
+
+
+@router.post(
+    "/chats/{chat_id}/turn/stream",
+    summary="Natural-language command turn — streamed token-by-token (SSE)",
+    dependencies=[Depends(RateLimit("assistant_ask", times=30, seconds=60))],
+)
+async def turn_stream(
+    client_id: uuid.UUID,
+    chat_id: uuid.UUID,
+    data: CommandTurnRequest,
+    user: CurrentUser,
+    db: DbSession,
+    _client: RequireClient,
+) -> StreamingResponse:
+    """Server-Sent Events: a ``delta`` frame per token of the model's own
+    reply, a ``tool_progress`` frame as each tool call is dispatched, then a
+    ``done`` frame with the persisted message id, full reply text, and any
+    staged ``proposal`` — nothing is written to the database until a human
+    calls ``POST .../proposals/{id}/approve``. Access + chat-existence are
+    checked (404) before the stream opens, same as ``ask_stream``."""
+    service = AssistantService(db)
+    ctx = await service.begin_command_stream(client_id, chat_id, user, data.content)
+    return StreamingResponse(
+        service.stream_command_events(ctx),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
