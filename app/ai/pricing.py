@@ -50,12 +50,6 @@ def _rate(inp: str, out: str, cw: str, cr: str) -> ModelRate:
 _DEFAULT_PRICING: dict[str, ModelRate] = {
     # --- Anthropic (via OpenRouter) ---
     "anthropic/claude-opus-5": _rate("5", "25", "6.25", "0.50"),
-    # "claude-opus-4-8" (the configured OPENROUTER_MODEL default before this
-    # fix) no longer appears in OpenRouter's public catalog but still serves
-    # real requests (confirmed live) — priced at parity with opus-5 as a
-    # best-effort estimate so historical/legacy usage rows stay priced rather
-    # than silently zeroing out.
-    "anthropic/claude-opus-4-8": _rate("5", "25", "6.25", "0.50"),
     "anthropic/claude-sonnet-5": _rate("2", "10", "2.5", "0.20"),
     "anthropic/claude-haiku-4.5": _rate("1", "5", "1.25", "0.10"),
     "anthropic/claude-fable-5": _rate("10", "50", "12.5", "1.00"),
