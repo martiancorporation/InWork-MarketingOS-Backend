@@ -24,16 +24,22 @@ providers still use ``connect`` until their client is built.
 
 from __future__ import annotations
 
+import base64
+import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import DbSession, RequireClient, require_capability
+from app.core.exceptions import BadRequestError
 from app.models.client import Client
 from app.models.enums import ClientCapability, IntegrationKey
 from app.schemas.integration import (
     AdAccountOption,
+    GhlConnectRequest,
+    GhlContactRead,
+    GhlContactsRead,
     IntegrationConnectRequest,
     IntegrationListResponse,
     IntegrationRead,
@@ -44,6 +50,73 @@ from app.schemas.integration import (
 from app.services.integration_service import IntegrationService
 
 router = APIRouter(prefix="/clients/{client_id}/integrations", tags=["integrations"])
+
+
+def _encode_cursor(cursor: list | None) -> str | None:
+    if not cursor:
+        return None
+    return base64.urlsafe_b64encode(json.dumps(cursor).encode()).decode()
+
+
+def _decode_cursor(raw: str | None) -> list | None:
+    if not raw:
+        return None
+    try:
+        return json.loads(base64.urlsafe_b64decode(raw.encode()).decode())
+    except Exception as exc:
+        raise BadRequestError("Invalid pagination cursor.") from exc
+
+
+# ---- GHL — registered ahead of the generic "/{key}" routes below, since a
+# literal "/ghl/..." path would otherwise be shadowed by "/{key}/..." (route
+# matching is order-dependent, not specificity-dependent). GHL never runs
+# oauth/start|complete — see IntegrationService.connect_ghl for why. ------- #
+
+
+@router.post(
+    "/ghl/connect",
+    response_model=IntegrationRead,
+    summary="Connect GHL with a token issued out-of-band by the client's team",
+)
+def connect_ghl(
+    client_id: uuid.UUID,
+    data: GhlConnectRequest,
+    db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
+) -> IntegrationRead:
+    integration = IntegrationService(db).connect_ghl(
+        client_id,
+        access_token=data.access_token,
+        refresh_token=data.refresh_token,
+        location_id=data.location_id,
+        tags=data.tags,
+        expires_in=data.expires_in,
+    )
+    return IntegrationRead.model_validate(integration)
+
+
+@router.get(
+    "/ghl/contacts",
+    response_model=GhlContactsRead,
+    summary="Fetch this client's tagged GHL contacts (one page)",
+)
+async def get_ghl_contacts(
+    client_id: uuid.UUID,
+    db: DbSession,
+    _client: RequireClient,
+    page_limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    search_after: Annotated[
+        str | None,
+        Query(description="Opaque cursor from a previous response's next_search_after"),
+    ] = None,
+) -> GhlContactsRead:
+    page = await IntegrationService(db).fetch_ghl_contacts(
+        client_id, page_limit=page_limit, search_after=_decode_cursor(search_after)
+    )
+    return GhlContactsRead(
+        contacts=[GhlContactRead.model_validate(c) for c in page.contacts],
+        next_search_after=_encode_cursor(page.next_search_after),
+    )
 
 
 @router.get("", response_model=IntegrationListResponse, summary="List integrations")

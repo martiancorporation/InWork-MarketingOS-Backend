@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from tests.conftest import API
 from tests.helpers import onboarding_payload
 
-ALL_KEYS = {"ga4", "search_console", "google_ads", "google_lsa", "meta", "linkedin"}
+ALL_KEYS = {"ga4", "search_console", "google_ads", "google_lsa", "meta", "linkedin", "ghl"}
 
 
 def _client_id(client, admin_headers, name="Acme Co."):

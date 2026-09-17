@@ -15,6 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import (
     GUID,
     Base,
+    JSONColumn,
     TimestampMixin,
     TZDateTime,
     UUIDPrimaryKeyMixin,
@@ -49,6 +50,12 @@ class Integration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # real accounts need this is client-specific and not derivable from the
     # API, so it isn't hardcoded anywhere). Unused by every other provider.
     login_customer_id: Mapped[str | None] = mapped_column(String(40))
+    # GHL only: the client's own tags under InWork's single shared GHL
+    # location (e.g. ["metrobuilders-tampabay", "metrobuilders-memphis"]) —
+    # operator-entered per client, since GHL has no separate location per
+    # client here and the tag names aren't derivable from the API. A list
+    # (not one string) because one client can span more than one tag.
+    ghl_tags: Mapped[list[str] | None] = mapped_column(JSONColumn)
     scopes: Mapped[str | None] = mapped_column(Text)  # comma-separated OAuth scopes
     access_token_encrypted: Mapped[str | None] = mapped_column(Text)
     refresh_token_encrypted: Mapped[str | None] = mapped_column(Text)

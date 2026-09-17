@@ -74,3 +74,17 @@ class IntegrationsSettings(BaseSettings):
     @property
     def meta_configured(self) -> bool:
         return bool(self.meta_app_id and self.meta_app_secret and self.meta_redirect_uri)
+
+    # GoHighLevel / LeadConnector. Unlike the other providers, tokens are
+    # issued to us directly by the client's team (a Private App, out-of-band,
+    # not an authorization-code redirect through our own app) — client_id/
+    # secret here are only needed to refresh an expired access token via
+    # GHL's OAuth token endpoint.
+    ghl_client_id: str | None = None
+    ghl_client_secret: str | None = None
+    ghl_base_url: str = "https://services.leadconnectorhq.com"
+    ghl_api_version: str = "2021-07-28"
+
+    @property
+    def ghl_configured(self) -> bool:
+        return bool(self.ghl_client_id and self.ghl_client_secret)

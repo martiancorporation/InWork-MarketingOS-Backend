@@ -31,6 +31,8 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.exceptions import AppError, BadRequestError, NotFoundError, ProviderAuthError
 from app.integrations.crypto import TokenCipher
+from app.integrations.ghl.client import GhlClient, GhlContactsPage
+from app.integrations.ghl.oauth import GhlOAuthClient
 from app.integrations.google.ads import GoogleAdsClient
 from app.integrations.google.ga4 import Ga4Client
 from app.integrations.google.lsa import LsaClient
@@ -72,11 +74,18 @@ _GOOGLE_PLATFORM = {
     IntegrationKey.ga4: SocialPlatform.ga4,
     IntegrationKey.search_console: SocialPlatform.seo,
 }
-# Providers wired for REAL OAuth (others still use the placeholder `connect`).
+# Providers wired for REAL OAuth (an authorization-code redirect through our
+# own app — oauth_start / oauth_complete). GHL is deliberately NOT one of
+# these: its token is handed to us directly, out-of-band, by the client's
+# team (see `connect_ghl`), so it never runs the redirect flow and must not
+# be picked up by oauth_start/oauth_complete's per-provider branching, nor by
+# the scheduler sweep's generic `sync()` call (which only knows ad-metrics
+# providers) — a separate, explicit set keeps it out of both.
 _META_KEYS = {IntegrationKey.meta}
 _GOOGLE_KEYS = set(_GOOGLE_SCOPES)
 _LINKEDIN_KEYS = {IntegrationKey.linkedin}
 _REAL_KEYS = _META_KEYS | _GOOGLE_KEYS | _LINKEDIN_KEYS
+_GHL_KEYS = {IntegrationKey.ghl}
 
 
 def _select_ad_account(accounts: list[dict], requested: str | None) -> dict | None:
@@ -139,6 +148,8 @@ class IntegrationService:
         lsa_client: LsaClient | None = None,
         linkedin_oauth: LinkedInOAuthClient | None = None,
         linkedin_client: LinkedInClient | None = None,
+        ghl_oauth: GhlOAuthClient | None = None,
+        ghl_client: GhlClient | None = None,
         cipher: TokenCipher | None = None,
     ) -> None:
         self.db = db
@@ -152,6 +163,8 @@ class IntegrationService:
         self._lsa_client = lsa_client
         self._linkedin_oauth = linkedin_oauth
         self._linkedin_client = linkedin_client
+        self._ghl_oauth = ghl_oauth
+        self._ghl_client = ghl_client
         self._cipher_override = cipher
 
     # ---- reads --------------------------------------------------------- #
@@ -218,6 +231,113 @@ class IntegrationService:
         self.db.commit()
         self.db.refresh(integration)
         return integration
+
+    # ---- GHL (token handed to us directly — no redirect flow) --------- #
+
+    def connect_ghl(
+        self,
+        client_id: uuid.UUID,
+        *,
+        access_token: str,
+        refresh_token: str | None,
+        location_id: str,
+        tags: list[str],
+        expires_in: int | None = None,
+    ) -> Integration:
+        """Store a GHL Private App token handed to us out-of-band.
+
+        Unlike Meta/Google/LinkedIn, there is no authorization-code redirect
+        through our app for GHL — the client's team issues the access/refresh
+        token pair directly (see the account-access email thread), scoped to
+        their one shared location. ``tags`` is the set of contact/opportunity
+        tags that identify this client's records within that shared location.
+        """
+        if not tags:
+            raise BadRequestError("At least one GHL tag is required to connect this client.")
+        integration = self._upsert(client_id, IntegrationKey.ghl)
+        integration.status = IntegrationStatus.connected
+        integration.external_account_id = location_id
+        integration.ghl_tags = tags
+        integration.access_token_encrypted = self.cipher.encrypt(access_token)
+        integration.refresh_token_encrypted = (
+            self.cipher.encrypt(refresh_token) if refresh_token else None
+        )
+        integration.token_expires_at = self._expiry(expires_in)
+        integration.last_error = None
+        self.db.commit()
+        self.db.refresh(integration)
+        return integration
+
+    async def fetch_ghl_contacts(
+        self,
+        client_id: uuid.UUID,
+        *,
+        page_limit: int = 100,
+        search_after: list | None = None,
+    ) -> GhlContactsPage:
+        """One page of contacts tagged for this client, from InWork's one
+        shared GHL location. Bounded like every other list endpoint — callers
+        that want everything page through via ``next_search_after`` rather
+        than this pulling an unbounded set into memory in one call."""
+        integration = self.get(client_id, IntegrationKey.ghl)  # 404 if never connected
+        if not integration.access_token_encrypted or not integration.external_account_id:
+            raise BadRequestError("GHL is not connected for this client.")
+        if not integration.ghl_tags:
+            raise BadRequestError("No GHL tags are configured for this client.")
+        try:
+            token = await self._ghl_access_token(integration)
+            page = await self.ghl_client.search_contacts(
+                token,
+                integration.external_account_id,
+                integration.ghl_tags,
+                page_limit=page_limit,
+                search_after=search_after,
+            )
+        except Exception as exc:
+            # Same split as `sync()`: a dead grant (refresh token itself
+            # expired/revoked — GHL's refresh tokens are valid up to a year if
+            # unused, per the account-access email thread) needs a reconnect;
+            # anything else is worth retrying, so it stays `error`.
+            integration.status = (
+                IntegrationStatus.needs_reauth
+                if isinstance(exc, ProviderAuthError)
+                else IntegrationStatus.error
+            )
+            integration.last_error = str(exc)[:1000]
+            self.db.commit()
+            raise
+        integration.status = IntegrationStatus.connected
+        integration.last_sync_at = datetime.now(UTC)
+        integration.last_error = None
+        self.db.commit()
+        return page
+
+    async def _ghl_access_token(self, integration: Integration) -> str:
+        """Return a valid GHL access token, refreshing it if it's near expiry.
+
+        GHL rotates the refresh token on every use — the new one returned by
+        the refresh call is what must be persisted, not the one just spent.
+        """
+        now = datetime.now(UTC)
+        expires = integration.token_expires_at
+        if expires is not None and expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        fresh = expires is None or expires > now + timedelta(seconds=60)
+        if fresh or not integration.refresh_token_encrypted:
+            return self.cipher.decrypt(integration.access_token_encrypted)
+        tokens = await self.ghl_oauth.refresh_access_token(
+            self.cipher.decrypt(integration.refresh_token_encrypted)
+        )
+        access = tokens.get("access_token")
+        if not access:  # refresh failed — fall back to the stored token
+            return self.cipher.decrypt(integration.access_token_encrypted)
+        integration.access_token_encrypted = self.cipher.encrypt(access)
+        new_refresh = tokens.get("refresh_token")
+        if new_refresh:
+            integration.refresh_token_encrypted = self.cipher.encrypt(new_refresh)
+        integration.token_expires_at = self._expiry(tokens.get("expires_in"))
+        self.db.commit()
+        return access
 
     # ---- real OAuth2 (Meta + Google Ads) ------------------------------ #
 
@@ -784,6 +904,18 @@ class IntegrationService:
         if self._linkedin_client is None:
             self._linkedin_client = LinkedInClient()
         return self._linkedin_client
+
+    @property
+    def ghl_oauth(self) -> GhlOAuthClient:
+        if self._ghl_oauth is None:
+            self._ghl_oauth = GhlOAuthClient()
+        return self._ghl_oauth
+
+    @property
+    def ghl_client(self) -> GhlClient:
+        if self._ghl_client is None:
+            self._ghl_client = GhlClient()
+        return self._ghl_client
 
     @property
     def cipher(self) -> TokenCipher:

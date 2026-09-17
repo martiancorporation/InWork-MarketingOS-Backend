@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import IntegrationKey, IntegrationStatus
 from app.schemas.common import MAX_LONG_LINE, ORMModel, StrictModel
@@ -91,6 +92,8 @@ class IntegrationRead(ORMModel):
     account_label: str | None = None
     external_account_id: str | None = None
     login_customer_id: str | None = None
+    # GHL only: this client's own tags under InWork's one shared GHL location.
+    ghl_tags: list[str] | None = None
     scopes: str | None = None
     last_sync_at: datetime | None = None
     last_error: str | None = None
@@ -105,3 +108,70 @@ class IntegrationListResponse(BaseModel):
     """The full connector catalog for a client (small, fixed — no pagination)."""
 
     items: list[IntegrationRead]
+
+
+class GhlConnectRequest(StrictModel):
+    """Connect GHL with a token handed to us out-of-band by the client's team
+    (a Private App — no OAuth redirect through our own app; see
+    ``IntegrationService.connect_ghl``).
+
+    ``location_id`` and ``tags`` are operator-entered, not hardcoded: this
+    engagement's GHL setup uses one shared location across every client, with
+    per-client separation done entirely via tags the client's team assigns —
+    neither value is derivable from our own API.
+    """
+
+    access_token: str = Field(min_length=1, max_length=4000)
+    refresh_token: str | None = Field(None, max_length=4000)
+    location_id: str = Field(min_length=1, max_length=160)
+    tags: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(
+        min_length=1, max_length=20
+    )
+    # Seconds until the access token expires, if known.
+    expires_in: int | None = Field(None, ge=1, le=31_536_000)
+
+
+class GhlContactRead(BaseModel):
+    """One GHL contact, normalized from the provider's raw camelCase payload —
+    the client (``GhlClient``) returns raw dicts verbatim (same convention as
+    Meta's campaign hierarchy); normalization happens here, at the API edge.
+
+    GHL's own examples have been inconsistent about the name field: the
+    illustrative ``/contacts/search`` sample showed a single ``contactName``,
+    but the account team's later field-level breakdown lists separate
+    ``firstName``/``lastName`` instead. Rather than trust one over the other,
+    both are accepted and ``contact_name`` falls back to joining first/last
+    when GHL doesn't send a combined name.
+    """
+
+    model_config = {"populate_by_name": True}
+
+    id: str
+    # ``validation_alias`` (not ``alias``) so GHL's camelCase is accepted on
+    # the way IN but the API still serializes clean snake_case on the way OUT.
+    contact_name: str | None = Field(None, validation_alias="contactName")
+    first_name: str | None = Field(None, validation_alias="firstName")
+    last_name: str | None = Field(None, validation_alias="lastName")
+    email: str | None = None
+    phone: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    date_added: str | None = Field(None, validation_alias="dateAdded")
+    source: str | None = None
+    assigned_to: str | None = Field(None, validation_alias="assignedTo")
+
+    @model_validator(mode="after")
+    def _fallback_contact_name(self) -> GhlContactRead:
+        if not self.contact_name:
+            joined = " ".join(p for p in (self.first_name, self.last_name) if p)
+            if joined:
+                self.contact_name = joined
+        return self
+
+
+class GhlContactsRead(BaseModel):
+    """One page of tagged contacts. ``next_search_after`` is an opaque cursor —
+    pass it back as the ``search_after`` query param to fetch the next page;
+    ``null`` means this was the last page."""
+
+    contacts: list[GhlContactRead]
+    next_search_after: str | None = None

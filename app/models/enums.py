@@ -147,6 +147,7 @@ class IntegrationKey(str, enum.Enum):
     google_lsa = "google_lsa"
     meta = "meta"
     linkedin = "linkedin"  # added — present in the frontend integrations catalog
+    ghl = "ghl"  # GoHighLevel / LeadConnector — tag-scoped contacts under one shared location
 
 
 class IntegrationStatus(str, enum.Enum):
