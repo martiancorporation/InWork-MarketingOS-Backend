@@ -13,13 +13,17 @@ import pytest
 
 from app.utils.web import (
     _extract_colors,
+    _extract_favicon,
     _extract_fonts,
     _extract_meta,
     _get,
+    _parse_json_ld_blocks,
     _resolve_public_ip,
+    _social_link_from_url,
     candidate_urls,
     fetch_page,
     normalize_url,
+    parse_page,
 )
 
 
@@ -170,3 +174,119 @@ def test_extract_fonts_skips_generics_and_css_vars():
 def test_extract_fonts_reads_google_fonts_link():
     html = '<link href="https://fonts.googleapis.com/css2?family=Inter+Tight&display=swap">'
     assert "Inter Tight" in _extract_fonts(css="", html=html)
+
+
+# ---- identity extraction (JSON-LD / OG / favicon / social links) ----
+
+
+def test_json_ld_organization_yields_full_identity():
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@type": "Organization", "name": "Acme Corporation",
+     "logo": "https://acme.com/logo.png",
+     "sameAs": ["https://www.instagram.com/acmeco"],
+     "address": {"addressLocality": "Austin", "addressRegion": "TX"},
+     "contactPoint": {"email": "hello@acme.com", "telephone": "+1-512-555-0100"}}
+    </script>
+    </head><body><a href="https://facebook.com/acmeco">FB</a></body></html>
+    """
+    page = parse_page(html, "https://acme.com/")
+    identity = page.identity
+    assert identity.org_name == "Acme Corporation"
+    assert identity.logo_url == "https://acme.com/logo.png"
+    assert identity.location == "Austin, TX"
+    assert identity.emails == ["hello@acme.com"]
+    assert identity.phones == ["+1-512-555-0100"]
+    platforms = {link.platform for link in identity.social_links}
+    assert platforms == {"instagram", "facebook"}
+
+
+def test_json_ld_multiple_blocks_and_graph_nesting():
+    html = """
+    <script type="application/ld+json">{"@type": "WebSite", "name": "not this"}</script>
+    <script type="application/ld+json">
+      {"@graph": [{"@type": "BreadcrumbList"}, {"@type": "Organization", "name": "Graph Co"}]}
+    </script>
+    """
+    nodes = _parse_json_ld_blocks(
+        [
+            '{"@type": "WebSite", "name": "not this"}',
+            '{"@graph": [{"@type": "BreadcrumbList"}, {"@type": "Organization", "name": "Graph Co"}]}',
+        ]
+    )
+    types = [n.get("@type") for n in nodes]
+    assert "Organization" in types
+    page = parse_page(html, "https://graph.example/")
+    assert page.identity.org_name == "Graph Co"
+
+
+def test_json_ld_malformed_block_does_not_kill_the_others():
+    blocks = ["{not valid json", '{"@type": "Organization", "name": "Good Co"}', "[1, 2, 3]"]
+    nodes = _parse_json_ld_blocks(blocks)
+    assert len(nodes) == 1
+    assert nodes[0]["name"] == "Good Co"
+
+
+def test_json_ld_contact_point_as_array():
+    blocks = [
+        '{"@type": "Organization", "name": "Multi", '
+        '"contactPoint": [{"email": "a@x.com"}, {"telephone": "555-0100", "email": "b@x.com"}]}'
+    ]
+    nodes = _parse_json_ld_blocks(blocks)
+    page = parse_page(
+        f'<script type="application/ld+json">{blocks[0]}</script>', "https://x.example/"
+    )
+    assert page.identity.emails == ["a@x.com", "b@x.com"]
+    assert page.identity.phones == ["555-0100"]
+    assert nodes  # sanity: at least parsed
+
+
+def test_json_ld_block_count_and_size_are_capped():
+    # 25 tiny blocks — only the first _MAX_JSONLD_BLOCKS (20) are parsed.
+    texts = [f'{{"@type": "Organization", "name": "n{i}"}}' for i in range(25)]
+    nodes = _parse_json_ld_blocks(texts)
+    assert len(nodes) == 20
+
+    # A single oversized block is truncated before json.loads, so it fails to
+    # parse cleanly rather than being fed whole to the JSON parser.
+    huge = '{"@type": "Organization", "name": "' + ("x" * 30_000) + '"}'
+    assert _parse_json_ld_blocks([huge]) == []
+
+
+def test_favicon_prefers_declared_link_else_default_path():
+    html = '<link rel="icon" href="/assets/favicon.png">'
+    assert _extract_favicon(html, "https://acme.com/") == "https://acme.com/assets/favicon.png"
+    assert _extract_favicon("<html></html>", "https://acme.com/") == "https://acme.com/favicon.ico"
+
+
+@pytest.mark.parametrize(
+    "url,expected_platform",
+    [
+        ("https://www.instagram.com/acme", "instagram"),
+        ("https://facebook.com/acme", "facebook"),
+        ("https://linkedin.com/company/acme", "linkedin"),
+        ("https://twitter.com/acme", "x"),
+        ("https://x.com/acme", "x"),
+        ("https://youtube.com/@acme", "youtube"),
+        ("https://tiktok.com/@acme", "tiktok"),
+    ],
+)
+def test_social_link_known_domains(url: str, expected_platform: str):
+    link = _social_link_from_url(url)
+    assert link is not None
+    assert link.platform == expected_platform
+
+
+def test_social_link_unknown_domain_is_ignored():
+    assert _social_link_from_url("https://acme.com/about") is None
+
+
+def test_identity_absent_when_page_has_no_signals():
+    page = parse_page("<html><body>Hello</body></html>", "https://bare.example/")
+    identity = page.identity
+    assert identity.org_name is None
+    assert identity.emails == []
+    assert identity.social_links == []
+    # Favicon still defaults, used only as a last-resort logo fallback.
+    assert identity.logo_url == "https://bare.example/favicon.ico"

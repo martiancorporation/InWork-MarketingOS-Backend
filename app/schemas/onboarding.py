@@ -268,6 +268,10 @@ class BrandExtraction(BaseModel):
     fonts: list[str] = []
     tone: str | None = None
     imagery: str | None = None
+    # Low-confidence AI guesses for onboarding auto-fill — never invented when
+    # the model found no real signal (the prompt instructs null in that case).
+    suggested_industry: str | None = None
+    suggested_business_type: str | None = None
     ai_generated: bool  # False when returned by the deterministic dev fallback
 
 
@@ -327,3 +331,49 @@ class OnboardingStepResponse(BaseModel):
     readiness: ReadinessReport
     onboarding: OnboardingProgress
     intelligence: IntelligenceStatus | None = None
+
+
+# ---- Website auto-fill (scans a site, saves whatever it reliably found) ----
+
+
+class SocialLinkOut(BaseModel):
+    platform: str
+    url: str
+
+
+class AutoFillSuggestions(BaseModel):
+    """Signals found that have no column to persist into today (a general
+    company email/phone — ``ClientContact`` requires a person's name — and
+    social profile links, which have no table at all). Surfaced for the
+    operator to use manually rather than fabricating a record."""
+
+    emails: list[str] = []
+    phones: list[str] = []
+    social_links: list[SocialLinkOut] = []
+
+
+class AutoFillRequest(StrictModel):
+    """Scan a website and save whatever onboarding fields it reliably found.
+
+    ``client_id`` is omitted for a brand-new onboarding (a draft is created
+    from ``name``/the site itself) or provided to fill in an existing draft
+    already in progress.
+    """
+
+    website: str = Field(min_length=1, max_length=255)
+    name: str | None = Field(default=None, max_length=160)
+    client_id: uuid.UUID | None = None
+
+
+class AutoFillResponse(OnboardingStepResponse):
+    """Same bundle every progressive endpoint returns, plus a report of what
+    this scan actually did: which fields were written (fill-only-if-empty —
+    never overwrites a value already on the client), which of those were the
+    AI's low-confidence industry/business-type guess, and suggestions found
+    but not persisted (see ``AutoFillSuggestions``)."""
+
+    filled: list[str] = []  # dotted paths written, e.g. "basics.industry"
+    ai_guessed: list[str] = []  # subset of `filled` from the AI guess
+    suggestions: AutoFillSuggestions = AutoFillSuggestions()
+    source: str = "none"  # "scrapingbee" | "render" | "scrape" | "none"
+    ai_generated: bool = False

@@ -20,6 +20,7 @@ are shared with the headless renderer.
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import socket
 from collections import Counter
@@ -47,6 +48,54 @@ _META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
 _ATTR_RE = re.compile(r'([a-zA-Z:_-]+)\s*=\s*(["\'])(.*?)\2', re.DOTALL)
 _HEX_FULL_RE = re.compile(r"#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
+
+_JSONLD_BLOCK_RE = re.compile(
+    r'<script[^>]+type\s*=\s*["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    re.IGNORECASE | re.DOTALL,
+)
+_ANCHOR_HREF_RE = re.compile(r'<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+_ICON_LINK_RE = re.compile(
+    r'<link[^>]+rel\s*=\s*["\']?(?:shortcut icon|icon|apple-touch-icon)["\']?[^>]*>',
+    re.IGNORECASE,
+)
+
+# Defense-in-depth caps on the new identity-extraction surface — a pathological
+# page (thousands of tiny script tags, or one huge malformed JSON-LD blob)
+# must not turn a single onboarding scan into a CPU/memory sink.
+_MAX_JSONLD_BLOCKS = 20
+_MAX_JSONLD_BLOCK_CHARS = 20_000
+_MAX_ANCHORS_SCANNED = 500
+
+# Hostname suffix -> platform id, for turning a footer/header link into a
+# labeled social profile. Order doesn't matter; matched via endswith.
+_SOCIAL_DOMAINS: dict[str, str] = {
+    "facebook.com": "facebook",
+    "instagram.com": "instagram",
+    "linkedin.com": "linkedin",
+    "x.com": "x",
+    "twitter.com": "x",
+    "youtube.com": "youtube",
+    "tiktok.com": "tiktok",
+}
+
+
+class SocialLink(NamedTuple):
+    platform: str
+    url: str
+
+
+class IdentitySignals(NamedTuple):
+    """Deterministic company-identity facts pulled from the same fetch as the
+    brand colors/fonts — used by the onboarding "auto-fill" flow. Every field
+    is ``None``/empty when not reliably found; nothing here is ever guessed."""
+
+    org_name: str | None = None
+    logo_url: str | None = None
+    favicon_url: str | None = None
+    location: str | None = None  # "City, Region" only — never a full street address
+    emails: list[str] = []
+    phones: list[str] = []
+    social_links: list[SocialLink] = []
 
 # A realistic desktop-Chrome fingerprint. A bespoke bot UA gets 403'd by many
 # WAFs; presenting as a normal browser clears the low bar most sites set.
@@ -96,6 +145,7 @@ class PageContent(NamedTuple):
     fonts: list[str]
     theme_color: str | None = None
     description: str | None = None
+    identity: IdentitySignals | None = None
 
 
 def normalize_url(raw: str) -> str | None:
@@ -353,6 +403,169 @@ def _extract_meta(html: str) -> dict[str, str]:
     return out
 
 
+def _parse_json_ld_blocks(texts: list[str]) -> list[dict]:
+    """Parse a handful of already-extracted ``<script type="application/ld+json">``
+    bodies into JSON-LD nodes, flattening any ``@graph`` array.
+
+    Best-effort: a malformed block (invalid JSON, or valid JSON that isn't an
+    object) is skipped rather than aborting the whole page — one bad script tag
+    must never lose the rest of a page's structured data. Capped on both count
+    and per-block size so a pathological page can't turn this into a CPU/memory
+    sink (see module docstring caps).
+    """
+    nodes: list[dict] = []
+    for text in texts[:_MAX_JSONLD_BLOCKS]:
+        try:
+            parsed = json.loads(text[:_MAX_JSONLD_BLOCK_CHARS])
+        except (json.JSONDecodeError, ValueError):
+            continue
+        candidates = parsed if isinstance(parsed, list) else [parsed]
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            graph = candidate.get("@graph")
+            if isinstance(graph, list):
+                nodes.extend(n for n in graph if isinstance(n, dict))
+            else:
+                nodes.append(candidate)
+    return nodes
+
+
+def _extract_json_ld(html: str) -> list[dict]:
+    """Regex-slice JSON-LD ``<script>`` bodies out of raw HTML, then parse them."""
+    return _parse_json_ld_blocks(_JSONLD_BLOCK_RE.findall(html))
+
+
+def _find_organization(nodes: list[dict]) -> dict | None:
+    """First node whose ``@type`` is (or includes) ``Organization``/``LocalBusiness``."""
+    for node in nodes:
+        node_type = node.get("@type")
+        types = node_type if isinstance(node_type, list) else [node_type]
+        if any(isinstance(t, str) and t in ("Organization", "LocalBusiness") for t in types):
+            return node
+    return None
+
+
+def _contact_points(org: dict) -> list[dict]:
+    contact = org.get("contactPoint")
+    if isinstance(contact, dict):
+        return [contact]
+    if isinstance(contact, list):
+        return [c for c in contact if isinstance(c, dict)]
+    return []
+
+
+def _address_label(org: dict) -> str | None:
+    """``"City, Region"`` from a JSON-LD ``PostalAddress`` — never a full street
+    address; ``Client.location`` is a short "Headquarters" label, not a mailing
+    address field."""
+    address = org.get("address")
+    if not isinstance(address, dict):
+        return None
+    locality = _clean_str(address.get("addressLocality"), limit=120)
+    region = _clean_str(address.get("addressRegion"), limit=120)
+    parts = [p for p in (locality, region) if p]
+    return ", ".join(parts) if parts else None
+
+
+def _social_link_from_url(url: str) -> SocialLink | None:
+    if not isinstance(url, str):
+        return None
+    host = (urlparse(url).hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    for suffix, platform in _SOCIAL_DOMAINS.items():
+        if host == suffix or host.endswith("." + suffix):
+            return SocialLink(platform=platform, url=url)
+    return None
+
+
+def _extract_favicon(html: str, base_url: str) -> str | None:
+    """First declared icon link, else the conventional ``/favicon.ico`` — an
+    unverified default (never fetched here), used only as a last-resort logo
+    fallback since there's no dedicated favicon field in the onboarding UI."""
+    match = _ICON_LINK_RE.search(html)
+    if match:
+        href = _HREF_RE.search(match.group(0))
+        if href:
+            return urljoin(base_url, href.group(1))
+    return urljoin(base_url, "/favicon.ico")
+
+
+def _social_links_from(json_ld_nodes: list[dict], anchor_hrefs: list[str]) -> list[SocialLink]:
+    found: dict[str, SocialLink] = {}
+    org = _find_organization(json_ld_nodes)
+    same_as = org.get("sameAs") if org else None
+    for url in same_as if isinstance(same_as, list) else []:
+        link = _social_link_from_url(url)
+        if link and link.platform not in found:
+            found[link.platform] = link
+    for href in anchor_hrefs[:_MAX_ANCHORS_SCANNED]:
+        link = _social_link_from_url(href)
+        if link and link.platform not in found:
+            found[link.platform] = link
+    return list(found.values())
+
+
+def _merge_identity(
+    *,
+    json_ld_nodes: list[dict],
+    anchor_hrefs: list[str],
+    favicon_url: str | None,
+    meta: dict[str, str],
+) -> IdentitySignals:
+    """Merge already-extracted JSON-LD/OG/anchor/favicon signals into one
+    identity record — source-agnostic (shared by the httpx-scrape path, which
+    slices these out of raw HTML, and the headless-render path, which
+    collects them via in-page JS). Priority, most-specific first: JSON-LD
+    ``Organization``/``LocalBusiness`` beats Open Graph beats nothing — never
+    a guess.
+    """
+    org = _find_organization(json_ld_nodes) or {}
+
+    name = (
+        _clean_str(org.get("name"), limit=160)
+        or _clean_str(meta.get("og:site_name"), limit=160)
+        or _clean_str(meta.get("og:title"), limit=160)
+    )
+    logo = org.get("logo")
+    logo_url = _clean_str(logo.get("url") if isinstance(logo, dict) else logo, limit=1024)
+    # Deliberately no og:image fallback for logo: it's usually a hero/banner
+    # image, not a logo — mislabeling a banner as "Company Logo" is worse than
+    # leaving the field blank for the operator to fill in by hand.
+
+    emails: list[str] = []
+    phones: list[str] = []
+    for point in _contact_points(org):
+        email = _clean_str(point.get("email"), limit=255)
+        phone = _clean_str(point.get("telephone"), limit=40)
+        if email and email not in emails:
+            emails.append(email)
+        if phone and phone not in phones:
+            phones.append(phone)
+
+    return IdentitySignals(
+        org_name=name,
+        logo_url=logo_url or favicon_url,
+        favicon_url=favicon_url,
+        location=_address_label(org),
+        emails=emails,
+        phones=phones,
+        social_links=_social_links_from(json_ld_nodes, anchor_hrefs),
+    )
+
+
+def _build_identity(html: str, base_url: str, meta: dict[str, str]) -> IdentitySignals:
+    """HTML-based entry point for ``_merge_identity`` — slices JSON-LD/anchor
+    hrefs/favicon out of raw HTML (the httpx-scrape and ScrapingBee paths)."""
+    return _merge_identity(
+        json_ld_nodes=_extract_json_ld(html),
+        anchor_hrefs=_ANCHOR_HREF_RE.findall(html),
+        favicon_url=_extract_favicon(html, base_url),
+        meta=meta,
+    )
+
+
 def parse_page(
     html: str,
     base_url: str,
@@ -390,6 +603,7 @@ def parse_page(
         fonts=_extract_fonts(css, html),
         theme_color=_as_hex(meta.get("theme-color")),
         description=_clean_str(meta.get("og:description") or meta.get("description")),
+        identity=_build_identity(html, base_url, meta),
     )
 
 

@@ -29,15 +29,18 @@ from __future__ import annotations
 import ipaddress
 import logging
 from typing import Any, NamedTuple
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from app.utils.web import (
     _CHROME_UA,
     _GENERIC_FONTS,
+    IdentitySignals,
     _as_hex,
     _clean_str,
     _is_blocked_ip,
     _is_public_http_url,
+    _merge_identity,
+    _parse_json_ld_blocks,
     candidate_urls,
 )
 
@@ -68,10 +71,16 @@ _BLOCK_MARKERS = (
     "access denied",
 )
 
-# Runs in the page: pull text, weighted computed colors, rendered fonts, and meta.
+# Runs in the page: pull text, weighted computed colors, rendered fonts, meta,
+# and identity signals (JSON-LD, anchors, icon links, og:site_name/og:title) —
+# the same raw ingredients app/utils/web.py's httpx path slices out of HTML,
+# collected here from the live, post-JS DOM instead.
 _EXTRACT_JS = """
 () => {
-  const out = { text: "", colors: [], fonts: [], title: null, themeColor: null, description: null };
+  const out = {
+    text: "", colors: [], fonts: [], title: null, themeColor: null, description: null,
+    jsonLd: [], anchors: [], icons: [], siteName: null, ogTitle: null,
+  };
   out.text = ((document.body && document.body.innerText) || "")
     .replace(/\\s+/g, " ").trim();
   out.title = document.title || null;
@@ -82,6 +91,15 @@ _EXTRACT_JS = """
   };
   out.themeColor = meta("theme-color");
   out.description = meta("og:description") || meta("description");
+  out.siteName = meta("og:site_name");
+  out.ogTitle = meta("og:title");
+  out.jsonLd = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+    .slice(0, 20).map((s) => s.textContent || "");
+  out.anchors = Array.from(document.querySelectorAll("a[href]")).slice(0, 500)
+    .map((a) => a.getAttribute("href")).filter(Boolean);
+  out.icons = Array.from(document.querySelectorAll(
+    'link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]'
+  )).map((l) => l.getAttribute("href")).filter(Boolean);
 
   const colorWeights = new Map();
   const addColor = (value, weight) => {
@@ -130,6 +148,7 @@ class RenderedPage(NamedTuple):
     screenshot: bytes  # viewport JPEG
     theme_color: str | None = None
     description: str | None = None
+    identity: IdentitySignals | None = None
 
 
 def _is_extreme(hex_color: str) -> bool:
@@ -205,7 +224,21 @@ def _looks_blocked(data: dict[str, Any]) -> bool:
     return len(text) < 600 and any(marker in blob for marker in _BLOCK_MARKERS)
 
 
-def _to_page(data: dict[str, Any], screenshot: bytes, max_chars: int) -> RenderedPage:
+def _to_page(data: dict[str, Any], screenshot: bytes, max_chars: int, base_url: str) -> RenderedPage:
+    json_ld_nodes = _parse_json_ld_blocks([t for t in data.get("jsonLd", []) if isinstance(t, str)])
+    anchor_hrefs = [h for h in data.get("anchors", []) if isinstance(h, str)]
+    icon_href = next((h for h in data.get("icons", []) if isinstance(h, str)), None)
+    meta = {
+        k: v
+        for k, v in {"og:site_name": data.get("siteName"), "og:title": data.get("ogTitle")}.items()
+        if isinstance(v, str) and v
+    }
+    identity = _merge_identity(
+        json_ld_nodes=json_ld_nodes,
+        anchor_hrefs=anchor_hrefs,
+        favicon_url=urljoin(base_url, icon_href) if icon_href else urljoin(base_url, "/favicon.ico"),
+        meta=meta,
+    )
     return RenderedPage(
         text=str(data.get("text", ""))[:max_chars],
         colors=_rank_colors([c for c in data.get("colors", []) if isinstance(c, str)]),
@@ -213,6 +246,7 @@ def _to_page(data: dict[str, Any], screenshot: bytes, max_chars: int) -> Rendere
         screenshot=screenshot,
         theme_color=_as_hex(data.get("themeColor")),
         description=_clean_str(data.get("description")),
+        identity=identity,
     )
 
 
@@ -283,5 +317,5 @@ async def _render_one(
             logger.info("Blocked/empty page for %s; trying next option.", target)
             return None
         screenshot = await page.screenshot(type="jpeg", quality=70)
-        return _to_page(data, screenshot, max_chars)
+        return _to_page(data, screenshot, max_chars, target)
     return None

@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from app.utils.render import _filter_fonts, _looks_blocked, _rank_colors, render_page
+from app.utils.render import _filter_fonts, _looks_blocked, _rank_colors, _to_page, render_page
 
 
 @pytest.mark.parametrize(
@@ -43,3 +43,36 @@ def test_rank_colors_puts_brand_accents_ahead_of_utility_grays():
 def test_filter_fonts_drops_generics_and_dedupes():
     fonts = _filter_fonts(["Fustat", "Arial", "sans-serif", "Fustat", "Inter Tight"])
     assert fonts == ["Fustat", "Inter Tight"]
+
+
+def test_to_page_populates_identity_from_the_in_page_js_payload():
+    """The Playwright path collects jsonLd/anchors/icons/siteName via JS
+    (see _EXTRACT_JS) — this proves `_to_page` merges them through the same
+    `_merge_identity` the httpx path uses, not a second, drifting copy."""
+    data = {
+        "text": "hi",
+        "colors": [],
+        "fonts": [],
+        "themeColor": None,
+        "description": None,
+        "jsonLd": [
+            '{"@type": "Organization", "name": "Render Co", '
+            '"logo": "https://render.example/logo.png"}'
+        ],
+        "anchors": ["https://instagram.com/renderco"],
+        "icons": ["/favicon.png"],
+        "siteName": "Render Co Site",
+        "ogTitle": None,
+    }
+    page = _to_page(data, b"", 8000, "https://render.example/")
+    assert page.identity.org_name == "Render Co"
+    assert page.identity.logo_url == "https://render.example/logo.png"
+    assert page.identity.favicon_url == "https://render.example/favicon.png"
+    assert page.identity.social_links[0].platform == "instagram"
+
+
+def test_to_page_falls_back_to_og_site_name_and_default_favicon():
+    data = {"text": "", "colors": [], "fonts": [], "siteName": "Fallback Co"}
+    page = _to_page(data, b"", 8000, "https://fallback.example/")
+    assert page.identity.org_name == "Fallback Co"
+    assert page.identity.favicon_url == "https://fallback.example/favicon.ico"

@@ -197,6 +197,30 @@ class OnboardingService:
         self.db.refresh(client)
         return client
 
+    def create_draft_minimal(self, admin: User, *, name: str, website: str) -> Client:
+        """Website auto-fill's entry point when no client exists yet.
+
+        Opens a draft from just a name + website — ``business_type``/``industry``
+        stay ``None`` (both columns are nullable) since a scan may not find them
+        and the operator hasn't been asked yet. Used ONLY by the auto-fill flow;
+        the manual step-1 form keeps requiring all three via ``create_draft``/
+        ``OnboardingDraftRequest``, unchanged.
+        """
+        slug = unique_slug(slugify(name, fallback="client"), exists=self.clients.slug_exists)
+        client = Client(
+            created_by=admin.id,
+            slug=slug,
+            name=name,
+            website=website,
+            status=ClientStatus.draft,
+            pipeline_stage=ClientPipelineStage.onboarding,
+            onboarding_step=1,
+        )
+        self.clients.add(client)
+        self._commit("Could not start onboarding — please retry.")
+        self.db.refresh(client)
+        return client
+
     def update_step(self, admin: User, client: Client, data: OnboardingStepUpdate) -> Client:
         """Apply a partial step save. Only the sections present are written."""
         sent = data.model_fields_set
