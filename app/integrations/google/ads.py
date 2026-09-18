@@ -15,6 +15,7 @@ micros → dollars).
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from datetime import date, timedelta
 
 import httpx
@@ -31,6 +32,24 @@ _DAILY_GAQL = (
     "metrics.conversions, metrics.conversions_value "
     "FROM customer WHERE segments.date BETWEEN '{start}' AND '{end}'"
 )
+# Google Ads only counts a phone call as a "conversion" once it clears a
+# configured minimum call duration (see the account's "Calls from ads"
+# conversion action) — the *raw* call volume the client actually sees in
+# Google Ads' own Calls report is a different metric (`metrics.phone_calls`),
+# only queryable from `campaign`, never `customer`. These two extra queries
+# let `fetch_daily_insights` reconcile the two into one honest lead count
+# instead of silently undercounting real calls. See the Sept 2026 Tony's
+# Garage lead-mismatch investigation (client-reported "12 calls, 24 calls" in
+# Google Ads not matching our reported leads).
+_CALL_CONVERSION_CATEGORY_GAQL = (
+    "SELECT segments.date, segments.conversion_action_category, metrics.conversions "
+    "FROM customer WHERE segments.date BETWEEN '{start}' AND '{end}'"
+)
+_DAILY_PHONE_CALLS_GAQL = (
+    "SELECT segments.date, metrics.phone_calls "
+    "FROM campaign WHERE segments.date BETWEEN '{start}' AND '{end}'"
+)
+_PHONE_CALL_LEAD_CATEGORY = "PHONE_CALL_LEAD"
 
 
 _CUSTOMER_CLIENT_GAQL = (
@@ -71,15 +90,6 @@ _RECOMMENDATION_GAQL = (
     "recommendation.impact, recommendation.dismissed "
     "FROM recommendation WHERE recommendation.dismissed = FALSE"
 )
-
-
-def _daily_gaql(days: int) -> str:
-    """GAQL has no ``DURING LAST_N_DAYS`` for arbitrary N — only a fixed set of
-    named ranges (LAST_7_DAYS, LAST_30_DAYS, ...). An explicit BETWEEN range is
-    the only way to honor a caller-supplied day count."""
-    end = date.today()
-    start = end - timedelta(days=days - 1)
-    return _DAILY_GAQL.format(start=start.isoformat(), end=end.isoformat())
 
 
 class GoogleAdsClient:
@@ -143,20 +153,40 @@ class GoogleAdsClient:
         """One row per day over the last ``days`` days — the historical trend a
         dashboard chart needs, not a single rolled-up total. ``login_customer_id``
         is the MCC id to query *through*, when this customer is a manager-linked
-        sub-account (omit for a standalone account)."""
+        sub-account (omit for a standalone account).
+
+        ``leads`` is reconciled from three queries, not read straight off
+        ``metrics.conversions`` — see the module-level comment above
+        ``_CALL_CONVERSION_CATEGORY_GAQL`` for why."""
         cid = (customer_id or "").replace("-", "")
         url = (
             f"{_BASE.format(version=self._s.google_ads_api_version)}"
             f"/customers/{cid}/googleAds:searchStream"
         )
+        end = date.today()
+        start = end - timedelta(days=days - 1)
+        window = {"start": start.isoformat(), "end": end.isoformat()}
+
         data = await self._request(
             "POST",
             url,
             access_token,
             login_customer_id=login_customer_id,
-            json={"query": _daily_gaql(days)},
+            json={"query": _DAILY_GAQL.format(**window)},
         )
-        return _normalize(data)
+        call_conversion_rows = await self._search(
+            access_token,
+            cid,
+            _CALL_CONVERSION_CATEGORY_GAQL.format(**window),
+            login_customer_id=login_customer_id,
+        )
+        phone_call_rows = await self._search(
+            access_token,
+            cid,
+            _DAILY_PHONE_CALLS_GAQL.format(**window),
+            login_customer_id=login_customer_id,
+        )
+        return _normalize(data, call_conversion_rows, phone_call_rows)
 
     async def fetch_campaign_hierarchy(
         self, access_token: str, customer_id: str, *, login_customer_id: str | None = None
@@ -273,33 +303,70 @@ class GoogleAdsClient:
         return payload if isinstance(payload, dict) else {"data": payload}
 
 
-def _normalize(payload: dict) -> list[dict]:
+def _normalize(
+    payload: dict, call_conversion_rows: list[dict], phone_call_rows: list[dict]
+) -> list[dict]:
     """``searchStream`` returns a list of batches, each with ``results[]`` rows
-    carrying a ``segments.date`` + ``metrics`` object — one row per day."""
+    carrying a ``segments.date`` + ``metrics`` object — one row per day.
+
+    ``leads`` is not simply ``metrics.conversions``: it's reconciled per day as
+    ``(conversions - call-category conversions) + raw phone_calls``, so a real
+    call is never silently dropped just because it didn't clear Google's
+    minimum-duration threshold for counting as a "conversion", and a
+    call-based conversion that *did* clear it is never double-counted against
+    the raw call figure. ``conversions``/``revenue`` are left exactly as
+    Google reports them (unchanged, still comparable to the Conversions column
+    in the Google Ads UI) — only ``leads`` is adjusted."""
+    call_leads_by_date: dict[date, float] = defaultdict(float)
+    for row in call_conversion_rows:
+        segments = row.get("segments") or {}
+        if segments.get("conversionActionCategory") != _PHONE_CALL_LEAD_CATEGORY:
+            continue
+        d = _parse_date(segments.get("date"))
+        if d is not None:
+            call_leads_by_date[d] += float((row.get("metrics") or {}).get("conversions", 0) or 0)
+
+    phone_calls_by_date: dict[date, int] = defaultdict(int)
+    for row in phone_call_rows:
+        d = _parse_date((row.get("segments") or {}).get("date"))
+        if d is not None:
+            phone_calls_by_date[d] += int((row.get("metrics") or {}).get("phoneCalls", 0) or 0)
+
     batches = payload.get("data") if isinstance(payload.get("data"), list) else [payload]
     rows = []
     for batch in batches or []:
         for row in (batch or {}).get("results") or []:
             m = row.get("metrics") or {}
             segments = row.get("segments") or {}
-            date_str = segments.get("date")
+            d = _parse_date(segments.get("date")) or date.today()
+            conversions = int(float(m.get("conversions", 0) or 0))
+            non_call_conversions = conversions - int(call_leads_by_date.get(d, 0))
+            leads = max(non_call_conversions, 0) + phone_calls_by_date.get(d, 0)
             rows.append(
                 {
-                    "date": date.fromisoformat(date_str) if date_str else date.today(),
+                    "date": d,
                     "impressions": int(m.get("impressions", 0) or 0),
                     "clicks": int(m.get("clicks", 0) or 0),
                     "spend": round(
                         int(m.get("costMicros", m.get("cost_micros", 0)) or 0) / 1_000_000, 2
                     ),
-                    "conversions": int(float(m.get("conversions", 0) or 0)),
-                    # Google Ads "conversions" are the lead/action count.
-                    "leads": int(float(m.get("conversions", 0) or 0)),
+                    "conversions": conversions,
+                    "leads": leads,
                     "revenue": round(
                         float(m.get("conversionsValue", m.get("conversions_value", 0)) or 0), 2
                     ),
                 }
             )
     return rows
+
+
+def _parse_date(raw: str | None) -> date | None:
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
 
 
 def _safe_json(resp: httpx.Response):

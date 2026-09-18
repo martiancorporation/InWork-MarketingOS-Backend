@@ -48,6 +48,15 @@ logger = logging.getLogger("app.ai.command_agent")
 #: concern the paid-AI routes address with request-rate limiting).
 _MAX_ROUNDS = 6
 _MAX_HISTORY_MESSAGES = 20
+#: The global default (AISettings.max_tokens, 1024) is sized for a single
+#: plain completion — too small for a reasoning-capable model doing
+#: tool-calling, which can spend a real share of the budget on internal
+#: reasoning before ever emitting a tool call or reply. Confirmed live: with
+#: the default, a real turn against Claude Sonnet 5 exhausted the budget
+#: entirely on reasoning and came back with empty content AND no tool
+#: calls — the exact same truncation failure mode already found and fixed
+#: for the classifier (see plan_chat_intent.py) and plan_generation.py.
+_MAX_TOKENS = 2000
 
 _NOT_CONFIGURED_REPLY = (
     "The AI command assistant isn't configured yet — ask an administrator "
@@ -103,7 +112,10 @@ class CommandAgent:
         for _round in range(_MAX_ROUNDS):
             try:
                 response = await self.ai.complete_with_tools(
-                    messages=messages, tools=tools, model=model_for(self.feature)
+                    messages=messages,
+                    tools=tools,
+                    model=model_for(self.feature),
+                    max_tokens=_MAX_TOKENS,
                 )
             except AppError:
                 logger.warning("Command agent LLM call failed", exc_info=True)
@@ -155,7 +167,10 @@ class CommandAgent:
             round_tool_calls: list[ToolCall] = []
             try:
                 async for delta in self.ai.stream_with_tools(
-                    messages=messages, tools=tools, model=model_for(self.feature)
+                    messages=messages,
+                    tools=tools,
+                    model=model_for(self.feature),
+                    max_tokens=_MAX_TOKENS,
                 ):
                     if delta.text:
                         content_parts.append(delta.text)

@@ -24,6 +24,7 @@ from app.ai.attachments import MAX_ATTACHMENTS, AttachmentBundle, build_bundle
 from app.ai.command_agent import CommandAgent, CommandTurnResult
 from app.ai.features import AiFeature
 from app.ai.plan_chat_intent import PlanChatIntent, PlanChatIntentAgent
+from app.ai.tools import handlers as command_tool_handlers
 from app.ai.usage import AiUsageContext
 from app.core.exceptions import BadRequestError, NotFoundError, ServiceUnavailableError
 from app.core.pagination import PaginationParams
@@ -533,8 +534,18 @@ class AssistantService:
         self, client_id: uuid.UUID, intent: PlanChatIntent, *, actor: User
     ) -> tuple[str, dict]:
         assert intent.start_date is not None and intent.end_date is not None
+
+        assignee_id, assignee_note = self._resolve_chat_assignee(
+            client_id, intent.assignee_hint, actor=actor
+        )
+
         items = await PlanGenerationService(self.db).propose_range(
-            client_id, "", start_date=intent.start_date, end_date=intent.end_date, user=actor
+            client_id,
+            intent.content_instructions or "",
+            start_date=intent.start_date,
+            end_date=intent.end_date,
+            user=actor,
+            assignee_id=assignee_id,
         )
         if not items:
             return (
@@ -560,7 +571,36 @@ class AssistantService:
             f"{intent.start_date.isoformat()} to {intent.end_date.isoformat()} — "
             "take a look below and approve it, or let me know what to change."
         )
+        if assignee_note:
+            reply += f" {assignee_note}"
         return reply, action.model_dump(mode="json")
+
+    def _resolve_chat_assignee(
+        self, client_id: uuid.UUID, assignee_hint: str | None, *, actor: User
+    ) -> tuple[uuid.UUID | None, str | None]:
+        """Resolve a name/email the manager mentioned to an actual team
+        member, the same "search this client's team, never guess" discipline
+        the command-agent tools use — never silently assign to the wrong
+        person, and never silently drop the request either: the returned note
+        (appended to the chat reply) says plainly when it couldn't be done."""
+        if not assignee_hint:
+            return None, None
+        matches = command_tool_handlers.search_users(
+            self.db, client_id, actor, query=assignee_hint
+        )["users"]
+        if len(matches) == 1:
+            match = matches[0]
+            return uuid.UUID(match["id"]), f"Assigned to {match['name']}."
+        if not matches:
+            return None, (
+                f"I couldn't find \"{assignee_hint}\" on this client's team, so it's "
+                "unassigned for now — assign it from the Plan board."
+            )
+        names = ", ".join(m["name"] for m in matches)
+        return None, (
+            f"\"{assignee_hint}\" matched more than one person ({names}), so I left it "
+            "unassigned — assign it from the Plan board."
+        )
 
     async def _resolve_attachments(
         self,

@@ -37,6 +37,15 @@ class PlanChatIntent:
     start_date: date | None
     end_date: date | None
     clarifying_question: str | None
+    #: Anything the manager said, anywhere in the conversation, about what the
+    #: content should actually say/look like (a CTA to keep, a topic, a tone)
+    #: — forwarded as the generation prompt so it isn't silently dropped just
+    #: because it was mentioned in an earlier turn than the one with the date.
+    content_instructions: str | None = None
+    #: A person named anywhere in the conversation to assign the generated
+    #: content to, verbatim (resolved against this client's team separately —
+    #: never trusted as a real id here).
+    assignee_hint: str | None = None
 
 
 _NOT_A_PLAN_REQUEST = PlanChatIntent(
@@ -99,9 +108,11 @@ def _parse_intent(payload: dict, today: date) -> PlanChatIntent:
             start_date=start,
             end_date=end,
             clarifying_question=None,
+            content_instructions=_clean_text(payload.get("content_instructions")),
+            assignee_hint=_clean_text(payload.get("assignee_hint")),
         )
 
-    question = _clean_question(payload.get("clarifying_question")) or _DEFAULT_CLARIFYING_QUESTION
+    question = _clean_text(payload.get("clarifying_question")) or _DEFAULT_CLARIFYING_QUESTION
     return PlanChatIntent(
         wants_content_plan=True,
         ready=False,
@@ -126,7 +137,7 @@ def _parse_date_on_or_after(raw: object, today: date) -> date | None:
     return parsed if parsed >= today else None
 
 
-def _clean_question(raw: object) -> str | None:
+def _clean_text(raw: object) -> str | None:
     if not isinstance(raw, str):
         return None
     text = raw.strip()

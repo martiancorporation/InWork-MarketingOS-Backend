@@ -82,12 +82,20 @@ class PlanGenerationService:
         start_date: date,
         end_date: date,
         user: User | None,
+        assignee_id: uuid.UUID | None = None,
     ) -> list[GeneratedPlanTaskRead]:
         """The real workhorse behind ``propose_month`` — also called directly
         by chat-driven generation (an explicit date range from the
         conversation) and the automatic monthly scheduler job (``user=None``,
         since nothing was manually requested; both ``MarketingEvent.created_by``
-        and ``PlanTask.created_by`` are nullable for exactly this case)."""
+        and ``PlanTask.created_by`` are nullable for exactly this case).
+
+        ``assignee_id`` is an exception to the usual "generate first, manager
+        assigns separately" flow: chat-driven generation passes it through
+        only when the manager named a specific, unambiguously-resolved person
+        in the same request that asked for the content — so their explicit
+        instruction isn't silently dropped just because it named a person
+        instead of only a date range."""
         if end_date < start_date:
             raise BadRequestError("End date must be on or after the start date.")
 
@@ -134,6 +142,7 @@ class PlanGenerationService:
                 description=proposed.caption,
                 category=TaskCategory(proposed.category),
                 status=TaskStatus.todo,
+                assignee_id=assignee_id,
                 event_id=event.id,
                 start_date=proposed.event_date,
                 due_date=proposed.event_date,
