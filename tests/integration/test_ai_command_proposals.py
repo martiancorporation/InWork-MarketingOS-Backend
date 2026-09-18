@@ -428,3 +428,73 @@ def test_inaccessible_client_is_404_not_403_on_every_new_endpoint(
         f"{API}/clients/{cid}/assistant/proposals/{proposal.id}", headers=admin_headers
     )
     assert still_pending.json()["status"] == "pending_approval"
+
+
+def test_assigning_a_task_via_chat_does_not_crash_the_turn(
+    client: TestClient, admin_headers: dict, make_user, monkeypatch
+):
+    """Regression test for a real production incident: `_audit_value()` (used
+    to build `field_changes` for the proposal's JSONB column) had no case for
+    `uuid.UUID`, so proposing an `assignee_id` change left a raw UUID object
+    in the diff dict — which crashed the whole turn with an unhandled
+    `TypeError: Object of type UUID is not JSON serializable` at
+    `create_proposal`'s commit, every single time, for the single most
+    ordinary chat command there is: "assign this to someone"."""
+    cid = _client_id(client, admin_headers)
+    member, _ = make_user(email="assignee@test.com", name="Assignee Person")
+    assign_resp = client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": member["id"]}
+    )
+    assert assign_resp.status_code == 201, assign_resp.text
+
+    task_resp = client.post(
+        f"{API}/clients/{cid}/plan/tasks",
+        headers=admin_headers,
+        json={"title": "Design the launch banner", "category": "content", "status": "todo"},
+    )
+    assert task_resp.status_code == 201, task_resp.text
+    task_id = task_resp.json()["id"]
+
+    monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
+    monkeypatch.setattr(
+        OpenRouterClient,
+        "complete_with_tools",
+        _scripted(
+            [
+                ToolCallResponse(
+                    content=None,
+                    tool_calls=[
+                        ToolCall(
+                            id="c1",
+                            name="propose_assign_user_to_plan_task",
+                            arguments={"task_id": task_id, "assignee_id": member["id"]},
+                        )
+                    ],
+                ),
+                ToolCallResponse(content="Assigned — take a look.", tool_calls=[]),
+            ]
+        ),
+    )
+
+    chat_id = _create_chat(client, admin_headers, cid)
+    turn = client.post(
+        f"{API}/clients/{cid}/assistant/chats/{chat_id}/turn",
+        headers=admin_headers,
+        json={"content": f"Assign this task to {member['name']}"},
+    )
+    assert turn.status_code == 201, turn.text  # not a 500
+    body = turn.json()
+    assert body["proposal"] is not None
+    op = body["proposal"]["operations"][0]
+    # The diff must carry a plain string, never a raw UUID object.
+    assert op["field_changes"]["assignee_id"]["after"] == member["id"]
+    assert isinstance(op["field_changes"]["assignee_id"]["after"], str)
+
+    approve = client.post(
+        f"{API}/clients/{cid}/assistant/proposals/{body['proposal']['id']}/approve",
+        headers=admin_headers,
+    )
+    assert approve.status_code == 200, approve.text
+
+    task = client.get(f"{API}/clients/{cid}/plan/tasks/{task_id}", headers=admin_headers)
+    assert task.json()["assignee_id"] == member["id"]

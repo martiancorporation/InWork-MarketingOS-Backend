@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
+from app.ai.daily_report import DailyReportAgent
+from app.ai.features import AiFeature
+from app.ai.usage import AiUsageContext
 from app.core.security import hash_password
 from app.integrations.brevo.client import BrevoSendError
 from app.models.assignment import ClientAssignment
@@ -22,6 +25,7 @@ from app.models.client import Client
 from app.models.enums import ClientStatus, ReportEmailStatus, UserRole
 from app.models.report_email_log import ReportEmailLog
 from app.models.user import User
+from app.schemas.ai import DailyReportNarrative
 from app.services.report_email.service import ReportEmailService
 
 
@@ -209,6 +213,43 @@ def test_non_retryable_failure_fails_fast_without_retry(db_session: Session):
     assert len(fake.calls) == 1  # no retry on a non-retryable (4xx-style) error
 
 
+def test_repeated_calls_after_a_failure_are_cooled_down(db_session: Session):
+    """A persistently-failing send (e.g. the provider rejecting our IP) must
+    not be retried on every single scheduler tick — that regenerates a full
+    AI narrative each time, forever, until someone notices. Once failed,
+    further calls within the cooldown window are a no-op; Brevo is not
+    called again."""
+    client = _client_row(db_session)
+    _user_row(db_session, role=UserRole.admin)
+    fake = FakeBrevo(fail_times=99, retryable=False)
+    svc = ReportEmailService(db_session, brevo_client=fake)
+
+    first = asyncio.run(svc.send_daily_report(client, date(2026, 8, 26)))
+    second = asyncio.run(svc.send_daily_report(client, date(2026, 8, 26)))
+    third = asyncio.run(svc.send_daily_report(client, date(2026, 8, 26)))
+
+    assert first.status == second.status == third.status == ReportEmailStatus.failed.value
+    assert len(fake.calls) == 1  # only the first call actually hit Brevo (or the AI)
+
+
+def test_retry_after_cooldown_expires_tries_again(db_session: Session):
+    client = _client_row(db_session)
+    _user_row(db_session, role=UserRole.admin)
+    fake = FakeBrevo(fail_times=99, retryable=False)
+    svc = ReportEmailService(db_session, brevo_client=fake)
+
+    first = asyncio.run(svc.send_daily_report(client, date(2026, 8, 26)))
+    assert len(fake.calls) == 1
+
+    # Simulate the cooldown having elapsed.
+    row = db_session.get(ReportEmailLog, first.id)
+    row.updated_at = row.updated_at - timedelta(hours=2)
+    db_session.commit()
+
+    asyncio.run(svc.send_daily_report(client, date(2026, 8, 26)))
+    assert len(fake.calls) == 2  # cooldown expired — tried again
+
+
 def test_disconnected_integrations_render_as_not_connected(db_session: Session):
     """No Integration rows exist for a fresh client, so every channel the
     email covers must render explicitly as "Not connected" rather than a
@@ -239,3 +280,32 @@ def test_client_is_never_a_recipient(db_session: Session):
     )
     to_emails = {r["email"] for r in fake.calls[0]["to"]}
     assert client.slug not in to_emails
+
+
+def test_narrative_generation_is_attributed_to_the_right_feature_and_client(
+    db_session: Session, monkeypatch
+):
+    """Regression test: `generate()` was being called with no usage context at
+    all, so every daily-report narrative call — including a runaway retry
+    storm — was silently recorded as feature=unknown, client_id=None,
+    invisible in cost/usage dashboards. It must always carry a real context."""
+    client = _client_row(db_session)
+    _user_row(db_session, role=UserRole.admin)
+    fake = FakeBrevo()
+    seen: dict = {}
+
+    async def fake_generate(self, data, usage: AiUsageContext | None = None):
+        seen["usage"] = usage
+        return DailyReportNarrative(headline="ok")
+
+    monkeypatch.setattr(DailyReportAgent, "generate", fake_generate)
+
+    asyncio.run(
+        ReportEmailService(db_session, brevo_client=fake).send_daily_report(
+            client, date(2026, 8, 26)
+        )
+    )
+
+    assert seen["usage"] is not None
+    assert seen["usage"].feature == AiFeature.REPORT_NARRATIVE
+    assert seen["usage"].client_id == client.id

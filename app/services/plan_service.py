@@ -60,6 +60,8 @@ def _audit_value(value: object) -> object:
     """
     if isinstance(value, date | time):
         return value.isoformat()
+    if isinstance(value, uuid.UUID):
+        return str(value)
     return getattr(value, "value", value)
 
 

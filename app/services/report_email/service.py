@@ -15,13 +15,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ai.daily_report import DailyReportAgent
+from app.ai.usage import AiUsageContext
 from app.integrations.brevo.client import BrevoClient, BrevoSendError
 from app.integrations.llm import LLMClient
 from app.models.client import Client
@@ -38,6 +39,12 @@ logger = logging.getLogger("app.report_email")
 
 _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = (2, 6)
+# A persistently-failing send (e.g. the email provider rejecting our IP) was
+# being retried on every single scheduler tick (every ~10 min) with no
+# backoff — regenerating a full AI narrative each time, forever, until fixed.
+# Once a send has failed, wait out this cooldown before trying the same
+# (client, report_date) again.
+_FAILED_RETRY_COOLDOWN = timedelta(hours=1)
 
 
 class ReportEmailService:
@@ -72,8 +79,15 @@ class ReportEmailService:
 
     async def send_daily_report(self, client: Client, report_date: date) -> ReportEmailLog:
         existing = self.logs.get_for_date(client.id, report_date)
-        if existing is not None and existing.status == ReportEmailStatus.sent.value:
-            return existing  # already delivered — no-op
+        if existing is not None:
+            if existing.status == ReportEmailStatus.sent.value:
+                return existing  # already delivered — no-op
+            if existing.status == ReportEmailStatus.failed.value:
+                last_attempt = existing.updated_at
+                if last_attempt.tzinfo is None:
+                    last_attempt = last_attempt.replace(tzinfo=UTC)
+                if datetime.now(UTC) - last_attempt < _FAILED_RETRY_COOLDOWN:
+                    return existing  # tried recently — wait out the cooldown
 
         recipients = self._resolve_recipients(client.id)
         if not recipients:
@@ -97,7 +111,10 @@ class ReportEmailService:
 
         try:
             data = build_daily_report_data(self.db, client, report_date)
-            narrative = await self._agent.generate(data)
+            narrative = await self._agent.generate(
+                data,
+                usage=AiUsageContext(feature=self._agent.feature, client_id=client.id),
+            )
             html = render_daily_report_html(data, narrative)
         except Exception as exc:
             logger.exception("Failed to build daily report for client %s", client.id)

@@ -17,6 +17,8 @@ from app.services.audit_service import field_changes
 
 def _audit_value(value: object) -> object:
     """JSON-safe scalar for a diff (enum -> ``.value``)."""
+    if isinstance(value, uuid.UUID):
+        return str(value)
     return getattr(value, "value", value)
 
 

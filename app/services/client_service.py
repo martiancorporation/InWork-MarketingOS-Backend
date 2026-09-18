@@ -30,6 +30,8 @@ from app.services.intelligence.job_queue import JobQueue
 
 def _audit_value(value: Any) -> Any:
     """JSON-safe representation of a field value for the audit diff."""
+    if isinstance(value, uuid.UUID):
+        return str(value)
     return getattr(value, "value", value)
 
 
