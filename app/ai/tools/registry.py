@@ -59,13 +59,30 @@ _TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="search_plan_tasks",
         description=(
-            "Search this client's plan/task board. Use this to find the task(s) "
-            "the user is referring to before proposing any change to one."
+            "Find existing task(s) on this client's plan/task board — REQUIRED before "
+            "propose_update_plan_task, propose_assign_user_to_plan_task, "
+            "propose_unassign_plan_task, or propose_archive_plan_task, since every one "
+            "of those needs a real task_id and none of them may be guessed. Whenever "
+            "the user refers to something that already exists ('this plan', 'that "
+            "task', 'the one for the 26th', 'the launch post'), call this first — use "
+            "on_date when they name or imply a date, query when they name/describe it. "
+            "Try ONE well-targeted call; if it doesn't return a single clear match, "
+            "call request_clarification immediately rather than retrying with "
+            "different search terms."
         ),
         parameters=_obj(
             {
                 "query": {"type": "string", "description": "Substring match on the task title."},
                 "status": {"type": "string", "enum": ["todo", "in_progress", "blocked", "done"]},
+                "on_date": {
+                    "type": "string",
+                    "description": (
+                        "YYYY-MM-DD. Finds task(s) scheduled on this exact date (start_date "
+                        "through due_date span includes it) — use this whenever the user "
+                        "names or implies a specific date (\"the plan for the 26th\", "
+                        "\"tomorrow's post\")."
+                    ),
+                },
                 "include_archived": {"type": "boolean", "default": False},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 10},
             }
@@ -166,7 +183,18 @@ _TOOLS: list[ToolSpec] = [
     # ---- write (propose-only) --------------------------------------------- #
     ToolSpec(
         name="propose_create_plan_task",
-        description="Draft a new task on the plan/task board. Requires human approval before it exists.",
+        description=(
+            "Draft a BRAND NEW task that does not exist yet. Never use this when the "
+            "user is referring to something that already exists (\"this plan\", \"that "
+            "task\", \"the one for the 26th\") — call search_plan_tasks first, and if a "
+            "matching task is found, use propose_update_plan_task / "
+            "propose_assign_user_to_plan_task on its id instead. Requires human "
+            "approval before it exists.\n\n"
+            "Title style: write it exactly as a person would — never prefix or append "
+            "a platform name (no 'Instagram Reel:', 'Facebook Static —', etc.). This "
+            "tool has no platform/format fields, so that detail belongs in the "
+            "description if it matters at all, not the title."
+        ),
         parameters=_obj(
             {
                 "title": {"type": "string"},
@@ -200,9 +228,11 @@ _TOOLS: list[ToolSpec] = [
         name="propose_update_plan_task",
         description=(
             "Change one or more fields (title, description, requirements, category, "
-            "status, priority, dates, archived) on an existing task. To change who is "
-            "assigned, use propose_assign_user_to_plan_task / propose_unassign_plan_task "
-            "instead."
+            "status, priority, dates, archived) on an EXISTING task — you must already "
+            "have its task_id from search_plan_tasks or get_plan_task in this "
+            "conversation; never guess one or call propose_create_plan_task instead "
+            "just because you don't have the id yet. To change who is assigned, use "
+            "propose_assign_user_to_plan_task / propose_unassign_plan_task instead."
         ),
         parameters=_obj(
             {
@@ -236,7 +266,12 @@ _TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="propose_assign_user_to_plan_task",
-        description="Assign a user (a user id from search_users) to a plan task.",
+        description=(
+            "Assign a user (a user id from search_users) to an EXISTING plan task (a "
+            "task_id from search_plan_tasks/get_plan_task — never call "
+            "propose_create_plan_task for this, even if you don't have the id yet; "
+            "search for it first)."
+        ),
         parameters=_obj(
             {"task_id": {"type": "string"}, "assignee_id": {"type": "string"}},
             required=["task_id", "assignee_id"],

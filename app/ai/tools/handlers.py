@@ -72,13 +72,18 @@ def search_plan_tasks(
     *,
     query: str | None = None,
     status: str | None = None,
+    on_date: str | None = None,
     include_archived: bool = False,
     limit: int = 10,
 ) -> dict:
     plans = PlanService(db)
+    on = date.fromisoformat(on_date) if on_date else None
     rows, total = plans.tasks.list_for_client(
         client_id,
         status=TaskStatus(status) if status else None,
+        start=on,
+        end=on,
+        include_undated=on is None,
         include_archived=include_archived,
         offset=0,
         limit=200,  # over-fetch, then narrow by title below; still a small bounded page
@@ -88,7 +93,7 @@ def search_plan_tasks(
         rows = [r for r in rows if q in r.title.lower()]
     capped = rows[: min(limit, _MAX_SEARCH_RESULTS)]
     return {
-        "total_matching": len(rows) if query else total,
+        "total_matching": len(rows) if (query or on_date) else total,
         "tasks": [_task_brief(r) for r in capped],
     }
 
