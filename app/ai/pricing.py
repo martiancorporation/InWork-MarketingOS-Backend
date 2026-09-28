@@ -5,18 +5,19 @@ Rates are USD **per 1,000,000 tokens**, split into input / output / cache-write
 the base input rate). Cost is computed once, at call time, and stored on the
 usage row — so changing these rates never rewrites history.
 
-Keyed by the exact OpenRouter model id string (e.g. ``"anthropic/claude-opus-5"``)
-passed to the API — see ``app/integrations/llm/``.
+Rates come from OpenRouter's own live catalog
+(``app/integrations/llm/model_catalog.py``, ``GET /models``) — there is no
+hardcoded per-model rate table here anymore. That fixes a real, verified bug:
+the previous hand-maintained table had been overstating Anthropic costs by
+1.5x-3x and had no entry at all for a model added after the table was last
+updated (silently priced at $0). Reading live pricing means it can never go
+stale and never needs a code change when a new model becomes available.
 
-Rates below were verified directly against OpenRouter's live catalog
-(``GET https://openrouter.ai/api/v1/models``) in September 2026 — replacing an
-earlier placeholder table that had been overstating Anthropic costs by
-1.5x-3x. Re-run ``scripts/refresh_model_pricing.py`` periodically (or after
-adding a model to ``app/ai/model_router.py``'s ``KNOWN_MODELS``) to catch
-drift; OpenRouter prices can change without notice. Override at runtime with
-the ``AI_PRICING_JSON`` env var (JSON:
+``AI_PRICING_JSON`` remains as an *admin-configurable* override layer (JSON:
 ``{"model": {"input":.., "output":.., "cache_write":.., "cache_read":..}}``,
-values per 1M tokens).
+values per 1M tokens) for the rare case the catalog is temporarily unreachable
+or a specific rate needs a manual correction — checked first, before the live
+catalog.
 """
 
 from __future__ import annotations
@@ -46,41 +47,57 @@ def _rate(inp: str, out: str, cw: str, cr: str) -> ModelRate:
     return ModelRate(Decimal(inp), Decimal(out), Decimal(cw), Decimal(cr))
 
 
-# Verified against OpenRouter's live /models catalog (Sept 2026).
-_DEFAULT_PRICING: dict[str, ModelRate] = {
-    # --- Anthropic (via OpenRouter) ---
-    "anthropic/claude-opus-5": _rate("5", "25", "6.25", "0.50"),
-    "anthropic/claude-sonnet-5": _rate("2", "10", "2.5", "0.20"),
-    "anthropic/claude-haiku-4.5": _rate("1", "5", "1.25", "0.10"),
-    "anthropic/claude-fable-5": _rate("10", "50", "12.5", "1.00"),
-    "anthropic/claude-fable-5.1": _rate("10", "50", "12.5", "1.00"),
-    # --- new low-cost models (Ayon Das's Sept 2026 recommendations) ---
-    "openai/gpt-5.6-luna": _rate("0.20", "1.20", "0.25", "0.02"),
-    "z-ai/glm-5.3-flash": _rate("0.15", "0.50", "0.15", "0.03"),
-    "deepseek/deepseek-v4.1-flash": _rate("0.15", "0.60", "0.15", "0.003"),
-    "minimax/minimax-m3": _rate("0.30", "1.20", "0.30", "0.06"),
-    "qwen/qwen3.7-flash": _rate("0.03", "0.13", "0.038", "0.006"),
-}
-
-
-def _load_pricing() -> dict[str, ModelRate]:
-    rates = dict(_DEFAULT_PRICING)
+def _overrides() -> dict[str, ModelRate]:
     raw = get_settings().ai.pricing_json
-    if raw:
-        try:
-            for model, r in json.loads(raw).items():
-                rates[model] = _rate(
-                    str(r["input"]),
-                    str(r["output"]),
-                    str(r.get("cache_write", r["input"])),
-                    str(r.get("cache_read", r["input"])),
-                )
-        except Exception:  # bad override must never break AI calls
-            logger.warning("Ignoring invalid AI_PRICING_JSON override", exc_info=True)
-    return rates
+    if not raw:
+        return {}
+    try:
+        rates: dict[str, ModelRate] = {}
+        for model, r in json.loads(raw).items():
+            rates[model] = _rate(
+                str(r["input"]),
+                str(r["output"]),
+                str(r.get("cache_write", r["input"])),
+                str(r.get("cache_read", r["input"])),
+            )
+        return rates
+    except Exception:  # bad override must never break AI calls
+        logger.warning("Ignoring invalid AI_PRICING_JSON override", exc_info=True)
+        return {}
 
 
-MODEL_PRICING: dict[str, ModelRate] = _load_pricing()
+def get_rate(model: str) -> ModelRate | None:
+    """The priced rate for ``model``, or ``None`` if it's neither in the
+    ``AI_PRICING_JSON`` override nor a currently-priced entry in OpenRouter's
+    live catalog."""
+    override = _overrides().get(model)
+    if override is not None:
+        return override
+
+    # Imported here, not at module level: app.integrations.llm's package
+    # __init__ pulls in base.py, which imports app.ai.usage, which imports
+    # this module — a module-level import here would be a circular import
+    # (confirmed live: it crashed the app on boot). By the time this function
+    # actually runs, both modules are already fully initialized.
+    from app.integrations.llm import model_catalog
+
+    catalog_model = model_catalog.get_model(model)
+    if catalog_model is None or catalog_model.input_per_million is None:
+        return None
+    # Not every catalog entry publishes cache pricing — default both to the
+    # base input rate (a deliberately conservative "no cache discount
+    # assumed") when it's missing, rather than treating a whole model as
+    # unpriced just because one of four rates is absent.
+    return ModelRate(
+        input=catalog_model.input_per_million,
+        output=catalog_model.output_per_million or catalog_model.input_per_million,
+        cache_write=catalog_model.cache_write_per_million or catalog_model.input_per_million,
+        cache_read=catalog_model.cache_read_per_million or catalog_model.input_per_million,
+    )
+
+
+def has_rate(model: str) -> bool:
+    return get_rate(model) is not None
 
 
 @dataclass(frozen=True)
@@ -112,7 +129,7 @@ class CostBreakdown:
 def price(model: str, usage: UsageBreakdown) -> CostBreakdown:
     """Compute the USD cost of ``usage`` for ``model``. Unknown model → zero cost
     with ``priced=False`` (tokens are still recorded upstream)."""
-    rate = MODEL_PRICING.get(model)
+    rate = get_rate(model)
     if rate is None:
         logger.warning("No pricing for model %r — recording tokens with zero cost", model)
         z = Decimal(0)

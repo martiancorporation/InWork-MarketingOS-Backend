@@ -3,23 +3,18 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 import app.ai.model_router as router_mod
 from app.ai.features import AiFeature
 from app.ai.model_router import (
     ALL_CATEGORIES,
     FEATURE_CATEGORY,
-    KNOWN_MODEL_IDS,
     AiTaskCategory,
-    builtin_default,
+    bootstrap_model_id,
     category_for,
     invalidate_cache,
     model_for,
 )
-from app.db.base import Base
 from app.models.ai_model_route import AiModelRoute
 
 pytestmark = pytest.mark.usefixtures("_reset_router_cache")
@@ -34,70 +29,26 @@ def _reset_router_cache():
     invalidate_cache()
 
 
-@pytest.fixture
-def routed_db(monkeypatch):
-    """A real (per-test) SQLite engine wired in place of the app's global
-    session factory, mirroring how ``app/services/scheduler_service.py``'s
-    ``_new_session`` binds to the test engine via ``StaticPool`` — this lets
-    ``model_router._load_active_routes`` (which uses its own short-lived
-    session, same pattern as ``app/ai/usage.py::record_usage``) actually see
-    rows this test commits, instead of hitting a disconnected engine."""
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-
-    @event.listens_for(engine, "connect")
-    def _enable_fk(dbapi_conn, _record):
-        cur = dbapi_conn.cursor()
-        cur.execute("PRAGMA foreign_keys=ON")
-        cur.close()
-
-    import app.models  # noqa: F401  register every table on Base.metadata
-
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    monkeypatch.setattr(router_mod, "get_session_factory", lambda: factory)
-    session = factory()
-    try:
-        yield session
-    finally:
-        session.close()
-        engine.dispose()
+def test_bootstrap_model_id_is_the_cheapest_catalog_model():
+    # The fake catalog (tests/conftest.py) has "test-vendor/cheap-fast" as its
+    # lowest-input-cost entry — bootstrap_model_id must pick it, not a
+    # hardcoded id, and must pick the same one every time (deterministic).
+    assert bootstrap_model_id() == "test-vendor/cheap-fast"
 
 
-def test_every_mapped_feature_has_a_builtin_default():
-    for feature, category in FEATURE_CATEGORY.items():
-        assert category in ALL_CATEGORIES
-        assert builtin_default(category), f"no default for category of {feature}"
-
-
-def test_conversational_features_route_off_the_flagship_default():
-    # Regression guard: PROJECT_AI (Ask AI), ASSISTANT (global), and
-    # COMMAND_AGENT (the unified chat's tool-calling loop — see
-    # app/ai/command_agent.py) each independently used to never consult
-    # model_for() at all, so they silently ran on the flagship default model
-    # on every single call — the client's core cost/speed complaint, twice.
-    conversational_default = builtin_default(AiTaskCategory.CONVERSATIONAL)
-    assert model_for(AiFeature.PROJECT_AI) == conversational_default
-    assert model_for(AiFeature.ASSISTANT) == conversational_default
-    assert model_for(AiFeature.COMMAND_AGENT) == conversational_default
-    assert conversational_default is not None
-
-
-def test_category_assignments_match_builtin_defaults_without_db():
-    assert model_for(AiFeature.BRAND_EXTRACTION) == builtin_default(AiTaskCategory.EXTRACTION)
-    assert model_for(AiFeature.CONSISTENCY_CHECK) == builtin_default(AiTaskCategory.CLASSIFICATION)
-    assert model_for(AiFeature.HEALTH_SCORE) == builtin_default(AiTaskCategory.ANALYSIS)
-    assert model_for(AiFeature.PLAN_GENERATION) == builtin_default(
-        AiTaskCategory.STRUCTURED_GENERATION
-    )
-
-
-def test_unmapped_or_missing_feature_keeps_the_default_model():
+def test_unmapped_or_missing_feature_has_no_model():
     assert model_for("some.unmapped.feature") is None
     assert model_for(None) is None
     assert category_for(None) is None
     assert category_for("some.unmapped.feature") is None
+
+
+def test_mapped_feature_with_no_db_route_has_no_model():
+    # No hardcoded fallback anymore — an unconfigured category means no
+    # model, treated the same as "AI provider not configured" by the caller.
+    assert model_for(AiFeature.HEALTH_SCORE) is None
+    assert model_for(AiFeature.PROJECT_AI) is None
+    assert model_for(AiFeature.COMMAND_AGENT) is None
 
 
 def test_qa_review_is_not_routed_here():
@@ -106,12 +57,12 @@ def test_qa_review_is_not_routed_here():
     assert AiFeature.QA_REVIEW not in FEATURE_CATEGORY
 
 
-def test_known_models_cover_every_builtin_default():
-    for category in ALL_CATEGORIES:
-        assert builtin_default(category) in KNOWN_MODEL_IDS
+def test_every_feature_maps_to_a_real_category():
+    for feature, category in FEATURE_CATEGORY.items():
+        assert category in ALL_CATEGORIES, f"{feature} maps to an unknown category"
 
 
-def test_db_override_wins_over_builtin_default(routed_db):
+def test_db_route_wins(routed_db):
     routed_db.add(
         AiModelRoute(
             task_category=AiTaskCategory.CLASSIFICATION,
@@ -136,12 +87,28 @@ def test_inactive_db_route_is_ignored(routed_db):
     routed_db.commit()
     invalidate_cache()
 
-    assert model_for(AiFeature.CONSISTENCY_CHECK) == builtin_default(AiTaskCategory.CLASSIFICATION)
+    assert model_for(AiFeature.CONSISTENCY_CHECK) is None
+
+
+def test_active_route_with_no_model_id_is_ignored(routed_db):
+    # Represents a category seeded (self-heal) before the catalog was first
+    # reachable — is_active but nothing to actually route to.
+    routed_db.add(
+        AiModelRoute(
+            task_category=AiTaskCategory.CLASSIFICATION,
+            model_id=None,
+            is_active=True,
+        )
+    )
+    routed_db.commit()
+    invalidate_cache()
+
+    assert model_for(AiFeature.CONSISTENCY_CHECK) is None
 
 
 def test_cache_is_not_reloaded_until_invalidated(routed_db):
     invalidate_cache()
-    assert model_for(AiFeature.CONSISTENCY_CHECK) == builtin_default(AiTaskCategory.CLASSIFICATION)
+    assert model_for(AiFeature.CONSISTENCY_CHECK) is None
 
     routed_db.add(
         AiModelRoute(
@@ -152,16 +119,16 @@ def test_cache_is_not_reloaded_until_invalidated(routed_db):
     )
     routed_db.commit()
     # No invalidate_cache() call — the stale cached value should still win.
-    assert model_for(AiFeature.CONSISTENCY_CHECK) == builtin_default(AiTaskCategory.CLASSIFICATION)
+    assert model_for(AiFeature.CONSISTENCY_CHECK) is None
 
     invalidate_cache()
     assert model_for(AiFeature.CONSISTENCY_CHECK) == "test/should-not-appear-yet"
 
 
-def test_failed_db_load_falls_back_to_builtin_default(monkeypatch):
+def test_failed_db_load_yields_no_model(monkeypatch):
     def _boom():
         raise RuntimeError("db unreachable")
 
     monkeypatch.setattr(router_mod, "get_session_factory", _boom)
     invalidate_cache()
-    assert model_for(AiFeature.HEALTH_SCORE) == builtin_default(AiTaskCategory.ANALYSIS)
+    assert model_for(AiFeature.HEALTH_SCORE) is None

@@ -24,14 +24,12 @@ class AISettings(BaseSettings):
     )
 
     api_key: str | None = None  # OPENROUTER_API_KEY — absent in local dev
-    # Model ids are "vendor/model", e.g. "anthropic/claude-sonnet-5",
-    # "openai/gpt-4o", "google/gemini-2.5-pro" — see openrouter.ai/models.
-    # This is the ceiling default: any feature not routed to a specific model
-    # via app/ai/model_router.py's category table uses this. Per-category
-    # routing (which model each *kind* of AI task actually uses) now lives in
-    # the admin-editable ``ai_model_routes`` table, not static settings here.
-    # Deliberately using a cheap model as the ceiling fallback.
-    model: str = "qwen/qwen3.7-flash"  # OPENROUTER_MODEL
+    # No model id lives here, or anywhere else in settings/env — every AI call
+    # resolves its model from the admin-editable ``ai_model_routes`` table
+    # (app/ai/model_router.py, app/services/ai_model_route_service.py),
+    # itself populated from OpenRouter's live model catalog. A feature whose
+    # category has no configured route yet degrades the same way an
+    # unconfigured provider does (see app/integrations/llm/openrouter.py).
     base_url: str = "https://openrouter.ai/api/v1"  # OPENROUTER_BASE_URL
     max_tokens: int = 1024  # OPENROUTER_MAX_TOKENS
     # Per-request timeout (seconds) and client-side retries.

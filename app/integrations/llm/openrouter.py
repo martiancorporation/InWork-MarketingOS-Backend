@@ -19,7 +19,14 @@ response's token usage, prices it, and writes one ``ai_usage_events`` row (see
 ``AiUsageContext`` (feature / user / client) — either per-call or as an
 instance default.
 
-Reads the API key/model/base URL from settings (never hardcoded).
+Reads the API key/base URL from settings (never hardcoded). There is no
+default *model* here at all — every call must resolve one via
+``app.ai.model_router.model_for`` (an admin-configured, DB-backed choice; see
+``app/ai/model_router.py``). A feature whose task category has no active
+route yet resolves to ``model=None``, which every method here treats exactly
+like "AI provider not configured" (``_require_model``) — the same
+deterministic-fallback contract every AI feature already implements, so no
+call site needs a separate check for "is a model actually configured".
 """
 
 from __future__ import annotations
@@ -70,6 +77,18 @@ class OpenRouterClient:
         transport = httpx.AsyncHTTPTransport(retries=self._settings.max_retries)
         return httpx.AsyncClient(timeout=self._settings.timeout_seconds, transport=transport)
 
+    def _require_model(self, model: str | None) -> str:
+        """Every request needs a real model id — there is no built-in default
+        to fall back to (see the module docstring). Raises the same error
+        type as "AI provider not configured" so existing call-site error
+        handling covers this case automatically."""
+        if not model:
+            raise ServiceUnavailableError(
+                "No AI model is configured for this yet — an admin needs to set one "
+                "under AI Routing settings."
+            )
+        return model
+
     async def _post(self, payload: dict) -> dict:
         if not self.is_configured:
             raise ServiceUnavailableError("AI provider is not configured.")
@@ -92,7 +111,7 @@ class OpenRouterClient:
         the event loop on every single AI call, platform-wide.
         """
         ctx = context or self._context
-        model = payload.get("model", self._settings.model)
+        model = payload["model"]
         started = time.perf_counter()
         try:
             body = await self._post(payload)
@@ -140,7 +159,7 @@ class OpenRouterClient:
     ) -> str:
         body = await self._invoke(
             {
-                "model": model or self._settings.model,
+                "model": self._require_model(model),
                 "max_tokens": max_tokens or self._settings.max_tokens,
                 "messages": [
                     {"role": "system", "content": system},
@@ -205,7 +224,7 @@ class OpenRouterClient:
 
         body = await self._invoke(
             {
-                "model": model or self._settings.model,
+                "model": self._require_model(model),
                 "max_tokens": max_tokens or self._settings.max_tokens,
                 "messages": [
                     {"role": "system", "content": system},
@@ -236,7 +255,7 @@ class OpenRouterClient:
         """
         body = await self._invoke(
             {
-                "model": model or self._settings.model,
+                "model": self._require_model(model),
                 "max_tokens": max_tokens or self._settings.max_tokens,
                 "messages": messages,
                 "tools": tools,
@@ -268,7 +287,7 @@ class OpenRouterClient:
         if not self.is_configured:
             raise ServiceUnavailableError("AI provider is not configured.")
         ctx = context or self._context
-        model = model or self._settings.model
+        model = self._require_model(model)
         payload = {
             "model": model,
             "max_tokens": max_tokens or self._settings.max_tokens,
@@ -375,7 +394,7 @@ class OpenRouterClient:
         if not self.is_configured:
             raise ServiceUnavailableError("AI provider is not configured.")
         ctx = context or self._context
-        model = model or self._settings.model
+        model = self._require_model(model)
         payload = {
             "model": model,
             "max_tokens": max_tokens or self._settings.max_tokens,

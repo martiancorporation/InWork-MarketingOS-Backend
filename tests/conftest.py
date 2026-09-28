@@ -61,6 +61,7 @@ os.environ["INTEL_EMBEDDING_PROVIDER"] = "fake"
 os.environ["DEMO_SEED_ON_CREATE"] = "false"
 
 from collections.abc import Callable, Generator  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -72,11 +73,90 @@ import app.models  # noqa: E402,F401  register all tables on Base.metadata
 from app.core.security import hash_password  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import get_db  # noqa: E402
+from app.integrations.llm import model_catalog  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.enums import UserRole  # noqa: E402
 from app.models.user import User  # noqa: E402
 
 API = "/api/v1"
+
+# A small, deterministic stand-in for OpenRouter's live model catalog
+# (app/integrations/llm/model_catalog.py) — the real catalog is a live network
+# fetch, which the suite must never depend on. Ids are deliberately
+# unrelated to any real vendor/model naming so a test can never accidentally
+# pass by matching a real id out of habit; a test that needs specific catalog
+# contents (e.g. to assert a particular price) monkeypatches
+# ``model_catalog.get_catalog`` itself instead of relying on this list's exact
+# values staying the same.
+FAKE_CATALOG: list[model_catalog.CatalogModel] = [
+    model_catalog.CatalogModel(
+        id="test-vendor/cheap-fast",
+        name="Test Cheap Fast",
+        context_length=32_000,
+        input_per_million=Decimal("0.10"),
+        output_per_million=Decimal("0.40"),
+        cache_write_per_million=Decimal("0.10"),
+        cache_read_per_million=Decimal("0.02"),
+    ),
+    model_catalog.CatalogModel(
+        id="test-vendor/mid-tier",
+        name="Test Mid Tier",
+        context_length=128_000,
+        input_per_million=Decimal("1.00"),
+        output_per_million=Decimal("4.00"),
+        cache_write_per_million=Decimal("1.00"),
+        cache_read_per_million=Decimal("0.20"),
+    ),
+    model_catalog.CatalogModel(
+        id="test-vendor/flagship",
+        name="Test Flagship",
+        context_length=256_000,
+        input_per_million=Decimal("5.00"),
+        output_per_million=Decimal("20.00"),
+        cache_write_per_million=Decimal("5.00"),
+        cache_read_per_million=Decimal("1.00"),
+    ),
+]
+
+
+@pytest.fixture(autouse=True)
+def _fake_model_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test gets a fixed, in-memory model catalog instead of the real
+    OpenRouter network call — keeps the suite hermetic (no network) and
+    deterministic (a live catalog changes over time)."""
+    monkeypatch.setattr(model_catalog, "get_catalog", lambda **_: list(FAKE_CATALOG))
+    monkeypatch.setattr(model_catalog, "_cache", None)
+
+
+@pytest.fixture
+def routed_db(monkeypatch: pytest.MonkeyPatch):
+    """A real (per-test) SQLite engine wired in place of
+    ``app.ai.model_router``'s own session factory, so
+    ``model_router._load_active_routes`` (which uses its own short-lived
+    session, same pattern as ``app/ai/usage.py::record_usage``) actually sees
+    ``AiModelRoute`` rows this test commits, instead of hitting a
+    disconnected/tableless engine. Yields the session to add rows through."""
+    import app.ai.model_router as router_mod
+
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+
+    @event.listens_for(engine, "connect")
+    def _enable_fk(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    monkeypatch.setattr(router_mod, "get_session_factory", lambda: factory)
+    session = factory()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
 
 
 @pytest.fixture

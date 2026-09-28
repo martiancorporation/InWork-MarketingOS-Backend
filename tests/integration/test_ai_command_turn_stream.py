@@ -14,9 +14,10 @@ import json
 from fastapi.testclient import TestClient
 
 from app.ai.features import AiFeature
-from app.ai.model_router import AiTaskCategory, builtin_default, model_for
+from app.ai.model_router import AiTaskCategory, invalidate_cache, model_for
 from app.integrations.llm.base import StreamDelta, ToolCall
 from app.integrations.llm.openrouter import OpenRouterClient
+from app.models.ai_model_route import AiModelRoute
 from tests.conftest import API
 from tests.helpers import onboarding_payload
 
@@ -183,13 +184,23 @@ def test_turn_stream_tool_progress_then_proposal_on_done(
 
 
 def test_turn_stream_routes_off_the_conversational_model(
-    client: TestClient, admin_headers: dict, monkeypatch
+    client: TestClient, admin_headers: dict, monkeypatch, routed_db
 ):
     """Regression guard: the command agent used to never pass a ``model`` to
-    ``stream_with_tools`` at all, so every turn silently ran on the raw
-    ceiling default (``AISettings.model``) instead of the admin-tunable
-    ``conversational`` route — see app/ai/model_router.py's FEATURE_CATEGORY
-    comment on AiFeature.COMMAND_AGENT."""
+    ``stream_with_tools`` at all, so every turn silently ran on whatever
+    model was hardcoded as the global ceiling default instead of the
+    admin-tunable ``conversational`` route — see app/ai/model_router.py's
+    FEATURE_CATEGORY comment on AiFeature.COMMAND_AGENT."""
+    routed_db.add(
+        AiModelRoute(
+            task_category=AiTaskCategory.CONVERSATIONAL,
+            model_id="test-vendor/mid-tier",
+            is_active=True,
+        )
+    )
+    routed_db.commit()
+    invalidate_cache()
+
     monkeypatch.setattr(OpenRouterClient, "is_configured", property(lambda self: True))
     received_models: list[str | None] = []
 
@@ -210,7 +221,6 @@ def test_turn_stream_routes_off_the_conversational_model(
     )
     assert resp.status_code == 200, resp.text
 
-    assert received_models == [builtin_default(AiTaskCategory.CONVERSATIONAL)]
-    assert received_models[0] is not None
+    assert received_models == ["test-vendor/mid-tier"]
     # And it's actually routed via COMMAND_AGENT's category, not a coincidence.
     assert received_models[0] == model_for(AiFeature.COMMAND_AGENT)

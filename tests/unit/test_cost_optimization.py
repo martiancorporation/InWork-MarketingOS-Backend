@@ -6,15 +6,34 @@ a separate static tier list, so these lock in that the two can never drift.
 
 from __future__ import annotations
 
+import pytest
+
 from app.ai.cost_optimization import build_report
 from app.ai.features import AiFeature
-from app.ai.model_router import AiTaskCategory, builtin_default
+from app.ai.model_router import AiTaskCategory, invalidate_cache
+from app.models.ai_model_route import AiModelRoute
+
+_RECOMMENDED = "test-vendor/cheap-fast"  # from tests/conftest.py's FAKE_CATALOG
+
+
+@pytest.fixture(autouse=True)
+def _route_analysis_to_recommended(routed_db):
+    """These suggestions are computed from whatever the live router actually
+    recommends for HEALTH_SCORE's category (ANALYSIS) — seed a real DB route
+    so that's a deterministic, known value instead of "unconfigured"."""
+    routed_db.add(
+        AiModelRoute(task_category=AiTaskCategory.ANALYSIS, model_id=_RECOMMENDED, is_active=True)
+    )
+    routed_db.commit()
+    invalidate_cache()
+    yield
+    invalidate_cache()
 
 
 def _row(**kw) -> dict:
     defaults = {
         "feature": AiFeature.HEALTH_SCORE,
-        "model": "anthropic/claude-opus-5",
+        "model": "test-vendor/flagship",
         "requests": 100,
         "input_tokens": 100_000,
         "output_tokens": 20_000,
@@ -30,13 +49,12 @@ def test_suggests_switching_off_the_flagship_for_a_routed_category():
     ids = [s.id for s in report.suggestions]
     assert any(i.startswith(f"route-cheaper-model:{AiFeature.HEALTH_SCORE}:") for i in ids)
     top = report.suggestions[0]
-    assert top.suggested_model == builtin_default(AiTaskCategory.ANALYSIS)
+    assert top.suggested_model == _RECOMMENDED
     assert top.estimated_savings > 0
 
 
 def test_no_suggestion_when_already_on_the_recommended_model():
-    recommended = builtin_default(AiTaskCategory.ANALYSIS)
-    report = build_report([_row(model=recommended)])
+    report = build_report([_row(model=_RECOMMENDED)])
     assert report.suggestions == []
 
 

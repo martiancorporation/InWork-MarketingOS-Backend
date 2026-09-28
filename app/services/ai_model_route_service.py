@@ -5,6 +5,11 @@ without a redeploy" mechanism: an admin changes which model handles a task
 category here, and every AI call in that category (through
 ``app.ai.model_router.model_for``) picks it up within one cache TTL (30s), or
 immediately in the worker that made the change (writes invalidate the cache).
+
+The model catalog (what an admin may pick, and what a category may already be
+seeded with) always comes from OpenRouter's live model list
+(``app/integrations/llm/model_catalog.py``) — there is no static list of
+"known" models maintained in this codebase.
 """
 
 from __future__ import annotations
@@ -13,14 +18,9 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from app.ai.model_router import (
-    ALL_CATEGORIES,
-    KNOWN_MODEL_IDS,
-    KNOWN_MODELS,
-    builtin_default,
-    invalidate_cache,
-)
+from app.ai.model_router import ALL_CATEGORIES, bootstrap_model_id, invalidate_cache
 from app.core.exceptions import BadRequestError, NotFoundError
+from app.integrations.llm import model_catalog
 from app.models.ai_model_route import AiModelRoute
 from app.repositories.ai_model_route_repository import AiModelRouteRepository
 from app.schemas.ai_model_route import (
@@ -35,20 +35,29 @@ class AiModelRouteService:
         self.repo = AiModelRouteRepository(db)
 
     def list_routes(self) -> list[AiModelRoute]:
-        """Every known task category, one row each — lazily creating a
-        built-in-default row for any category that doesn't have one yet
-        (same self-healing GET pattern as NotificationService.get_preferences),
-        so a new category added by a future code change just shows up with a
-        sane default the next time this list is loaded."""
+        """Every known task category, one row each — lazily creating a row
+        for any category that doesn't have one yet (same self-healing GET
+        pattern as NotificationService.get_preferences), so a new category
+        added by a future code change just shows up, the next time this list
+        is loaded, seeded from the live catalog's cheapest model — a safe,
+        non-hardcoded starting point, not a quality recommendation. If the
+        catalog can't be reached at seed time, the row is created inactive
+        with no model rather than guessing a literal id."""
         existing = {r.task_category: r for r in self.repo.list_all()}
         created = False
         for category in ALL_CATEGORIES:
             if category not in existing:
+                model_id = bootstrap_model_id()
                 route = AiModelRoute(
                     task_category=category,
-                    model_id=builtin_default(category) or "",
-                    is_active=True,
-                    notes="Built-in default — not yet tuned by an admin.",
+                    model_id=model_id,
+                    is_active=model_id is not None,
+                    notes=(
+                        "Bootstrapped from the cheapest available model — not yet tuned by an admin."
+                        if model_id
+                        else "Not configured yet — the model catalog was unreachable when this "
+                        "category was first seeded. Pick a model below."
+                    ),
                 )
                 self.repo.add(route)
                 existing[category] = route
@@ -62,13 +71,15 @@ class AiModelRouteService:
     ) -> AiModelRoute:
         if task_category not in ALL_CATEGORIES:
             raise NotFoundError(f"Unknown task category '{task_category}'.")
-        if data.model_id not in KNOWN_MODEL_IDS:
+        if model_catalog.get_model(data.model_id) is None:
             raise BadRequestError(
-                f"'{data.model_id}' is not in the known model catalog. "
+                f"'{data.model_id}' is not in OpenRouter's current model catalog. "
                 "See GET /admin/ai-model-routes/available-models."
             )
-        if data.fallback_model_id and data.fallback_model_id not in KNOWN_MODEL_IDS:
-            raise BadRequestError(f"'{data.fallback_model_id}' is not in the known model catalog.")
+        if data.fallback_model_id and model_catalog.get_model(data.fallback_model_id) is None:
+            raise BadRequestError(
+                f"'{data.fallback_model_id}' is not in OpenRouter's current model catalog."
+            )
 
         route = self.repo.get_by_category(task_category)
         is_new = route is None
@@ -88,12 +99,20 @@ class AiModelRouteService:
         return route
 
     def available_models(self) -> list[AvailableModel]:
+        """Every currently-selectable OpenRouter model with a fixed per-token
+        rate — excludes the catalog's variable/auto-routing meta-models
+        (e.g. an "auto" router that picks its own underlying model per
+        request), since those have no fixed price to show and aren't a real
+        pinned model choice for a task category."""
         return [
             AvailableModel(
-                model_id=str(m["model_id"]),
-                label=str(m["label"]),
-                input_per_1m=float(m["input"]),
-                output_per_1m=float(m["output"]),
+                model_id=m.id,
+                label=m.name,
+                input_per_1m=float(m.input_per_million),
+                output_per_1m=float(m.output_per_million)
+                if m.output_per_million is not None
+                else 0.0,
             )
-            for m in KNOWN_MODELS
+            for m in model_catalog.get_catalog()
+            if m.input_per_million is not None
         ]
