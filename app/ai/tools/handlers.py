@@ -18,6 +18,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import AppError
 from app.models.client import Client
 from app.models.enums import (
     ClientCapability,
@@ -37,9 +38,14 @@ from app.schemas.user import UserUpdate
 from app.services.assignment_service import AssignmentService
 from app.services.client_service import ClientService
 from app.services.plan_service import PlanService
-from app.services.proposal_service import ProposalService, StagedOperation
+from app.services.proposal_service import ProposalService, StagedBatch, StagedOperation
 
 _MAX_SEARCH_RESULTS = 10
+#: Safety cap on how many tasks one bulk propose_* call may stage — matches
+#: this codebase's "bound all inputs/outputs" house rule. A genuinely bigger
+#: change should be narrowed by the model (a tighter range/filter) or split
+#: across several calls, not staged as one unbounded batch.
+_MAX_BULK_MATCHES = 100
 
 
 def _user_brief(u: User) -> dict:
@@ -65,6 +71,43 @@ def _task_brief(t: PlanTask) -> dict:
 # --------------------------------------------------------------------------- #
 
 
+def _resolve_date_window(
+    *, on_date: str | None, start_date: str | None, end_date: str | None
+) -> tuple[date | None, date | None]:
+    """Shared by every task-search/bulk tool: a single named day (on_date) or
+    a real range (start_date+end_date, either edge optional meaning "open
+    ended" is NOT supported here — both must be given together, since an
+    unbounded range would defeat the whole point of the bulk-size cap)."""
+    if on_date:
+        day = date.fromisoformat(on_date)
+        return day, day
+    if start_date or end_date:
+        if not (start_date and end_date):
+            raise ValueError("Provide both start_date and end_date together for a range.")
+        start, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
+        if end < start:
+            raise ValueError("end_date must be on or after start_date.")
+        return start, end
+    return None, None
+
+
+def _apply_assignee_filter(
+    rows: list[PlanTask], *, assignee_id: str | None, assigned_only: bool
+) -> list[PlanTask]:
+    """``assignee_id`` narrows to one specific person (resolve via
+    search_users first); ``assigned_only`` narrows to "has ANY assignee" —
+    the filter a request like "assigned to someone" / "anyone assigned" /
+    "only assigned tasks" needs, distinct from any one person. Combining both
+    means "assigned to this specific person" (assigned_only is then
+    redundant but harmless). Neither set = no assignee filtering at all."""
+    if assignee_id:
+        wanted = uuid.UUID(assignee_id)
+        rows = [r for r in rows if r.assignee_id == wanted]
+    elif assigned_only:
+        rows = [r for r in rows if r.assignee_id is not None]
+    return rows
+
+
 def search_plan_tasks(
     db: Session,
     client_id: uuid.UUID,
@@ -73,27 +116,33 @@ def search_plan_tasks(
     query: str | None = None,
     status: str | None = None,
     on_date: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    assignee_id: str | None = None,
+    assigned_only: bool = False,
     include_archived: bool = False,
     limit: int = 10,
 ) -> dict:
     plans = PlanService(db)
-    on = date.fromisoformat(on_date) if on_date else None
+    start, end = _resolve_date_window(on_date=on_date, start_date=start_date, end_date=end_date)
     rows, total = plans.tasks.list_for_client(
         client_id,
         status=TaskStatus(status) if status else None,
-        start=on,
-        end=on,
-        include_undated=on is None,
+        start=start,
+        end=end,
+        include_undated=start is None,
         include_archived=include_archived,
         offset=0,
-        limit=200,  # over-fetch, then narrow by title below; still a small bounded page
+        limit=_MAX_BULK_MATCHES + 1,  # over-fetch, then narrow by title below
     )
     if query:
         q = query.lower()
         rows = [r for r in rows if q in r.title.lower()]
+    rows = _apply_assignee_filter(rows, assignee_id=assignee_id, assigned_only=assigned_only)
     capped = rows[: min(limit, _MAX_SEARCH_RESULTS)]
+    narrowed = bool(query or start or assignee_id or assigned_only)
     return {
-        "total_matching": len(rows) if (query or on_date) else total,
+        "total_matching": len(rows) if narrowed else total,
         "tasks": [_task_brief(r) for r in capped],
     }
 
@@ -173,9 +222,7 @@ def get_editable_schema(_db: Session, _client_id: uuid.UUID, _user: User) -> dic
     }
 
 
-def search_knowledge_base(
-    db: Session, client_id: uuid.UUID, _user: User, *, query: str
-) -> dict:
+def search_knowledge_base(db: Session, client_id: uuid.UUID, _user: User, *, query: str) -> dict:
     """Semantic search over this client's own indexed knowledge (brand voice,
     goals, compliance rules, onboarding answers, uploaded documents) — call
     this to answer any question about the client rather than guessing. Hard
@@ -349,6 +396,136 @@ def propose_add_plan_task_note(
     return ProposalService(db).stage_plan_task_add_note(
         client_id, user, uuid.UUID(task_id), PlanTaskNoteCreate(body=body)
     )
+
+
+def _resolve_bulk_task_ids(
+    db: Session,
+    client_id: uuid.UUID,
+    *,
+    task_ids: list[str] | None,
+    start_date: str | None,
+    end_date: str | None,
+    status: str | None,
+    query: str | None,
+    include_archived: bool,
+) -> list[uuid.UUID]:
+    """The scope for a bulk propose_* call — an explicit id list, or every
+    task matching a date range (+ optional narrowing), capped at
+    _MAX_BULK_MATCHES so one tool call can never stage an unbounded batch."""
+    if task_ids:
+        return [uuid.UUID(t) for t in task_ids]
+    start, end = _resolve_date_window(on_date=None, start_date=start_date, end_date=end_date)
+    if start is None:
+        raise ValueError("Provide either task_ids or both start_date and end_date.")
+    plans = PlanService(db)
+    rows, _total = plans.tasks.list_for_client(
+        client_id,
+        status=TaskStatus(status) if status else None,
+        start=start,
+        end=end,
+        include_undated=False,
+        include_archived=include_archived,
+        offset=0,
+        limit=_MAX_BULK_MATCHES + 1,
+    )
+    if query:
+        q = query.lower()
+        rows = [r for r in rows if q in r.title.lower()]
+    if len(rows) > _MAX_BULK_MATCHES:
+        raise ValueError(
+            f"That range matches {len(rows)} tasks, more than the {_MAX_BULK_MATCHES}-task "
+            "bulk-operation limit — narrow the date range or add a query/status filter, "
+            "then try again."
+        )
+    return [r.id for r in rows]
+
+
+def propose_bulk_update_plan_tasks(
+    db: Session,
+    client_id: uuid.UUID,
+    user: User,
+    *,
+    task_ids: list[str] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    query: str | None = None,
+    status: str | None = None,
+    include_archived: bool = False,
+    new_status: str | None = None,
+    priority: str | None = None,
+    category: str | None = None,
+    archived: bool | None = None,
+) -> StagedBatch:
+    fields: dict[str, object] = {}
+    if new_status is not None:
+        fields["status"] = TaskStatus(new_status)
+    if priority is not None:
+        fields["priority"] = TaskPriority(priority)
+    if category is not None:
+        fields["category"] = TaskCategory(category)
+    if archived is not None:
+        fields["archived"] = archived
+    if not fields:
+        raise ValueError(
+            "Provide at least one field to change: new_status, priority, category, or archived."
+        )
+    ids = _resolve_bulk_task_ids(
+        db,
+        client_id,
+        task_ids=task_ids,
+        start_date=start_date,
+        end_date=end_date,
+        status=status,
+        query=query,
+        include_archived=include_archived,
+    )
+    if not ids:
+        raise ValueError("No tasks matched that scope — nothing to change.")
+    data = PlanTaskUpdate(**fields)
+    svc = ProposalService(db)
+    operations: list[StagedOperation] = []
+    skipped: list[dict] = []
+    for task_id in ids:
+        try:
+            operations.append(svc.stage_plan_task_update(client_id, user, task_id, data))
+        except AppError as exc:
+            skipped.append({"task_id": str(task_id), "reason": exc.message})
+    return StagedBatch(operations=operations, skipped=skipped)
+
+
+def propose_bulk_delete_plan_tasks(
+    db: Session,
+    client_id: uuid.UUID,
+    user: User,
+    *,
+    task_ids: list[str] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    query: str | None = None,
+    status: str | None = None,
+    include_archived: bool = False,
+) -> StagedBatch:
+    ids = _resolve_bulk_task_ids(
+        db,
+        client_id,
+        task_ids=task_ids,
+        start_date=start_date,
+        end_date=end_date,
+        status=status,
+        query=query,
+        include_archived=include_archived,
+    )
+    if not ids:
+        raise ValueError("No tasks matched that scope — nothing to delete.")
+    svc = ProposalService(db)
+    operations: list[StagedOperation] = []
+    skipped: list[dict] = []
+    for task_id in ids:
+        try:
+            operations.append(svc.stage_plan_task_delete(client_id, user, task_id))
+        except AppError as exc:
+            skipped.append({"task_id": str(task_id), "reason": exc.message})
+    return StagedBatch(operations=operations, skipped=skipped)
 
 
 def propose_assign_user_to_client(

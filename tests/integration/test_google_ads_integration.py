@@ -62,6 +62,9 @@ def fake_google(monkeypatch):
         # customer_client (manager-linked accounts) — none in this fixture.
         return []
 
+    async def customer_name(self, token, customer_id):
+        return {"1234567890": "Acme Ads Account"}.get(customer_id)
+
     async def no_insights_yet(self, access_token, customer_id, *, login_customer_id=None, days=90):
         # oauth/complete auto-syncs immediately once an account is bound —
         # default to "nothing yet" so connect-only tests stay hermetic (no
@@ -83,6 +86,7 @@ def fake_google(monkeypatch):
     monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(GoogleAdsClient, "list_accessible_customers", list_accessible_customers)
     monkeypatch.setattr(GoogleAdsClient, "list_customer_clients", no_linked_clients)
+    monkeypatch.setattr(GoogleAdsClient, "get_customer_name", customer_name)
     monkeypatch.setattr(GoogleAdsClient, "fetch_daily_insights", no_insights_yet)
     monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_hierarchy", no_hierarchy)
     monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_metrics_daily", no_campaign_metrics)
@@ -102,6 +106,9 @@ def fake_google_multi(monkeypatch):
     async def no_linked_clients(self, token, manager_customer_id):
         return []
 
+    async def customer_name(self, token, customer_id):
+        return {"1111111111": "Alpha Co Ads", "2222222222": "Beta Co Ads"}.get(customer_id)
+
     async def no_insights_yet(self, access_token, customer_id, *, login_customer_id=None, days=90):
         return []
 
@@ -119,6 +126,7 @@ def fake_google_multi(monkeypatch):
     monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(GoogleAdsClient, "list_accessible_customers", list_accessible_customers)
     monkeypatch.setattr(GoogleAdsClient, "list_customer_clients", no_linked_clients)
+    monkeypatch.setattr(GoogleAdsClient, "get_customer_name", customer_name)
     monkeypatch.setattr(GoogleAdsClient, "fetch_daily_insights", no_insights_yet)
     monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_hierarchy", no_hierarchy)
     monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_metrics_daily", no_campaign_metrics)
@@ -192,7 +200,7 @@ def test_single_account_still_requires_explicit_pick(
     body = resp.json()
     assert body["status"] == "connected"
     assert body["external_account_id"] is None
-    assert body["available_accounts"] == [{"id": "1234567890", "name": "1234567890"}]
+    assert body["available_accounts"] == [{"id": "1234567890", "name": "Acme Ads Account"}]
 
 
 def test_operator_supplied_login_customer_id_is_stored_and_used(
@@ -340,8 +348,8 @@ def test_multiple_accounts_connect_without_binding_one(
     assert body["status"] == "connected"
     assert body["external_account_id"] is None
     assert body["available_accounts"] == [
-        {"id": "1111111111", "name": "1111111111"},
-        {"id": "2222222222", "name": "2222222222"},
+        {"id": "1111111111", "name": "Alpha Co Ads"},
+        {"id": "2222222222", "name": "Beta Co Ads"},
     ]
 
 
@@ -379,6 +387,9 @@ def test_manager_linked_client_account_is_discoverable(
         assert manager_customer_id == "7516589748"
         return [{"id": "2935574193", "name": "Family First Roofing of Florida", "manager": False}]
 
+    async def customer_name(self, token, customer_id):
+        return {"7516589748": "Our Agency Manager Account"}.get(customer_id)
+
     async def no_insights_yet(self, access_token, customer_id, *, login_customer_id=None, days=90):
         return []
 
@@ -396,6 +407,7 @@ def test_manager_linked_client_account_is_discoverable(
     monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(GoogleAdsClient, "list_accessible_customers", list_accessible_customers)
     monkeypatch.setattr(GoogleAdsClient, "list_customer_clients", list_customer_clients)
+    monkeypatch.setattr(GoogleAdsClient, "get_customer_name", customer_name)
     monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_hierarchy", no_hierarchy)
     monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_metrics_daily", no_campaign_metrics)
     monkeypatch.setattr(GoogleAdsClient, "fetch_recommendations", no_recommendations)
@@ -404,8 +416,11 @@ def test_manager_linked_client_account_is_discoverable(
     cid = _client_id(client, admin_headers)
     resp = _complete(client, admin_headers, cid)
     assert resp.status_code == 200, resp.text
-    ids = {a["id"] for a in resp.json()["available_accounts"]}
-    assert ids == {"7516589748", "2935574193"}
+    accounts = {a["id"]: a["name"] for a in resp.json()["available_accounts"]}
+    assert accounts == {
+        "7516589748": "Our Agency Manager Account",
+        "2935574193": "Family First Roofing of Florida",
+    }
 
     resp = client.post(
         f"{API}/clients/{cid}/integrations/google_ads/oauth/select-account",

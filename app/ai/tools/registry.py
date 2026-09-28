@@ -65,10 +65,16 @@ _TOOLS: list[ToolSpec] = [
             "of those needs a real task_id and none of them may be guessed. Whenever "
             "the user refers to something that already exists ('this plan', 'that "
             "task', 'the one for the 26th', 'the launch post'), call this first — use "
-            "on_date when they name or imply a date, query when they name/describe it. "
-            "Try ONE well-targeted call; if it doesn't return a single clear match, "
-            "call request_clarification immediately rather than retrying with "
-            "different search terms."
+            "on_date for a single named day, start_date+end_date for anything wider "
+            "(a week, a month, several months, a year, an explicit range — resolve the "
+            "user's wording into concrete dates yourself), query when they name/describe "
+            "it. Also useful to preview how many tasks a range actually covers before "
+            "calling a bulk propose tool on that same range. total_matching in the "
+            "response is the real total count even when more results exist than fit in "
+            "the returned list. Try ONE well-targeted call; if it doesn't return a clear "
+            "match (or, for a range, if the count is surprising), call "
+            "request_clarification immediately rather than retrying with different "
+            "search terms."
         ),
         parameters=_obj(
             {
@@ -79,9 +85,23 @@ _TOOLS: list[ToolSpec] = [
                     "description": (
                         "YYYY-MM-DD. Finds task(s) scheduled on this exact date (start_date "
                         "through due_date span includes it) — use this whenever the user "
-                        "names or implies a specific date (\"the plan for the 26th\", "
-                        "\"tomorrow's post\")."
+                        'names or implies a single specific date ("the plan for the 26th", '
+                        "\"tomorrow's post\"). Don't combine with start_date/end_date."
                     ),
+                },
+                "start_date": {
+                    "type": "string",
+                    "description": (
+                        "YYYY-MM-DD. Start of a date/week/month/year range — pair with "
+                        "end_date. Use this (not on_date) for anything wider than a single "
+                        "day: a week, a specific week range, a month, several months, a "
+                        "month range, a year, several years, a year range, or an explicit "
+                        "start/end the user gave you."
+                    ),
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD. End of the range (inclusive) — pair with start_date.",
                 },
                 "include_archived": {"type": "boolean", "default": False},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 10},
@@ -125,8 +145,8 @@ _TOOLS: list[ToolSpec] = [
         description=(
             "Search this client's own knowledge — brand voice, goals, compliance "
             "rules, onboarding answers, uploaded documents. Call this to answer any "
-            "question about the client (\"what's our brand voice\", \"what are we not "
-            "allowed to say\", \"what are this client's goals\") instead of guessing "
+            'question about the client ("what\'s our brand voice", "what are we not '
+            'allowed to say", "what are this client\'s goals") instead of guessing '
             "or answering from general knowledge."
         ),
         parameters=_obj({"query": {"type": "string"}}, required=["query"]),
@@ -139,7 +159,7 @@ _TOOLS: list[ToolSpec] = [
         description=(
             "Real ad-performance numbers for this client (spend, impressions, clicks, "
             "leads, conversions, revenue, ROAS) over a trailing window. Call this for "
-            "\"how are my ads doing\" / \"what's our spend\" style questions."
+            '"how are my ads doing" / "what\'s our spend" style questions.'
         ),
         parameters=_obj(
             {
@@ -185,8 +205,8 @@ _TOOLS: list[ToolSpec] = [
         name="propose_create_plan_task",
         description=(
             "Draft a BRAND NEW task that does not exist yet. Never use this when the "
-            "user is referring to something that already exists (\"this plan\", \"that "
-            "task\", \"the one for the 26th\") — call search_plan_tasks first, and if a "
+            'user is referring to something that already exists ("this plan", "that '
+            'task", "the one for the 26th") — call search_plan_tasks first, and if a '
             "matching task is found, use propose_update_plan_task / "
             "propose_assign_user_to_plan_task on its id instead. Requires human "
             "approval before it exists.\n\n"
@@ -326,6 +346,108 @@ _TOOLS: list[ToolSpec] = [
         handler=handlers.propose_add_plan_task_note,
         progress_label="Drafting the note",
     ),
+    ToolSpec(
+        name="propose_bulk_update_plan_tasks",
+        description=(
+            "Change status, priority, category, and/or the archived flag on EVERY task "
+            "that matches a scope, in one go — for requests like 'archive everything in "
+            "September', 'mark this week's tasks done', or 'move all of Q3's tasks to "
+            "high priority'. Each match becomes its own drafted change in the SAME "
+            "proposal, so the user approves them all together — this is not one task at "
+            "a time.\n\n"
+            "Give the scope as EITHER an explicit task_ids list (e.g. from a prior "
+            "search_plan_tasks call, when the user pointed at specific items) OR "
+            "start_date+end_date (resolve the user's wording — a week, a month, several "
+            "months, a year, an explicit range — into concrete dates yourself), "
+            "optionally narrowed with query/status. Don't combine task_ids with a date "
+            "range in the same call.\n\n"
+            "This tool never rewrites title/description/requirements in bulk (those are "
+            "per-item by nature) — only status/priority/category/archived. For several "
+            "separate, non-contiguous periods ('September and November, not October'), "
+            "call this once per period in the same turn; both batches still land in one "
+            "proposal."
+        ),
+        parameters=_obj(
+            {
+                "task_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Explicit task ids to change, if you already resolved them.",
+                },
+                "start_date": {"type": "string", "description": "YYYY-MM-DD — range start."},
+                "end_date": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD — range end (inclusive).",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Optional: only tasks whose title contains this, within the range.",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["todo", "in_progress", "blocked", "done"],
+                    "description": "Optional: only tasks currently in this status.",
+                },
+                "include_archived": {"type": "boolean", "default": False},
+                "new_status": {
+                    "type": "string",
+                    "enum": ["todo", "in_progress", "blocked", "done"],
+                },
+                "priority": {"type": "string", "enum": ["low", "medium", "high", "urgent"]},
+                "category": {
+                    "type": "string",
+                    "enum": [
+                        "strategy",
+                        "creative",
+                        "ads",
+                        "content",
+                        "analytics",
+                        "compliance",
+                        "admin",
+                    ],
+                },
+                "archived": {"type": "boolean"},
+            }
+        ),
+        kind="write",
+        handler=handlers.propose_bulk_update_plan_tasks,
+        progress_label="Drafting bulk changes",
+    ),
+    ToolSpec(
+        name="propose_bulk_delete_plan_tasks",
+        description=(
+            "Permanently delete EVERY task that matches a scope, in one go — for "
+            "requests like 'delete the whole plan for September' or 'remove everything "
+            "from Sept 10 to Sept 25'. This cannot be undone once approved. Each match "
+            "becomes its own drafted deletion in the SAME proposal, so the user approves "
+            "them all together — this is not one task at a time. Only use this for a "
+            "genuine delete request; if the user said 'archive'/'hide' instead, use "
+            "propose_bulk_update_plan_tasks with archived=true.\n\n"
+            "Give the scope as EITHER an explicit task_ids list OR start_date+end_date "
+            "(resolve the user's wording into concrete dates yourself), optionally "
+            "narrowed with query/status. Consider running search_plan_tasks with the "
+            "same range first to confirm the count with the user before deleting, "
+            "especially for a wide or vague scope ('everything', 'the whole month'). For "
+            "several separate, non-contiguous periods, call this once per period in the "
+            "same turn."
+        ),
+        parameters=_obj(
+            {
+                "task_ids": {"type": "array", "items": {"type": "string"}},
+                "start_date": {"type": "string", "description": "YYYY-MM-DD — range start."},
+                "end_date": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD — range end (inclusive).",
+                },
+                "query": {"type": "string"},
+                "status": {"type": "string", "enum": ["todo", "in_progress", "blocked", "done"]},
+                "include_archived": {"type": "boolean", "default": False},
+            }
+        ),
+        kind="write",
+        handler=handlers.propose_bulk_delete_plan_tasks,
+        progress_label="Drafting the bulk delete",
+    ),
     # Deliberately NOT registered as tools, even though the underlying
     # ProposalService methods exist and are tested: propose_assign_user_to_client
     # / propose_set_client_capabilities / propose_unassign_user_from_client /
@@ -425,8 +547,15 @@ def progress_label_for(name: str) -> str:
     return (spec.progress_label if spec and spec.progress_label else None) or "Working"
 
 
-def openai_tool_definitions() -> list[dict[str, Any]]:
-    """The ``tools=`` payload for ``LLMClient.complete_with_tools``."""
+def openai_tool_definitions(*, include_write: bool = True) -> list[dict[str, Any]]:
+    """The ``tools=`` payload for ``LLMClient.complete_with_tools``.
+
+    ``include_write=False`` (a read-only user — see ``CommandAgent``) omits
+    every ``kind="write"`` tool entirely, so the model is never even offered a
+    mutating action to call — the primary enforcement layer for read-only
+    access, not just a cosmetic filter (``CommandAgent._dispatch`` also
+    re-checks this defensively, but a tool that was never offered can't be
+    called through normal tool-calling in the first place)."""
     return [
         {
             "type": "function",
@@ -437,4 +566,5 @@ def openai_tool_definitions() -> list[dict[str, Any]]:
             },
         }
         for t in _TOOLS
+        if include_write or t.kind != "write"
     ]

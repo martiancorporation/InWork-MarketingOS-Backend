@@ -58,6 +58,12 @@ _CUSTOMER_CLIENT_GAQL = (
     "FROM customer_client WHERE customer_client.level > 0"
 )
 
+# ``listAccessibleCustomers`` (list_accessible_customers) only ever returns
+# bare customer ids, no display name — this is the one extra call needed to
+# put a real, human-readable name next to that id in the connect-flow account
+# picker instead of showing the same digits twice.
+_CUSTOMER_NAME_GAQL = "SELECT customer.descriptive_name FROM customer LIMIT 1"
+
 # Platform Insights hierarchy — mirrors what MetaClient.fetch_campaign_hierarchy
 # pulls (campaign -> ad group -> ad), raw GAQL rows returned verbatim;
 # normalization happens one layer up in platform_insight_service.py.
@@ -141,6 +147,24 @@ class GoogleAdsClient:
                 }
             )
         return out
+
+    async def get_customer_name(self, access_token: str, customer_id: str) -> str | None:
+        """The account's own display name (what shows in the Google Ads UI) —
+        for a directly-accessible account, not a manager-linked one (see
+        ``list_customer_clients``, which already gets a name for those for
+        free). Queried directly against the account itself, no
+        ``login-customer-id`` needed. Best-effort: ``None`` on any failure
+        rather than breaking the connect flow over a cosmetic label."""
+        try:
+            rows = await self._search(
+                access_token, customer_id, _CUSTOMER_NAME_GAQL, login_customer_id=None
+            )
+        except AppError:
+            return None
+        if not rows:
+            return None
+        customer = rows[0].get("customer") or {}
+        return customer.get("descriptiveName") or customer.get("descriptive_name")
 
     async def fetch_daily_insights(
         self,

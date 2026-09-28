@@ -117,16 +117,14 @@ def _select_ad_account(accounts: list[dict], requested: str | None) -> dict | No
     return None
 
 
-def _select_google_account(accounts: list[str], requested: str | None) -> str | None:
+def _select_google_account(accounts: list[dict], requested: str | None) -> dict | None:
     """Pick which Google account (Ads customer id / GA4 property / Search
     Console site) to bind — same "never auto-bind" contract as
-    ``_select_ad_account``, just over a plain id list instead of dicts (Google's
-    discovery calls don't return display names).
-    """
+    ``_select_ad_account``, now over the same ``{"id", "name"}`` shape."""
     if requested:
         want = requested.replace("-", "")
         for acc in accounts:
-            if acc.replace("-", "") == want:
+            if str(acc["id"]).replace("-", "") == want:
                 return acc
         raise BadRequestError(
             "The requested Google account isn't accessible to the authorized user."
@@ -440,13 +438,13 @@ class IntegrationService:
         else:
             access = await self._google_access_token(integration)
             accounts = await self._list_google_accounts(key, access)
-            account_id = _select_google_account(accounts, ad_account_id)
-            if account_id is None:
+            account = _select_google_account(accounts, ad_account_id)
+            if account is None:
                 raise BadRequestError(
                     "The requested Google account isn't accessible to the authorized user."
                 )
-            integration.external_account_id = account_id
-            integration.account_label = account_id
+            integration.external_account_id = account["id"]
+            integration.account_label = account.get("name") or account["id"]
             if key == IntegrationKey.google_ads:
                 integration.login_customer_id = login_customer_id
         self.db.commit()
@@ -694,19 +692,19 @@ class IntegrationService:
             raise BadRequestError("Google did not return an access token.")
         refresh = tokens.get("refresh_token")
         accounts = await self._list_google_accounts(key, access)
-        account_id = _select_google_account(accounts, ad_account_id)
+        account = _select_google_account(accounts, ad_account_id)
         integration.access_token_encrypted = self.cipher.encrypt(access)
         integration.refresh_token_encrypted = (
             self.cipher.encrypt(refresh) if refresh else integration.refresh_token_encrypted
         )
         integration.token_expires_at = self._expiry(tokens.get("expires_in"))
         integration.scopes = _GOOGLE_SCOPES[key]
-        if account_id is None:
+        if account is None:
             integration.external_account_id = None
             integration.account_label = None
-            return [{"id": a, "name": a} for a in accounts]
-        integration.external_account_id = account_id
-        integration.account_label = account_id
+            return accounts
+        integration.external_account_id = account["id"]
+        integration.account_label = account.get("name") or account["id"]
         # Google Ads only: the operator supplies this per real account (which
         # accounts sit under an MCC is client-specific, not derivable via the
         # API) — see app/models/integration.py.
@@ -714,22 +712,27 @@ class IntegrationService:
             integration.login_customer_id = login_customer_id
         return []
 
-    async def _list_google_accounts(self, key: IntegrationKey, access: str) -> list[str]:
+    async def _list_google_accounts(self, key: IntegrationKey, access: str) -> list[dict]:
         """Every account/property/site the token can read for ``key`` — no
-        picking here, see ``_select_google_account``."""
+        picking here, see ``_select_google_account``. Always ``{"id", "name"}``
+        per entry (GA4/Search Console have no separate display name to fetch,
+        so ``name`` is just the id there — kept uniform so every caller can
+        treat this the same way ``_select_ad_account``'s Meta accounts are)."""
         if key == IntegrationKey.google_ads:
             return await self._list_ads_family_customers(self.google_ads, access)
         if key == IntegrationKey.google_lsa:
             return await self._list_ads_family_customers(self.lsa_client, access)
         if key == IntegrationKey.ga4:
-            return await self.ga4_client.list_properties(access)
+            ids = await self.ga4_client.list_properties(access)
+            return [{"id": i, "name": i} for i in ids]
         if key == IntegrationKey.search_console:
-            return await self.search_console.list_sites(access)
+            ids = await self.search_console.list_sites(access)
+            return [{"id": i, "name": i} for i in ids]
         return []  # pragma: no cover - guarded by _require_real
 
     async def _list_ads_family_customers(
         self, ads_api_client: GoogleAdsClient | LsaClient, access: str
-    ) -> list[str]:
+    ) -> list[dict]:
         """Shared by Google Ads and LSA — both ride the same underlying Ads
         API account model. ``listAccessibleCustomers`` only returns accounts
         the OAuth user has *direct* access to — a manager account's linked
@@ -737,10 +740,19 @@ class IntegrationService:
         Ads UI, not via user-level access) don't show up there at all. Expand
         every directly-accessible account through ``customer_client`` so a
         manager-linked client account is selectable too, not just the manager
-        account itself."""
+        account itself.
+
+        Returns ``{"id", "name"}`` per account. A direct account has no name
+        in ``listAccessibleCustomers``'s response at all, so it costs one
+        extra lookup each (best-effort — falls back to the bare id if that
+        lookup fails); a manager-linked child account's name comes for free
+        from ``list_customer_clients`` and was previously being discarded."""
         direct = await ads_api_client.list_accessible_customers(access)
-        ids = list(direct)
+        accounts: list[dict] = []
         seen = set(direct)
+        for cid in direct:
+            name = await ads_api_client.get_customer_name(access, cid)
+            accounts.append({"id": cid, "name": name or cid})
         for manager_id in direct:
             try:
                 children = await ads_api_client.list_customer_clients(access, manager_id)
@@ -753,8 +765,8 @@ class IntegrationService:
                 cid = child.get("id")
                 if cid and cid not in seen:
                     seen.add(cid)
-                    ids.append(cid)
-        return ids
+                    accounts.append({"id": cid, "name": child.get("name") or cid})
+        return accounts
 
     async def _complete_linkedin(self, integration: Integration, code: str) -> None:
         tokens = await self.linkedin_oauth.exchange_code(code)

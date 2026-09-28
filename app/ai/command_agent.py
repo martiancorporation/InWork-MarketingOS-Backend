@@ -3,15 +3,24 @@
 Runs one chat turn: feeds the user's message, recent history, and the tool
 registry (``app/ai/tools/registry.py``) to the LLM; executes read tools
 inline; and accumulates any write-tool results — already dry-run validated
-``StagedOperation``s, see ``ProposalService`` — into a draft. If the turn
-produced at least one staged operation, the caller (``AssistantService``)
-persists them as one ``ChangeProposal`` via ``ProposalService.create_proposal``.
-Nothing is written to the database before that, and ``ProposalService.approve``
-is the only path that ever mutates data — this module never calls it, and it
-isn't in the tool list the model is given.
+``StagedOperation``s (or a ``StagedBatch`` of several, for a date-range bulk
+tool), see ``ProposalService`` — into a draft. If the turn produced at least
+one staged operation, the caller (``AssistantService``) persists them as one
+``ChangeProposal`` via ``ProposalService.create_proposal``. Nothing is written
+to the database before that, and ``ProposalService.approve`` is the only path
+that ever mutates data — this module never calls it, and it isn't in the tool
+list the model is given.
 
 Degrades to a deterministic, no-tools reply when the AI provider isn't
 configured — the same posture every other ``app/ai`` feature takes.
+
+Read-only enforcement (``UserRole.user``): every write tool is filtered out of
+what the model is even offered (``openai_tool_definitions(include_write=...)``)
+AND re-checked defensively at dispatch (``_dispatch``) — never trust "the
+model wasn't shown the tool" as the only gate for something this sensitive.
+``ProposalService.approve``/``reject`` carry the matching backstop on the
+approval side, so a read-only user is blocked at every layer: staging,
+dispatch, and approval.
 """
 
 from __future__ import annotations
@@ -36,9 +45,10 @@ from app.ai.tools.registry import (
 from app.core.exceptions import AppError
 from app.integrations.llm.base import LLMClient, ToolCall
 from app.models.client import Client
+from app.models.enums import UserRole
 from app.models.user import User
 from app.prompts.loader import load_prompt, render
-from app.services.proposal_service import StagedOperation
+from app.services.proposal_service import StagedBatch, StagedOperation
 from app.utils.timezones import client_local_today
 
 logger = logging.getLogger("app.ai.command_agent")
@@ -67,6 +77,29 @@ _ROUND_CAP_REPLY = (
     "I wasn't able to finish working through that in one go — could you narrow down "
     "the request a little?"
 )
+#: Injected into the system prompt (see command_agent/system.txt's
+#: {read_only_notice} slot) only for role == UserRole.user. The actual
+#: enforcement is the write tools never being offered/dispatched (below) —
+#: this just lets the model explain that plainly instead of getting stuck or
+#: hallucinating an apology when it has no matching tool to reach for.
+_READ_ONLY_SYSTEM_NOTICE = (
+    "IMPORTANT: this user's account has READ-ONLY access on this client. They can chat, "
+    "ask questions, and see any information you can look up, but they cannot create, "
+    "update, delete, assign, approve, or reject anything — there are no such tools "
+    "available in this conversation at all. If they ask you to make any change, do not "
+    "attempt it or search for a way around it — just clearly and politely explain that "
+    "their account has read-only access and that an admin or manager on this client "
+    "needs to make that change, then offer to help with anything read-only instead."
+)
+#: Returned directly by _dispatch as a defensive backstop if a write tool is
+#: ever somehow called for a read-only user (it should never even be offered —
+#: see run_turn/run_turn_stream's `openai_tool_definitions(include_write=...)`).
+_READ_ONLY_TOOL_ERROR = {
+    "error": (
+        "This account has read-only access and cannot make this change. "
+        "An admin or manager on this client needs to do this instead."
+    )
+}
 
 
 @dataclass
@@ -101,12 +134,19 @@ class CommandAgent:
         self.user = user
         self.ai = ai_client
 
+    @property
+    def _is_read_only(self) -> bool:
+        """``UserRole.user`` is strictly read-only through Ask AI, regardless
+        of any per-client capability they hold for the manual UI — see the
+        module docstring. Admins and managers are unaffected."""
+        return self.user.role == UserRole.user
+
     async def run_turn(self, content: str, *, history: list[tuple[str, str]]) -> CommandTurnResult:
         if not self.ai.is_configured:
             return CommandTurnResult(reply=_NOT_CONFIGURED_REPLY)
 
         messages = self._build_messages(content, history)
-        tools = openai_tool_definitions()
+        tools = openai_tool_definitions(include_write=not self._is_read_only)
         staged: list[StagedOperation] = []
 
         for _round in range(_MAX_ROUNDS):
@@ -133,7 +173,10 @@ class CommandAgent:
                     messages.append(_tool_message(call.id, {"acknowledged": True}))
                     continue
                 result = self._dispatch(call.name, call.arguments)
-                if isinstance(result, StagedOperation):
+                if isinstance(result, StagedBatch):
+                    staged.extend(result.operations)
+                    messages.append(_tool_message(call.id, _staged_batch_tool_result(result)))
+                elif isinstance(result, StagedOperation):
                     staged.append(result)
                     messages.append(_tool_message(call.id, _staged_tool_result(result)))
                 else:
@@ -155,11 +198,13 @@ class CommandAgent:
         ``CommandTurnResult`` ``run_turn`` would have returned (same staged
         operations, same reply text) — a caller can persist it identically."""
         if not self.ai.is_configured:
-            yield CommandStreamEvent(type="result", result=CommandTurnResult(reply=_NOT_CONFIGURED_REPLY))
+            yield CommandStreamEvent(
+                type="result", result=CommandTurnResult(reply=_NOT_CONFIGURED_REPLY)
+            )
             return
 
         messages = self._build_messages(content, history)
-        tools = openai_tool_definitions()
+        tools = openai_tool_definitions(include_write=not self._is_read_only)
         staged: list[StagedOperation] = []
 
         for _round in range(_MAX_ROUNDS):
@@ -180,14 +225,16 @@ class CommandAgent:
             except AppError:
                 logger.warning("Command agent streaming LLM call failed", exc_info=True)
                 yield CommandStreamEvent(
-                    type="result", result=CommandTurnResult(reply=_PROVIDER_ERROR_REPLY, operations=staged)
+                    type="result",
+                    result=CommandTurnResult(reply=_PROVIDER_ERROR_REPLY, operations=staged),
                 )
                 return
 
             round_content = "".join(content_parts) or None
             if not round_tool_calls:
                 yield CommandStreamEvent(
-                    type="result", result=CommandTurnResult(reply=round_content or "", operations=staged)
+                    type="result",
+                    result=CommandTurnResult(reply=round_content or "", operations=staged),
                 )
                 return
 
@@ -199,9 +246,14 @@ class CommandAgent:
                     clarification = str(call.arguments.get("question") or "Could you clarify that?")
                     messages.append(_tool_message(call.id, {"acknowledged": True}))
                     continue
-                yield CommandStreamEvent(type="tool_progress", tool_name=progress_label_for(call.name))
+                yield CommandStreamEvent(
+                    type="tool_progress", tool_name=progress_label_for(call.name)
+                )
                 result = self._dispatch(call.name, call.arguments)
-                if isinstance(result, StagedOperation):
+                if isinstance(result, StagedBatch):
+                    staged.extend(result.operations)
+                    messages.append(_tool_message(call.id, _staged_batch_tool_result(result)))
+                elif isinstance(result, StagedOperation):
                     staged.append(result)
                     messages.append(_tool_message(call.id, _staged_tool_result(result)))
                 else:
@@ -224,6 +276,7 @@ class CommandAgent:
             {
                 "client_name": client.name if client else "this client",
                 "today": client_local_today(client.timezone if client else None).isoformat(),
+                "read_only_notice": _READ_ONLY_SYSTEM_NOTICE if self._is_read_only else "",
             },
         )
         messages: list[dict] = [{"role": "system", "content": system}]
@@ -232,10 +285,16 @@ class CommandAgent:
         messages.append({"role": "user", "content": content})
         return messages
 
-    def _dispatch(self, name: str, arguments: dict) -> dict | StagedOperation:
+    def _dispatch(self, name: str, arguments: dict) -> dict | StagedOperation | StagedBatch:
         spec = TOOLS.get(name)
         if spec is None or spec.handler is None:
             return {"error": f"Unknown tool '{name}'."}
+        if spec.kind == "write" and self._is_read_only:
+            # Defensive backstop — write tools aren't offered to a read-only
+            # user at all (see run_turn/run_turn_stream), so this should never
+            # actually trigger, but never trust "the model won't call a tool
+            # it wasn't shown" as the only gate for something this sensitive.
+            return _READ_ONLY_TOOL_ERROR
         try:
             return spec.handler(self.db, self.client_id, self.user, **arguments)
         except AppError as exc:
@@ -269,6 +328,21 @@ def _staged_tool_result(op: StagedOperation) -> dict:
             f"Drafted: {op.entity_label or op.entity_type} (pending human approval, not yet applied)"
         ),
     }
+
+
+def _staged_batch_tool_result(batch: StagedBatch) -> dict:
+    result = {
+        "staged": True,
+        "summary": (
+            f"Drafted {len(batch.operations)} change(s) across the matched items "
+            "(pending human approval, not yet applied — all in the same proposal)."
+        ),
+        "staged_count": len(batch.operations),
+    }
+    if batch.skipped:
+        result["skipped"] = batch.skipped
+        result["skipped_count"] = len(batch.skipped)
+    return result
 
 
 def _tool_message(call_id: str, payload: dict) -> dict:

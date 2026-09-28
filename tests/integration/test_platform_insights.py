@@ -346,6 +346,9 @@ def fake_google_ads_full(monkeypatch):
     async def no_linked_clients(self, token, manager_customer_id):
         return []
 
+    async def customer_name(self, token, customer_id):
+        return {"9990001111": "Brand Search Co."}.get(customer_id)
+
     async def no_insights_yet(self, access_token, customer_id, *, login_customer_id=None, days=90):
         return []
 
@@ -424,6 +427,7 @@ def fake_google_ads_full(monkeypatch):
     monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(GoogleAdsClient, "list_accessible_customers", list_accessible_customers)
     monkeypatch.setattr(GoogleAdsClient, "list_customer_clients", no_linked_clients)
+    monkeypatch.setattr(GoogleAdsClient, "get_customer_name", customer_name)
     monkeypatch.setattr(GoogleAdsClient, "fetch_daily_insights", no_insights_yet)
     monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_hierarchy", hierarchy)
     monkeypatch.setattr(GoogleAdsClient, "fetch_campaign_metrics_daily", campaign_metrics)
@@ -543,6 +547,9 @@ def fake_google_lsa_full(monkeypatch):
     async def no_linked_clients(self, token, manager_customer_id):
         return []
 
+    async def customer_name(self, token, customer_id):
+        return {"2336702039": "Tampa Bay LSA Account"}.get(customer_id)
+
     async def no_insights_yet(self, access_token, customer_id, *, days=90):
         return []
 
@@ -589,6 +596,7 @@ def fake_google_lsa_full(monkeypatch):
     monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(LsaClient, "list_accessible_customers", list_accessible_customers)
     monkeypatch.setattr(LsaClient, "list_customer_clients", no_linked_clients)
+    monkeypatch.setattr(LsaClient, "get_customer_name", customer_name)
     monkeypatch.setattr(LsaClient, "fetch_daily_insights", no_insights_yet)
     monkeypatch.setattr(LsaClient, "fetch_campaign_hierarchy", hierarchy)
     monkeypatch.setattr(LsaClient, "fetch_campaign_metrics_daily", campaign_metrics)

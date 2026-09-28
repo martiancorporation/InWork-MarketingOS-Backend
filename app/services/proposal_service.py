@@ -19,6 +19,12 @@ after the rollback that undoes it:
      transaction, writing one manual ``AuditLog`` row per operation. One final
      commit persists every mutated entity + every audit row + the proposal's
      ``completed`` status together.
+
+``UserRole.user`` (strictly read-only through Ask AI — see ``CommandAgent``)
+is blocked unconditionally at the very top of both ``approve`` and ``reject``,
+before anything else — the acting user is always re-derived from the
+authenticated session, never trusted from the proposal itself, so this can't
+be bypassed by a read-only user discovering someone else's proposal id.
   3. **Record failure** (only on a mid-loop exception) — the transaction-2
      rollback undoes every mutation and the audit rows, but also would drop
      the failure reason, so it's written in a fresh transaction 3.
@@ -80,6 +86,22 @@ class StagedOperation:
     base_snapshot: dict | None = None
     required_capability: ClientCapability | None = None
     requires_admin: bool = False
+
+
+@dataclass
+class StagedBatch:
+    """Several write-tool calls staged together as one unit — e.g. a
+    date-range bulk update/delete (see ``app/ai/tools/handlers.py``'s
+    ``propose_bulk_*`` tools). Each ``operations`` entry becomes its own
+    ``ProposedOperation`` in the same ``ChangeProposal``, exactly as if the
+    model had called the single-item tool once per match — approved/executed
+    together, in the same ``seq`` order, by the normal ``approve`` flow.
+    ``skipped`` records matches that couldn't be staged (id + why), so the
+    tool result — and therefore the model's reply — can be honest about a
+    partial batch instead of silently dropping some matches."""
+
+    operations: list[StagedOperation]
+    skipped: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -470,6 +492,8 @@ class ProposalService:
         self, client_id: uuid.UUID, proposal_id: uuid.UUID, *, user: User, reason: str | None = None
     ) -> ChangeProposal:
         self.clients.get_client(user, client_id)  # 404 if inaccessible
+        if user.role == UserRole.user:
+            raise ForbiddenError("Your account has read-only access and cannot reject changes.")
         proposal = self.get_proposal(client_id, proposal_id)
         if proposal.status != ProposalStatus.pending_approval:
             raise ConflictError("This proposal is no longer pending approval.")
@@ -493,6 +517,8 @@ class ProposalService:
         client) raises, matching every other endpoint's 404 contract.
         """
         self.clients.get_client(user, client_id)  # 404 if inaccessible; re-checked live
+        if user.role == UserRole.user:
+            raise ForbiddenError("Your account has read-only access and cannot approve changes.")
         proposal = self.get_proposal(client_id, proposal_id)
 
         # ---- phase 1: claim (its own committed transaction) ---- #

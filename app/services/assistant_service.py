@@ -26,14 +26,19 @@ from app.ai.features import AiFeature
 from app.ai.plan_chat_intent import PlanChatIntent, PlanChatIntentAgent
 from app.ai.tools import handlers as command_tool_handlers
 from app.ai.usage import AiUsageContext
-from app.core.exceptions import BadRequestError, NotFoundError, ServiceUnavailableError
+from app.core.exceptions import (
+    BadRequestError,
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from app.core.pagination import PaginationParams
 from app.integrations.embeddings import get_embedder
 from app.integrations.llm import get_llm_client
 from app.integrations.storage import Storage
 from app.models.ai import AiChat, AiChatMessage
 from app.models.client import Client
-from app.models.enums import AiRole
+from app.models.enums import AiRole, UserRole
 from app.models.user import User
 from app.repositories.ai_chat_repository import AiChatRepository
 from app.schemas.assistant import (
@@ -67,6 +72,17 @@ _MAX_LLM_HISTORY_MESSAGES = 40
 # is always on the real Content Calendar; the card just needs enough for the
 # manager to recognize what was drafted before approving.
 _MAX_PREVIEW_ITEMS = 8
+
+#: UserRole.user is strictly read-only through Ask AI (see CommandAgent's own
+#: tool-level gate, which handles the natural-language command path) — this
+#: is the equivalent gate for the OLDER, separate chat-drafted-content-plan
+#: flow (_maybe_handle_plan_request), which persists rows directly rather
+#: than going through ProposalService's stage/approve mechanism at all.
+_READ_ONLY_CONTENT_PLAN_REPLY = (
+    "Your account has read-only access on this client, so I can't draft or change "
+    "the content calendar — an admin or manager needs to do that. I'm happy to look "
+    "up existing plans, performance, or anything else for you."
+)
 
 
 @dataclass
@@ -434,7 +450,9 @@ class AssistantService:
                 "type": "done",
                 "message_id": str(response.message_id),
                 "content": response.reply,
-                "proposal": response.proposal.model_dump(mode="json") if response.proposal else None,
+                "proposal": response.proposal.model_dump(mode="json")
+                if response.proposal
+                else None,
             }
         )
 
@@ -444,7 +462,9 @@ class AssistantService:
             client_id,
             user,
             ai_client=get_llm_client(
-                AiUsageContext(feature=AiFeature.COMMAND_AGENT, client_id=client_id, user_id=user.id)
+                AiUsageContext(
+                    feature=AiFeature.COMMAND_AGENT, client_id=client_id, user_id=user.id
+                )
             ),
         )
 
@@ -526,6 +546,11 @@ class AssistantService:
         intent = await intent_agent.classify(content, history=history, today=today)
         if not intent.wants_content_plan:
             return None
+        if actor.role == UserRole.user:
+            # Read-only accounts never reach generation at all — not even a
+            # clarifying question, since there is nothing they could approve
+            # afterward anyway. See the module-level constant's docstring.
+            return _READ_ONLY_CONTENT_PLAN_REPLY, None
         if not intent.ready:
             return intent.clarifying_question, None
         return await self._generate_plan_from_chat(client_id, intent, actor=actor)
@@ -598,7 +623,7 @@ class AssistantService:
             )
         names = ", ".join(m["name"] for m in matches)
         return None, (
-            f"\"{assignee_hint}\" matched more than one person ({names}), so I left it "
+            f'"{assignee_hint}" matched more than one person ({names}), so I left it '
             "unassigned — assign it from the Plan board."
         )
 
@@ -785,6 +810,8 @@ class AssistantService:
         ``PlanGenerationService.approve_batch``), then marks this specific
         message's card as resolved so reopening the chat later shows the
         outcome instead of a card that looks pending forever."""
+        if actor.role == UserRole.user:
+            raise ForbiddenError("Your account has read-only access and cannot approve changes.")
         message, task_ids = self._require_pending_action_message(client_id, chat_id, message_id)
         PlanGenerationService(self.db).approve_batch(client_id, task_ids, actor=actor)
         self._set_action_status(message, "approved")
@@ -802,6 +829,8 @@ class AssistantService:
         """The chat card's "Discard" button — mirrors
         ``PlanGenerationService.reject_batch`` exactly (never hard-deletes;
         a manager can still revise it later from the normal Plan page)."""
+        if actor.role == UserRole.user:
+            raise ForbiddenError("Your account has read-only access and cannot reject changes.")
         message, task_ids = self._require_pending_action_message(client_id, chat_id, message_id)
         PlanGenerationService(self.db).reject_batch(client_id, task_ids, reason, actor=actor)
         self._set_action_status(message, "rejected")

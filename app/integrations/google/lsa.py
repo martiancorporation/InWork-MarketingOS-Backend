@@ -74,6 +74,10 @@ _CUSTOMER_CLIENT_GAQL = (
     "FROM customer_client WHERE customer_client.level > 0"
 )
 
+# ``listAccessibleCustomers`` only ever returns bare customer ids, no display
+# name — mirrors ``app.integrations.google.ads.GoogleAdsClient.get_customer_name``.
+_CUSTOMER_NAME_GAQL = "SELECT customer.descriptive_name FROM customer LIMIT 1"
+
 # Platform Insights — LSA campaigns are a normal ``campaign`` resource (channel
 # type LOCAL_SERVICES), so this row shape deliberately matches
 # ``app.integrations.google.ads._CAMPAIGN_GAQL`` / ``_CAMPAIGN_METRIC_GAQL``
@@ -162,6 +166,20 @@ class LsaClient:
                     }
                 )
         return out
+
+    async def get_customer_name(self, access_token: str, customer_id: str) -> str | None:
+        """The account's own display name — see
+        ``GoogleAdsClient.get_customer_name`` (LSA accounts share the same
+        underlying Ads API account model). Best-effort: ``None`` on any
+        failure rather than breaking the connect flow over a cosmetic label."""
+        try:
+            rows = await self._search(access_token, customer_id, _CUSTOMER_NAME_GAQL)
+        except AppError:
+            return None
+        if not rows:
+            return None
+        customer = rows[0].get("customer") or {}
+        return customer.get("descriptiveName") or customer.get("descriptive_name")
 
     async def fetch_daily_insights(
         self, access_token: str, customer_id: str, *, days: int = 90
