@@ -9,6 +9,8 @@
 - ``POST /clients/{id}/integrations/{key}/sync``          — pull live insights
 - ``POST /clients/{id}/integrations/{key}/connect``       — placeholder connect (other providers)
 - ``POST /clients/{id}/integrations/{key}/disconnect``    — reset to disconnected
+- ``POST /clients/{id}/integrations/ghl/tags``            — set this client's GHL tags
+- ``GET  /clients/{id}/integrations/ghl/contacts``        — fetch this client's tagged GHL contacts
 
 Every route is client-access-scoped via ``ClientService.get_client`` (admin or
 assigned user); an inaccessible client returns 404, never revealing its
@@ -20,6 +22,12 @@ are stored encrypted, and the bound account is never auto-picked — the
 operator always confirms it, even when only one is found (see
 ``IntegrationService._select_ad_account``/``_select_google_account``). Other
 providers still use ``connect`` until their client is built.
+
+**GHL** is a real OAuth2 connection too, but agency-wide, not per-client (this
+engagement's GHL setup is one shared location for every client) — its
+``oauth/start``/``oauth/complete`` live on the admin-only
+``app.api.v1.routers.ghl_agency`` router instead. The only per-client GHL
+setting is which tags identify that client's records (``POST .../ghl/tags``).
 """
 
 from __future__ import annotations
@@ -37,9 +45,9 @@ from app.models.client import Client
 from app.models.enums import ClientCapability, IntegrationKey
 from app.schemas.integration import (
     AdAccountOption,
-    GhlConnectRequest,
     GhlContactRead,
     GhlContactsRead,
+    GhlSetTagsRequest,
     IntegrationConnectRequest,
     IntegrationListResponse,
     IntegrationRead,
@@ -69,29 +77,23 @@ def _decode_cursor(raw: str | None) -> list | None:
 
 # ---- GHL — registered ahead of the generic "/{key}" routes below, since a
 # literal "/ghl/..." path would otherwise be shadowed by "/{key}/..." (route
-# matching is order-dependent, not specificity-dependent). GHL never runs
-# oauth/start|complete — see IntegrationService.connect_ghl for why. ------- #
+# matching is order-dependent, not specificity-dependent). GHL's real OAuth
+# connect flow is agency-wide, not per-client — see
+# app.api.v1.routers.ghl_agency; the only per-client GHL setting is tags. -- #
 
 
 @router.post(
-    "/ghl/connect",
+    "/ghl/tags",
     response_model=IntegrationRead,
-    summary="Connect GHL with a token issued out-of-band by the client's team",
+    summary="Set which GHL tags identify this client's records",
 )
-def connect_ghl(
+def set_ghl_tags(
     client_id: uuid.UUID,
-    data: GhlConnectRequest,
+    data: GhlSetTagsRequest,
     db: DbSession,
     _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
 ) -> IntegrationRead:
-    integration = IntegrationService(db).connect_ghl(
-        client_id,
-        access_token=data.access_token,
-        refresh_token=data.refresh_token,
-        location_id=data.location_id,
-        tags=data.tags,
-        expires_in=data.expires_in,
-    )
+    integration = IntegrationService(db).set_ghl_tags(client_id, data.tags)
     return IntegrationRead.model_validate(integration)
 
 

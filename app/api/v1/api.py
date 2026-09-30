@@ -24,6 +24,7 @@ from app.api.v1.routers import (
     compliance,
     content,
     conversations,
+    ghl_agency,
     global_assistant,
     integrations,
     intelligence,
@@ -74,3 +75,4 @@ api_router.include_router(support_tickets.router)
 api_router.include_router(me.router)
 api_router.include_router(admin_tasks.router)
 api_router.include_router(ai_model_routes.router)
+api_router.include_router(ghl_agency.router)

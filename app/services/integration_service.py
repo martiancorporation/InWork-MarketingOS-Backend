@@ -24,12 +24,19 @@ import hmac
 import logging
 import time
 import uuid
+from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.exceptions import AppError, BadRequestError, NotFoundError, ProviderAuthError
+from app.core.exceptions import (
+    AppError,
+    BadRequestError,
+    NotFoundError,
+    ProviderAuthError,
+    ServiceUnavailableError,
+)
 from app.integrations.crypto import TokenCipher
 from app.integrations.ghl.client import GhlClient, GhlContactsPage
 from app.integrations.ghl.oauth import GhlOAuthClient
@@ -43,7 +50,9 @@ from app.integrations.linkedin.oauth import LinkedInOAuthClient
 from app.integrations.meta.client import MetaClient
 from app.integrations.meta.oauth import MetaOAuthClient
 from app.models.enums import IntegrationKey, IntegrationStatus, SocialPlatform
+from app.models.ghl_agency_connection import GhlAgencyConnection
 from app.models.integration import Integration
+from app.repositories.ghl_agency_connection_repository import GhlAgencyConnectionRepository
 from app.repositories.integration_repository import IntegrationRepository
 from app.schemas.analytics import AnalyticsDailyIn
 from app.schemas.integration import (
@@ -152,6 +161,7 @@ class IntegrationService:
     ) -> None:
         self.db = db
         self.integrations = IntegrationRepository(db)
+        self.ghl_agency_repo = GhlAgencyConnectionRepository(db)
         self._meta_oauth = meta_oauth
         self._meta_client = meta_client
         self._google_oauth = google_oauth
@@ -230,37 +240,96 @@ class IntegrationService:
         self.db.refresh(integration)
         return integration
 
-    # ---- GHL (token handed to us directly — no redirect flow) --------- #
+    # ---- GHL (one real, agency-wide OAuth2 connection) ---------------- #
+    #
+    # This engagement's GHL setup is one shared location for every client, so
+    # the OAuth connect flow (below) is deliberately NOT client-scoped — it's
+    # performed once, by an admin, against ``GhlAgencyConnection`` (a
+    # singleton — see that model's docstring for why this also fixes a real
+    # refresh-token-collision bug the old per-client-copy design had). What
+    # IS per-client is only which contact/opportunity tags identify that
+    # client's records within the one shared location (``set_ghl_tags``).
 
-    def connect_ghl(
-        self,
-        client_id: uuid.UUID,
-        *,
-        access_token: str,
-        refresh_token: str | None,
-        location_id: str,
-        tags: list[str],
-        expires_in: int | None = None,
-    ) -> Integration:
-        """Store a GHL Private App token handed to us out-of-band.
+    def ghl_agency_status(self) -> GhlAgencyConnection | None:
+        return self.ghl_agency_repo.get_singleton()
 
-        Unlike Meta/Google/LinkedIn, there is no authorization-code redirect
-        through our app for GHL — the client's team issues the access/refresh
-        token pair directly (see the account-access email thread), scoped to
-        their one shared location. ``tags`` is the set of contact/opportunity
-        tags that identify this client's records within that shared location.
-        """
+    def ghl_oauth_start(self) -> tuple[str, str]:
+        """Begin the agency-wide authorization-code flow: return
+        (authorization_url, state). An admin opens ``authorization_url``,
+        picks the one shared location on GHL's own consent screen, and GHL
+        redirects back with a ``code`` for ``ghl_oauth_complete``."""
+        if not self.ghl_oauth.is_configured:
+            raise ServiceUnavailableError(
+                "GHL integration is not configured on this server "
+                "(GHL_CLIENT_ID / GHL_CLIENT_SECRET / GHL_REDIRECT_URI)."
+            )
+        state = self._sign_agency_state()
+        url = self.ghl_oauth.authorization_url(state)
+        connection = self.ghl_agency_repo.get_singleton()
+        if connection is None:
+            connection = GhlAgencyConnection()
+            self.ghl_agency_repo.add(connection)
+        connection.status = IntegrationStatus.pending
+        self.db.commit()
+        return url, state
+
+    async def ghl_oauth_complete(
+        self, code: str, state: str, *, actor_user_id: uuid.UUID
+    ) -> GhlAgencyConnection:
+        """Finish the agency-wide OAuth: exchange the code, store the one
+        shared token pair. Re-derives who performed this from the
+        authenticated session (``actor_user_id``), same "never trust
+        anything client-supplied for who did this" stance as every other
+        approval-style action in this codebase."""
+        if not self._verify_agency_state(state):
+            raise BadRequestError("Invalid or expired OAuth state.")
+        tokens = await self.ghl_oauth.exchange_code(code)
+        connection = self.ghl_agency_repo.get_singleton()
+        if connection is None:
+            connection = GhlAgencyConnection()
+            self.ghl_agency_repo.add(connection)
+        access = tokens.get("access_token")
+        if not access:
+            raise ProviderAuthError("GHL did not return an access token.")
+        connection.access_token_encrypted = self.cipher.encrypt(access)
+        refresh = tokens.get("refresh_token")
+        connection.refresh_token_encrypted = self.cipher.encrypt(refresh) if refresh else None
+        connection.token_expires_at = self._expiry(tokens.get("expires_in"))
+        connection.location_id = tokens.get("locationId") or connection.location_id
+        connection.company_id = tokens.get("companyId") or connection.company_id
+        connection.status = IntegrationStatus.connected
+        connection.connected_by = actor_user_id
+        connection.last_error = None
+        self.db.commit()
+        self.db.refresh(connection)
+        return connection
+
+    def ghl_disconnect(self) -> GhlAgencyConnection:
+        connection = self.ghl_agency_repo.get_singleton()
+        if connection is None:
+            raise NotFoundError("GHL has never been connected.")
+        connection.status = IntegrationStatus.disconnected
+        connection.access_token_encrypted = None
+        connection.refresh_token_encrypted = None
+        connection.token_expires_at = None
+        self.db.commit()
+        self.db.refresh(connection)
+        return connection
+
+    def set_ghl_tags(self, client_id: uuid.UUID, tags: list[str]) -> Integration:
+        """Set which contact/opportunity tags identify this client's records
+        within InWork's one shared GHL location. This is the entire per-client
+        "connect" step now — the credential itself lives on the one agency-wide
+        ``GhlAgencyConnection`` (see above), never duplicated per client."""
         if not tags:
             raise BadRequestError("At least one GHL tag is required to connect this client.")
         integration = self._upsert(client_id, IntegrationKey.ghl)
-        integration.status = IntegrationStatus.connected
-        integration.external_account_id = location_id
         integration.ghl_tags = tags
-        integration.access_token_encrypted = self.cipher.encrypt(access_token)
-        integration.refresh_token_encrypted = (
-            self.cipher.encrypt(refresh_token) if refresh_token else None
+        integration.status = (
+            IntegrationStatus.connected
+            if self.ghl_agency_repo.get_singleton() is not None
+            else IntegrationStatus.pending
         )
-        integration.token_expires_at = self._expiry(expires_in)
         integration.last_error = None
         self.db.commit()
         self.db.refresh(integration)
@@ -277,32 +346,23 @@ class IntegrationService:
         shared GHL location. Bounded like every other list endpoint — callers
         that want everything page through via ``next_search_after`` rather
         than this pulling an unbounded set into memory in one call."""
-        integration = self.get(client_id, IntegrationKey.ghl)  # 404 if never connected
-        if not integration.access_token_encrypted or not integration.external_account_id:
-            raise BadRequestError("GHL is not connected for this client.")
+        integration = self.get(client_id, IntegrationKey.ghl)  # 404 if never configured
         if not integration.ghl_tags:
             raise BadRequestError("No GHL tags are configured for this client.")
+        connection = self.ghl_agency_repo.get_singleton()
+        if connection is None or not connection.access_token_encrypted:
+            raise BadRequestError("GHL is not connected yet — connect it from Settings first.")
         try:
-            token = await self._ghl_access_token(integration)
+            token = await self._ghl_agency_access_token(connection)
             page = await self.ghl_client.search_contacts(
                 token,
-                integration.external_account_id,
+                connection.location_id,
                 integration.ghl_tags,
                 page_limit=page_limit,
                 search_after=search_after,
             )
         except Exception as exc:
-            # Same split as `sync()`: a dead grant (refresh token itself
-            # expired/revoked — GHL's refresh tokens are valid up to a year if
-            # unused, per the account-access email thread) needs a reconnect;
-            # anything else is worth retrying, so it stays `error`.
-            integration.status = (
-                IntegrationStatus.needs_reauth
-                if isinstance(exc, ProviderAuthError)
-                else IntegrationStatus.error
-            )
-            integration.last_error = str(exc)[:1000]
-            self.db.commit()
+            self._record_ghl_failure(integration, connection, exc)
             raise
         integration.status = IntegrationStatus.connected
         integration.last_sync_at = datetime.now(UTC)
@@ -310,30 +370,98 @@ class IntegrationService:
         self.db.commit()
         return page
 
-    async def _ghl_access_token(self, integration: Integration) -> str:
+    async def sync_ghl_leads(self, client_id: uuid.UUID, *, days: int = 30) -> int:
+        """Roll this client's tagged GHL contacts up into ``analytics_daily``
+        as a daily lead count (``platform=ghl``) over a trailing window —
+        this is what actually produces a "lead count" the dashboard/report
+        can show; ``fetch_ghl_contacts`` only ever returns the raw contact
+        list on demand. Returns how many days got a row written."""
+        integration = self.get(client_id, IntegrationKey.ghl)  # 404 if never configured
+        if not integration.ghl_tags:
+            raise BadRequestError("No GHL tags are configured for this client.")
+        connection = self.ghl_agency_repo.get_singleton()
+        if connection is None or not connection.access_token_encrypted:
+            raise BadRequestError("GHL is not connected yet — connect it from Settings first.")
+        try:
+            token = await self._ghl_agency_access_token(connection)
+            contacts = await self.ghl_client.search_all_contacts(
+                token, connection.location_id, integration.ghl_tags
+            )
+        except Exception as exc:
+            self._record_ghl_failure(integration, connection, exc)
+            raise
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        counts: dict[date, int] = defaultdict(int)
+        for contact in contacts:
+            added = _parse_ghl_datetime(contact.get("dateAdded"))
+            if added is None or added < cutoff:
+                continue
+            counts[added.date()] += 1
+        rows = [
+            AnalyticsDailyIn(date=day, platform=SocialPlatform.ghl, leads=count)
+            for day, count in counts.items()
+        ]
+        if rows:
+            # commit=False: folded into this method's own terminal commit
+            # below, same reasoning as the real-OAuth providers' `sync()`.
+            AnalyticsService(self.db).ingest(client_id, rows, commit=False)
+        integration.status = IntegrationStatus.connected
+        integration.last_sync_at = datetime.now(UTC)
+        integration.last_error = None
+        connection.status = IntegrationStatus.connected
+        connection.last_sync_at = datetime.now(UTC)
+        connection.last_error = None
+        self.db.commit()
+        return len(rows)
+
+    def _record_ghl_failure(
+        self, integration: Integration, connection: GhlAgencyConnection, exc: Exception
+    ) -> None:
+        # A dead grant (refresh token itself expired/revoked — GHL's refresh
+        # tokens are valid up to a year if unused) needs a reconnect; anything
+        # else is worth retrying, so it stays `error`. Recorded on BOTH the
+        # one shared connection (the real root cause, same for every client)
+        # and this specific client's own row (so their own status view shows
+        # they're affected too).
+        status = (
+            IntegrationStatus.needs_reauth
+            if isinstance(exc, ProviderAuthError)
+            else IntegrationStatus.error
+        )
+        message = str(exc)[:1000]
+        connection.status = status
+        connection.last_error = message
+        integration.status = status
+        integration.last_error = message
+        self.db.commit()
+
+    async def _ghl_agency_access_token(self, connection: GhlAgencyConnection) -> str:
         """Return a valid GHL access token, refreshing it if it's near expiry.
 
         GHL rotates the refresh token on every use — the new one returned by
         the refresh call is what must be persisted, not the one just spent.
+        Refreshing here, on the one shared connection, is what makes the
+        collision bug the old per-client-copy design had structurally
+        impossible: there is only ever one row to refresh and re-read.
         """
         now = datetime.now(UTC)
-        expires = integration.token_expires_at
+        expires = connection.token_expires_at
         if expires is not None and expires.tzinfo is None:
             expires = expires.replace(tzinfo=UTC)
         fresh = expires is None or expires > now + timedelta(seconds=60)
-        if fresh or not integration.refresh_token_encrypted:
-            return self.cipher.decrypt(integration.access_token_encrypted)
+        if fresh or not connection.refresh_token_encrypted:
+            return self.cipher.decrypt(connection.access_token_encrypted)
         tokens = await self.ghl_oauth.refresh_access_token(
-            self.cipher.decrypt(integration.refresh_token_encrypted)
+            self.cipher.decrypt(connection.refresh_token_encrypted)
         )
         access = tokens.get("access_token")
         if not access:  # refresh failed — fall back to the stored token
-            return self.cipher.decrypt(integration.access_token_encrypted)
-        integration.access_token_encrypted = self.cipher.encrypt(access)
+            return self.cipher.decrypt(connection.access_token_encrypted)
+        connection.access_token_encrypted = self.cipher.encrypt(access)
         new_refresh = tokens.get("refresh_token")
         if new_refresh:
-            integration.refresh_token_encrypted = self.cipher.encrypt(new_refresh)
-        integration.token_expires_at = self._expiry(tokens.get("expires_in"))
+            connection.refresh_token_encrypted = self.cipher.encrypt(new_refresh)
+        connection.token_expires_at = self._expiry(tokens.get("expires_in"))
         self.db.commit()
         return access
 
@@ -978,6 +1106,30 @@ class IntegrationService:
             return False
 
     @staticmethod
+    def _sign_agency_state() -> str:
+        """Same signed-state contract as ``_sign_state``, minus a client_id —
+        the GHL connect flow is agency-wide, not client-scoped."""
+        raw = f"ghl-agency:{int(time.time())}"
+        sig = _hmac(raw)
+        return base64.urlsafe_b64encode(f"{raw}:{sig}".encode()).decode()
+
+    @staticmethod
+    def _verify_agency_state(state: str) -> bool:
+        try:
+            decoded = base64.urlsafe_b64decode(state.encode()).decode()
+            marker, ts, sig = decoded.rsplit(":", 2)
+        except Exception:
+            return False
+        if not hmac.compare_digest(sig, _hmac(f"{marker}:{ts}")):
+            return False
+        if marker != "ghl-agency":
+            return False
+        try:
+            return (int(time.time()) - int(ts)) <= _STATE_MAX_AGE
+        except ValueError:
+            return False
+
+    @staticmethod
     def _disconnected_view(client_id: uuid.UUID, key: IntegrationKey) -> IntegrationRead:
         """A transient ``disconnected`` catalog entry for a never-configured key."""
         now = datetime.now(UTC)
@@ -1000,3 +1152,17 @@ def _hmac(raw: str) -> str:
     """Truncated HMAC-SHA256 of ``raw`` keyed by SECRET_KEY (OAuth state signing)."""
     secret = get_settings().security.secret_key.encode()
     return hmac.new(secret, raw.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _parse_ghl_datetime(raw: str | None) -> datetime | None:
+    """GHL's ``dateAdded`` is an ISO-8601 string (typically ``...Z`` UTC) —
+    tolerate that suffix, which ``datetime.fromisoformat`` doesn't accept
+    before Python 3.11, and any other malformed value from the API rather
+    than let one bad contact break the whole day-count rollup."""
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)

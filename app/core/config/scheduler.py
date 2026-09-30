@@ -69,3 +69,10 @@ class SchedulerSettings(BaseSettings):
     auto_plan_generation_check_interval_minutes: int = (
         60  # SCHEDULER_AUTO_PLAN_GENERATION_CHECK_INTERVAL_MINUTES
     )
+
+    # GHL lead-count sync — rolls each tagged client's GHL contacts up into
+    # analytics_daily (platform=ghl). Separate from integration_sync_interval
+    # since GHL is deliberately not one of the real-OAuth ad platforms that
+    # sweep covers (see app/services/integration_service.py's _GHL_KEYS).
+    ghl_leads_sync_enabled: bool = True  # SCHEDULER_GHL_LEADS_SYNC_ENABLED
+    ghl_leads_sync_interval_minutes: int = 360  # SCHEDULER_GHL_LEADS_SYNC_INTERVAL_MINUTES

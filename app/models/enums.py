@@ -215,6 +215,7 @@ class SocialPlatform(str, enum.Enum):
     ga4 = "ga4"  # GA4 web-analytics bucket (distinct from google ads)
     seo = "seo"  # SEO channel + Search Console sync bucket
     influencer = "influencer"  # Phase-1 influencer channel
+    ghl = "ghl"  # GoHighLevel CRM lead-count sync bucket
     other = "other"
     # ---- deprecated (Phase-1 removed; kept for existing rows only) ----
     x = "x"

@@ -42,6 +42,7 @@ from app.models.event import (
     EventPost,
     MarketingEvent,
 )
+from app.models.ghl_agency_connection import GhlAgencyConnection
 from app.models.integration import Integration
 from app.models.intel_job import IntelJob
 from app.models.knowledge import KnowledgeChunk, KnowledgeSource
@@ -97,6 +98,7 @@ __all__ = [
     "EventAd",
     "EventAsset",
     "EventPost",
+    "GhlAgencyConnection",
     "Integration",
     "IntelJob",
     "KnowledgeChunk",

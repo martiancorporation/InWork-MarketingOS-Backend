@@ -110,25 +110,42 @@ class IntegrationListResponse(BaseModel):
     items: list[IntegrationRead]
 
 
-class GhlConnectRequest(StrictModel):
-    """Connect GHL with a token handed to us out-of-band by the client's team
-    (a Private App — no OAuth redirect through our own app; see
-    ``IntegrationService.connect_ghl``).
+class GhlSetTagsRequest(StrictModel):
+    """Which contact/opportunity tags identify this client's records within
+    InWork's one shared GHL location (see ``GhlAgencyConnectionRead`` for the
+    actual OAuth connection, which is agency-wide, not per-client). Operator-
+    entered, not hardcoded or derivable from the API — the client's team
+    assigns these tags on their end."""
 
-    ``location_id`` and ``tags`` are operator-entered, not hardcoded: this
-    engagement's GHL setup uses one shared location across every client, with
-    per-client separation done entirely via tags the client's team assigns —
-    neither value is derivable from our own API.
-    """
-
-    access_token: str = Field(min_length=1, max_length=4000)
-    refresh_token: str | None = Field(None, max_length=4000)
-    location_id: str = Field(min_length=1, max_length=160)
     tags: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(
         min_length=1, max_length=20
     )
-    # Seconds until the access token expires, if known.
-    expires_in: int | None = Field(None, ge=1, le=31_536_000)
+
+
+class GhlAgencyConnectionRead(ORMModel):
+    """The one agency-wide GHL OAuth connection's status — never exposes the
+    encrypted token columns, same stance as ``IntegrationRead``.
+
+    Unlike a per-client ``Integration`` row (always created upfront, so its
+    ``status`` alone carries the "not connected" case), the
+    ``GhlAgencyConnection`` singleton row doesn't exist until the first
+    connect attempt. Rather than returning a bare JSON ``null`` for that case
+    (the frontend's shared query wrapper treats any ``null`` body as an
+    application error — see ``useTanstackQuery``), the router always returns
+    a real object here, with ``id``/``created_at``/``updated_at`` left unset
+    and ``status="disconnected"`` standing in for "never connected yet" —
+    the same convention ``IntegrationRead``/``IntelligenceStatus`` use.
+    """
+
+    id: uuid.UUID | None = None
+    status: IntegrationStatus
+    company_id: str | None = None
+    location_id: str | None = None
+    connected_by: uuid.UUID | None = None
+    last_sync_at: datetime | None = None
+    last_error: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class GhlContactRead(BaseModel):

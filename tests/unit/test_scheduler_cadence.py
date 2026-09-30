@@ -6,6 +6,7 @@ from app.core.config.scheduler import SchedulerSettings
 from app.tasks.scheduler import (
     AUTO_PLAN_GENERATION_JOB,
     DIGEST_JOB,
+    GHL_LEADS_SYNC_JOB,
     INTEGRATION_SYNC_JOB,
     REPORT_EMAIL_JOB,
     SESSION_PURGE_JOB,
@@ -22,6 +23,19 @@ def test_defaults():
     assert jobs[SESSION_PURGE_JOB].interval_seconds == 60 * 60
     assert jobs[REPORT_EMAIL_JOB].interval_seconds == 10 * 60
     assert jobs[AUTO_PLAN_GENERATION_JOB].interval_seconds == 60 * 60
+    assert jobs[GHL_LEADS_SYNC_JOB].interval_seconds == 360 * 60
+
+
+def test_ghl_leads_sync_can_be_disabled():
+    jobs = {j.name for j in build_jobs(SchedulerSettings(ghl_leads_sync_enabled=False))}
+    assert GHL_LEADS_SYNC_JOB not in jobs
+    assert WATCHDOG_JOB in jobs
+
+
+def test_ghl_leads_sync_custom_interval():
+    s = SchedulerSettings(ghl_leads_sync_interval_minutes=90)
+    jobs = {j.name: j for j in build_jobs(s)}
+    assert jobs[GHL_LEADS_SYNC_JOB].interval_seconds == 90 * 60
 
 
 def test_auto_plan_generation_can_be_disabled():

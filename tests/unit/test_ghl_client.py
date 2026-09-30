@@ -99,7 +99,9 @@ def test_search_contacts_forwards_search_after_cursor(monkeypatch):
 
 def test_search_all_contacts_walks_search_after_until_a_short_page(monkeypatch):
     page1 = {
-        "contacts": [{"id": f"c{i}", "tags": ["tony-form-lead"], "searchAfter": [i]} for i in range(2)]
+        "contacts": [
+            {"id": f"c{i}", "tags": ["tony-form-lead"], "searchAfter": [i]} for i in range(2)
+        ]
     }
     page2 = {"contacts": [{"id": "c-last", "tags": ["tony-form-lead"], "searchAfter": [99]}]}
     fake = _FakeHttp([_FakeResponse(page1), _FakeResponse(page2)])
@@ -165,6 +167,7 @@ def ghl_configured(monkeypatch):
     s = get_settings().integrations
     monkeypatch.setattr(s, "ghl_client_id", "client-123")
     monkeypatch.setattr(s, "ghl_client_secret", "secret-456")
+    monkeypatch.setattr(s, "ghl_redirect_uri", "https://app.inwork.com/oauth/ghl/callback")
     return s
 
 

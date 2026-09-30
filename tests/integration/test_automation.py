@@ -4,7 +4,7 @@ sync sweep, and daily digests, plus admin-only enforcement."""
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -161,6 +161,59 @@ def test_integration_sync_sweep_skips_prewarm_with_nothing_connected(
         select(DashboardSnapshot).where(DashboardSnapshot.client_id == uuid.UUID(cid))
     )
     assert snapshot is None
+
+
+def test_ghl_leads_sync_sweep_skips_clients_without_tags(client, admin_headers: dict):
+    _client_id(client, admin_headers)  # onboarded, but never set GHL tags
+    resp = client.post(f"{API}/automation/ghl-leads/sync", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"clients": 0, "synced": 0, "failed": 0, "details": []}
+
+
+def test_ghl_leads_sync_sweep_rolls_up_tagged_clients(
+    client, admin_headers: dict, db_session: Session, monkeypatch
+):
+    from app.integrations.ghl.client import GhlClient
+    from app.models.ghl_agency_connection import GhlAgencyConnection
+
+    db_session.add(
+        GhlAgencyConnection(
+            status=IntegrationStatus.connected,
+            location_id="loc-1",
+            access_token_encrypted=TokenCipher().encrypt("agency-access"),
+        )
+    )
+    db_session.commit()
+
+    cid = _client_id(client, admin_headers)
+    tags_resp = client.post(
+        f"{API}/clients/{cid}/integrations/ghl/tags",
+        headers=admin_headers,
+        json={"tags": ["acme-form-lead"]},
+    )
+    assert tags_resp.status_code == 200, tags_resp.text
+
+    async def fake_search_all(self, token, location_id, tags):
+        assert token == "agency-access"
+        assert location_id == "loc-1"
+        assert tags == ["acme-form-lead"]
+        return [{"id": "c1", "dateAdded": datetime.now(UTC).isoformat()}]
+
+    monkeypatch.setattr(GhlClient, "search_all_contacts", fake_search_all)
+
+    resp = client.post(f"{API}/automation/ghl-leads/sync", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["clients"] == 1
+    assert body["synced"] == 1
+    assert body["failed"] == 0
+    assert body["details"][0]["key"] == "ghl"
+
+    analytics = client.get(f"{API}/clients/{cid}/analytics/daily", headers=admin_headers)
+    assert analytics.status_code == 200, analytics.text
+    ghl_rows = [r for r in analytics.json()["items"] if r["platform"] == "ghl"]
+    assert len(ghl_rows) == 1
+    assert ghl_rows[0]["leads"] == 1
 
 
 def test_client_digest(client, admin_headers: dict):
