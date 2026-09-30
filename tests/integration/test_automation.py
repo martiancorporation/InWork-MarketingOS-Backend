@@ -186,12 +186,6 @@ def test_ghl_leads_sync_sweep_rolls_up_tagged_clients(
     db_session.commit()
 
     cid = _client_id(client, admin_headers)
-    tags_resp = client.post(
-        f"{API}/clients/{cid}/integrations/ghl/tags",
-        headers=admin_headers,
-        json={"tags": ["acme-form-lead"]},
-    )
-    assert tags_resp.status_code == 200, tags_resp.text
 
     async def fake_search_all(self, token, location_id, tags):
         assert token == "agency-access"
@@ -199,7 +193,17 @@ def test_ghl_leads_sync_sweep_rolls_up_tagged_clients(
         assert tags == ["acme-form-lead"]
         return [{"id": "c1", "dateAdded": datetime.now(UTC).isoformat()}]
 
+    # Mocked before the tags POST: set_ghl_tags now syncs immediately when
+    # the agency is already connected, so this must be in place beforehand
+    # to stay hermetic (see IntegrationService.set_ghl_tags).
     monkeypatch.setattr(GhlClient, "search_all_contacts", fake_search_all)
+
+    tags_resp = client.post(
+        f"{API}/clients/{cid}/integrations/ghl/tags",
+        headers=admin_headers,
+        json={"tags": ["acme-form-lead"]},
+    )
+    assert tags_resp.status_code == 200, tags_resp.text
 
     resp = client.post(f"{API}/automation/ghl-leads/sync", headers=admin_headers)
     assert resp.status_code == 200, resp.text

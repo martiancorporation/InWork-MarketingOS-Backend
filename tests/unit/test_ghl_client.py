@@ -171,7 +171,16 @@ def ghl_configured(monkeypatch):
     return s
 
 
-def test_refresh_unconfigured_raises_service_unavailable():
+def test_refresh_unconfigured_raises_service_unavailable(monkeypatch):
+    # Explicitly blanked rather than relying on ambient .env absence — a
+    # developer's local .env may legitimately hold real GHL credentials.
+    from app.core.config import get_settings
+
+    settings = get_settings().integrations
+    monkeypatch.setattr(settings, "ghl_client_id", None)
+    monkeypatch.setattr(settings, "ghl_client_secret", None)
+    monkeypatch.setattr(settings, "ghl_redirect_uri", None)
+
     with pytest.raises(ServiceUnavailableError):
         _run(GhlOAuthClient().refresh_access_token("refresh-tok"))
 

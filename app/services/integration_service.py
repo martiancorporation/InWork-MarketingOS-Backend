@@ -27,6 +27,7 @@ import uuid
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -302,7 +303,31 @@ class IntegrationService:
         connection.last_error = None
         self.db.commit()
         self.db.refresh(connection)
+        # Sync right away rather than waiting for the next scheduled sweep —
+        # some clients may already have tags configured from before this
+        # connection existed (their status was `pending`; see set_ghl_tags).
+        await self._sync_all_tagged_ghl_clients()
         return connection
+
+    async def _sync_all_tagged_ghl_clients(self) -> None:
+        """Best-effort immediate sync for every client with GHL tags already
+        configured. Failures are isolated per client and logged, never
+        raised — this runs opportunistically after a connect/tag-save, and
+        the periodic scheduler sweep remains the source of truth."""
+        clients = self.db.scalars(
+            select(Integration).where(Integration.key == IntegrationKey.ghl)
+        ).all()
+        for integration in clients:
+            if not integration.ghl_tags:
+                continue
+            try:
+                await self.sync_ghl_leads(integration.client_id)
+            except Exception:
+                logger.warning(
+                    "Immediate GHL leads sync failed: client=%s",
+                    integration.client_id,
+                    exc_info=True,
+                )
 
     def ghl_disconnect(self) -> GhlAgencyConnection:
         connection = self.ghl_agency_repo.get_singleton()
@@ -316,7 +341,7 @@ class IntegrationService:
         self.db.refresh(connection)
         return connection
 
-    def set_ghl_tags(self, client_id: uuid.UUID, tags: list[str]) -> Integration:
+    async def set_ghl_tags(self, client_id: uuid.UUID, tags: list[str]) -> Integration:
         """Set which contact/opportunity tags identify this client's records
         within InWork's one shared GHL location. This is the entire per-client
         "connect" step now — the credential itself lives on the one agency-wide
@@ -325,14 +350,22 @@ class IntegrationService:
             raise BadRequestError("At least one GHL tag is required to connect this client.")
         integration = self._upsert(client_id, IntegrationKey.ghl)
         integration.ghl_tags = tags
+        agency_connected = self.ghl_agency_repo.get_singleton() is not None
         integration.status = (
-            IntegrationStatus.connected
-            if self.ghl_agency_repo.get_singleton() is not None
-            else IntegrationStatus.pending
+            IntegrationStatus.connected if agency_connected else IntegrationStatus.pending
         )
         integration.last_error = None
         self.db.commit()
         self.db.refresh(integration)
+        if agency_connected:
+            # Sync right away rather than waiting for the next scheduled
+            # sweep, so leads show up as soon as tags are configured.
+            try:
+                await self.sync_ghl_leads(client_id)
+            except Exception:
+                logger.warning(
+                    "Immediate GHL leads sync failed: client=%s", client_id, exc_info=True
+                )
         return integration
 
     async def fetch_ghl_contacts(

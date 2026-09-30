@@ -11,6 +11,7 @@
 - ``POST /clients/{id}/integrations/{key}/disconnect``    — reset to disconnected
 - ``POST /clients/{id}/integrations/ghl/tags``            — set this client's GHL tags
 - ``GET  /clients/{id}/integrations/ghl/contacts``        — fetch this client's tagged GHL contacts
+- ``POST /clients/{id}/integrations/ghl/sync``            — sync this client's GHL lead counts now
 
 Every route is client-access-scoped via ``ClientService.get_client`` (admin or
 assigned user); an inaccessible client returns 404, never revealing its
@@ -87,13 +88,13 @@ def _decode_cursor(raw: str | None) -> list | None:
     response_model=IntegrationRead,
     summary="Set which GHL tags identify this client's records",
 )
-def set_ghl_tags(
+async def set_ghl_tags(
     client_id: uuid.UUID,
     data: GhlSetTagsRequest,
     db: DbSession,
     _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
 ) -> IntegrationRead:
-    integration = IntegrationService(db).set_ghl_tags(client_id, data.tags)
+    integration = await IntegrationService(db).set_ghl_tags(client_id, data.tags)
     return IntegrationRead.model_validate(integration)
 
 
@@ -119,6 +120,22 @@ async def get_ghl_contacts(
         contacts=[GhlContactRead.model_validate(c) for c in page.contacts],
         next_search_after=_encode_cursor(page.next_search_after),
     )
+
+
+@router.post(
+    "/ghl/sync",
+    response_model=IntegrationRead,
+    summary="Sync this client's GHL lead counts into analytics now",
+)
+async def sync_ghl_leads(
+    client_id: uuid.UUID,
+    db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
+) -> IntegrationRead:
+    service = IntegrationService(db)
+    await service.sync_ghl_leads(client_id)
+    integration = service.get(client_id, IntegrationKey.ghl)
+    return IntegrationRead.model_validate(integration)
 
 
 @router.get("", response_model=IntegrationListResponse, summary="List integrations")

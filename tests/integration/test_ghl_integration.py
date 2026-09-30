@@ -67,12 +67,32 @@ def _connect_agency(db_session: Session, *, location_id="loc-1") -> GhlAgencyCon
     return connection
 
 
+def _mock_no_leads(monkeypatch) -> None:
+    """No-op GHL 'fetch all contacts' call. ``set_ghl_tags`` now syncs
+    immediately when the agency is already connected (see IntegrationService),
+    so any test that sets tags against an already-connected agency needs this
+    mocked to stay hermetic — real network is never allowed in this suite."""
+
+    async def fake_search_all(self, token, location_id, tags):
+        return []
+
+    monkeypatch.setattr(GhlClient, "search_all_contacts", fake_search_all)
+
+
 # ---- agency-wide OAuth connect flow (service-level) ----------------------- #
 
 
-def test_ghl_oauth_start_requires_configured_credentials(db_session: Session):
-    svc = IntegrationService(db_session)
+def test_ghl_oauth_start_requires_configured_credentials(db_session: Session, monkeypatch):
+    # Explicitly blanked rather than relying on ambient .env absence — a
+    # developer's local .env may legitimately hold real GHL credentials.
+    from app.core.config import get_settings
     from app.core.exceptions import ServiceUnavailableError
+
+    settings = get_settings().integrations
+    monkeypatch.setattr(settings, "ghl_client_id", None)
+    monkeypatch.setattr(settings, "ghl_client_secret", None)
+    monkeypatch.setattr(settings, "ghl_redirect_uri", None)
+    svc = IntegrationService(db_session)
 
     with pytest.raises(ServiceUnavailableError):
         svc.ghl_oauth_start()
@@ -129,6 +149,43 @@ def test_ghl_oauth_complete_rejects_invalid_state(db_session: Session, monkeypat
     svc = IntegrationService(db_session)
     with pytest.raises(BadRequestError):
         asyncio.run(svc.ghl_oauth_complete("code", "garbage-state", actor_user_id=uuid.uuid4()))
+
+
+def test_ghl_oauth_complete_syncs_already_tagged_clients(
+    client, admin_headers, db_session: Session, monkeypatch
+):
+    """A client tagged before the agency was ever connected sits at
+    `pending`. Once the agency connection completes, that client should get
+    synced immediately — not wait for the next scheduled sweep."""
+    _configure_ghl(monkeypatch)
+    svc = IntegrationService(db_session)
+    cid = _client_id(client, admin_headers)
+    integration = asyncio.run(svc.set_ghl_tags(cid, ["tony-form-lead"]))
+    assert integration.status == IntegrationStatus.pending
+
+    _url, state = svc.ghl_oauth_start()
+
+    async def fake_exchange(self, code):
+        return {
+            "access_token": "agency-access",
+            "refresh_token": "agency-refresh",
+            "expires_in": 3600,
+            "locationId": "loc-xyz",
+            "companyId": "company-xyz",
+        }
+
+    async def fake_search_all(self, token, location_id, tags):
+        return [{"id": "c1", "dateAdded": datetime.now(UTC).isoformat()}]
+
+    monkeypatch.setattr(GhlOAuthClient, "exchange_code", fake_exchange)
+    monkeypatch.setattr(GhlClient, "search_all_contacts", fake_search_all)
+    admin_id = _make_user(db_session).id
+
+    asyncio.run(svc.ghl_oauth_complete("auth-code-1", state, actor_user_id=admin_id))
+
+    refreshed = svc.get(cid, IntegrationKey.ghl)
+    assert refreshed.status == IntegrationStatus.connected
+    assert refreshed.last_sync_at is not None
 
 
 def test_ghl_disconnect_clears_stored_tokens(db_session: Session):
@@ -215,17 +272,18 @@ def test_set_ghl_tags_requires_at_least_one(client, admin_headers, db_session: S
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
     with pytest.raises(BadRequestError):
-        svc.set_ghl_tags(cid, [])
+        asyncio.run(svc.set_ghl_tags(cid, []))
 
 
 def test_set_ghl_tags_is_connected_once_agency_is_connected(
-    client, admin_headers, db_session: Session
+    client, admin_headers, db_session: Session, monkeypatch
 ):
     _connect_agency(db_session)
+    _mock_no_leads(monkeypatch)
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
 
-    integration = svc.set_ghl_tags(cid, ["metrobuilders-tampabay"])
+    integration = asyncio.run(svc.set_ghl_tags(cid, ["metrobuilders-tampabay"]))
 
     assert integration.status == IntegrationStatus.connected
     assert integration.ghl_tags == ["metrobuilders-tampabay"]
@@ -240,18 +298,21 @@ def test_set_ghl_tags_before_agency_connected_stays_pending(
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
 
-    integration = svc.set_ghl_tags(cid, ["tony-form-lead"])
+    integration = asyncio.run(svc.set_ghl_tags(cid, ["tony-form-lead"]))
 
     assert integration.status == IntegrationStatus.pending
 
 
-def test_set_ghl_tags_is_idempotent_on_the_same_client(client, admin_headers, db_session: Session):
+def test_set_ghl_tags_is_idempotent_on_the_same_client(
+    client, admin_headers, db_session: Session, monkeypatch
+):
     _connect_agency(db_session)
+    _mock_no_leads(monkeypatch)
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
 
-    svc.set_ghl_tags(cid, ["a"])
-    svc.set_ghl_tags(cid, ["b"])
+    asyncio.run(svc.set_ghl_tags(cid, ["a"]))
+    asyncio.run(svc.set_ghl_tags(cid, ["b"]))
 
     rows = db_session.scalars(
         select(Integration).where(
@@ -260,6 +321,45 @@ def test_set_ghl_tags_is_idempotent_on_the_same_client(client, admin_headers, db
     ).all()
     assert len(rows) == 1
     assert rows[0].ghl_tags == ["b"]
+
+
+def test_set_ghl_tags_triggers_immediate_sync_when_already_connected(
+    client, admin_headers, db_session: Session, monkeypatch
+):
+    """The other half of the auto-sync story: a client tagged AFTER the
+    agency is already connected shouldn't have to wait for the next
+    scheduled sweep either."""
+    _connect_agency(db_session)
+    cid = _client_id(client, admin_headers)
+    svc = IntegrationService(db_session)
+
+    async def fake_search_all(self, token, location_id, tags):
+        return [{"id": "c1", "dateAdded": datetime.now(UTC).isoformat()}]
+
+    monkeypatch.setattr(GhlClient, "search_all_contacts", fake_search_all)
+
+    integration = asyncio.run(svc.set_ghl_tags(cid, ["tony-form-lead"]))
+
+    assert integration.last_sync_at is not None
+
+
+def test_set_ghl_tags_succeeds_even_if_immediate_sync_fails(
+    client, admin_headers, db_session: Session, monkeypatch
+):
+    """The immediate post-connect sync is best-effort — a GHL-side failure
+    must never take down the tag-save response itself."""
+    _connect_agency(db_session)
+    cid = _client_id(client, admin_headers)
+    svc = IntegrationService(db_session)
+
+    async def broken_search_all(self, token, location_id, tags):
+        raise AppError("Could not reach GHL: timeout", code="ghl_unreachable", status_code=502)
+
+    monkeypatch.setattr(GhlClient, "search_all_contacts", broken_search_all)
+
+    integration = asyncio.run(svc.set_ghl_tags(cid, ["tony-form-lead"]))
+
+    assert integration.ghl_tags == ["tony-form-lead"]
 
 
 def test_fetch_ghl_contacts_requires_tags_configured(client, admin_headers, db_session: Session):
@@ -274,7 +374,7 @@ def test_fetch_ghl_contacts_requires_tags_configured(client, admin_headers, db_s
 def test_fetch_ghl_contacts_requires_agency_connected(client, admin_headers, db_session: Session):
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
-    svc.set_ghl_tags(cid, ["tony-form-lead"])
+    asyncio.run(svc.set_ghl_tags(cid, ["tony-form-lead"]))
 
     with pytest.raises(BadRequestError):
         asyncio.run(svc.fetch_ghl_contacts(cid))
@@ -284,9 +384,10 @@ def test_fetch_ghl_contacts_uses_shared_agency_token_and_client_tags(
     client, admin_headers, db_session: Session, monkeypatch
 ):
     _connect_agency(db_session, location_id="loc-shared")
+    _mock_no_leads(monkeypatch)
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
-    svc.set_ghl_tags(cid, ["aib-form-lead"])
+    asyncio.run(svc.set_ghl_tags(cid, ["aib-form-lead"]))
 
     seen: dict = {}
 
@@ -314,11 +415,16 @@ def test_fetch_ghl_contacts_refreshes_the_shared_connection_near_expiry(
     client, admin_headers, db_session: Session, monkeypatch
 ):
     connection = _connect_agency(db_session)
-    connection.token_expires_at = datetime.now(UTC) + timedelta(seconds=5)
-    db_session.commit()
+    _mock_no_leads(monkeypatch)
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
-    svc.set_ghl_tags(cid, ["somi-form-lead"])
+    asyncio.run(svc.set_ghl_tags(cid, ["somi-form-lead"]))
+
+    # Only push the connection near expiry AFTER tagging — set_ghl_tags's own
+    # immediate sync above ran against a still-fresh token, so it never
+    # touched the refresh path this test is actually exercising.
+    connection.token_expires_at = datetime.now(UTC) + timedelta(seconds=5)
+    db_session.commit()
 
     async def fake_refresh(self, refresh_token):
         assert refresh_token == "agency-refresh"
@@ -350,13 +456,15 @@ def test_fetch_ghl_contacts_refresh_benefits_every_client_at_once(
     refreshes the one shared connection, every OTHER client's next fetch
     sees the already-rotated token too — no per-client copy to go stale."""
     connection = _connect_agency(db_session)
-    connection.token_expires_at = datetime.now(UTC) + timedelta(seconds=5)
-    db_session.commit()
+    _mock_no_leads(monkeypatch)
     svc = IntegrationService(db_session)
     cid_a = _client_id(client, admin_headers, name="Client A")
     cid_b = _client_id(client, admin_headers, name="Client B")
-    svc.set_ghl_tags(cid_a, ["a-tag"])
-    svc.set_ghl_tags(cid_b, ["b-tag"])
+    asyncio.run(svc.set_ghl_tags(cid_a, ["a-tag"]))
+    asyncio.run(svc.set_ghl_tags(cid_b, ["b-tag"]))
+
+    connection.token_expires_at = datetime.now(UTC) + timedelta(seconds=5)
+    db_session.commit()
 
     async def fake_refresh(self, refresh_token):
         return {
@@ -384,11 +492,13 @@ def test_fetch_ghl_contacts_marks_needs_reauth_on_dead_refresh_grant(
     client, admin_headers, db_session: Session, monkeypatch
 ):
     connection = _connect_agency(db_session)
-    connection.token_expires_at = datetime.now(UTC) + timedelta(seconds=5)
-    db_session.commit()
+    _mock_no_leads(monkeypatch)
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
-    svc.set_ghl_tags(cid, ["tony-form-lead"])
+    asyncio.run(svc.set_ghl_tags(cid, ["tony-form-lead"]))
+
+    connection.token_expires_at = datetime.now(UTC) + timedelta(seconds=5)
+    db_session.commit()
 
     async def dead_refresh(self, refresh_token):
         raise ProviderAuthError("GHL rejected the token request: invalid_grant")
@@ -409,9 +519,10 @@ def test_fetch_ghl_contacts_marks_error_on_transient_failure(
     client, admin_headers, db_session: Session, monkeypatch
 ):
     _connect_agency(db_session)
+    _mock_no_leads(monkeypatch)
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
-    svc.set_ghl_tags(cid, ["tony-form-lead"])
+    asyncio.run(svc.set_ghl_tags(cid, ["tony-form-lead"]))
 
     async def unreachable(self, token, location_id, tags, *, page_limit=100, search_after=None):
         raise AppError("Could not reach GHL: timeout", code="ghl_unreachable", status_code=502)
@@ -430,9 +541,10 @@ def test_fetch_ghl_contacts_clears_prior_error_on_success(
     client, admin_headers, db_session: Session, monkeypatch
 ):
     _connect_agency(db_session)
+    _mock_no_leads(monkeypatch)
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
-    integration = svc.set_ghl_tags(cid, ["tony-form-lead"])
+    integration = asyncio.run(svc.set_ghl_tags(cid, ["tony-form-lead"]))
     integration.status = IntegrationStatus.error
     integration.last_error = "Could not reach GHL: timeout"
     db_session.commit()
@@ -458,7 +570,6 @@ def test_sync_ghl_leads_counts_contacts_per_day(
     _connect_agency(db_session)
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
-    svc.set_ghl_tags(cid, ["aib-form-lead"])
 
     today = datetime.now(UTC)
     contacts = [
@@ -471,6 +582,7 @@ def test_sync_ghl_leads_counts_contacts_per_day(
         return contacts
 
     monkeypatch.setattr(GhlClient, "search_all_contacts", fake_search_all)
+    asyncio.run(svc.set_ghl_tags(cid, ["aib-form-lead"]))
 
     written = asyncio.run(svc.sync_ghl_leads(cid))
 
@@ -499,12 +611,12 @@ def test_sync_ghl_leads_ignores_malformed_dates(
     _connect_agency(db_session)
     cid = _client_id(client, admin_headers)
     svc = IntegrationService(db_session)
-    svc.set_ghl_tags(cid, ["aib-form-lead"])
 
     async def fake_search_all(self, token, location_id, tags):
         return [{"id": "c1", "dateAdded": "not-a-date"}, {"id": "c2", "dateAdded": None}]
 
     monkeypatch.setattr(GhlClient, "search_all_contacts", fake_search_all)
+    asyncio.run(svc.set_ghl_tags(cid, ["aib-form-lead"]))
 
     written = asyncio.run(svc.sync_ghl_leads(cid))
     assert written == 0
@@ -513,8 +625,9 @@ def test_sync_ghl_leads_ignores_malformed_dates(
 # ---- per-client router: /clients/{id}/integrations/ghl/{tags,contacts} --- #
 
 
-def test_set_tags_endpoint(client, admin_headers, db_session: Session):
+def test_set_tags_endpoint(client, admin_headers, db_session: Session, monkeypatch):
     _connect_agency(db_session)
+    _mock_no_leads(monkeypatch)
     cid = _client_id(client, admin_headers)
     resp = client.post(
         f"{API}/clients/{cid}/integrations/ghl/tags",
@@ -526,6 +639,43 @@ def test_set_tags_endpoint(client, admin_headers, db_session: Session):
     assert body["key"] == "ghl"
     assert body["status"] == "connected"
     assert body["ghl_tags"] == ["metrobuilders-tampabay", "metrobuilders-memphis"]
+
+
+def test_sync_endpoint_pulls_lead_counts_on_demand(
+    client, admin_headers, db_session: Session, monkeypatch
+):
+    _connect_agency(db_session)
+    _mock_no_leads(monkeypatch)
+    cid = _client_id(client, admin_headers)
+    client.post(
+        f"{API}/clients/{cid}/integrations/ghl/tags",
+        headers=admin_headers,
+        json={"tags": ["tony-form-lead"]},
+    )
+
+    async def fake_search_all(self, token, location_id, tags):
+        return [{"id": "c1", "dateAdded": datetime.now(UTC).isoformat()}]
+
+    monkeypatch.setattr(GhlClient, "search_all_contacts", fake_search_all)
+
+    resp = client.post(f"{API}/clients/{cid}/integrations/ghl/sync", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["key"] == "ghl"
+    assert body["status"] == "connected"
+    assert body["last_sync_at"] is not None
+
+    analytics = client.get(f"{API}/clients/{cid}/analytics/daily", headers=admin_headers)
+    ghl_rows = [r for r in analytics.json()["items"] if r["platform"] == "ghl"]
+    assert len(ghl_rows) == 1
+    assert ghl_rows[0]["leads"] == 1
+
+
+def test_sync_endpoint_requires_tags(client, admin_headers, db_session: Session):
+    _connect_agency(db_session)
+    cid = _client_id(client, admin_headers)
+    resp = client.post(f"{API}/clients/{cid}/integrations/ghl/sync", headers=admin_headers)
+    assert resp.status_code == 404  # never even configured -> 404, not 400
 
 
 def test_set_tags_endpoint_rejects_empty_tags(client, admin_headers):
@@ -556,6 +706,7 @@ def test_contacts_endpoint_returns_normalized_page_and_cursor(
     client, admin_headers, db_session: Session, monkeypatch
 ):
     _connect_agency(db_session)
+    _mock_no_leads(monkeypatch)
     cid = _client_id(client, admin_headers)
     client.post(
         f"{API}/clients/{cid}/integrations/ghl/tags",
@@ -607,8 +758,11 @@ def test_contacts_endpoint_returns_normalized_page_and_cursor(
     assert seen_cursor["value"] == ["cursor-token", "cXyZ1a2B3c4D5e6F7g8H"]
 
 
-def test_contacts_endpoint_rejects_garbage_cursor(client, admin_headers, db_session: Session):
+def test_contacts_endpoint_rejects_garbage_cursor(
+    client, admin_headers, db_session: Session, monkeypatch
+):
     _connect_agency(db_session)
+    _mock_no_leads(monkeypatch)
     cid = _client_id(client, admin_headers)
     client.post(
         f"{API}/clients/{cid}/integrations/ghl/tags",
