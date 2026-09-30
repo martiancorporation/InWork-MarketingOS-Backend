@@ -103,6 +103,24 @@ _TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "description": "YYYY-MM-DD. End of the range (inclusive) — pair with start_date.",
                 },
+                "assignee_id": {
+                    "type": "string",
+                    "description": (
+                        "A user id from search_users — narrows to tasks assigned to that one "
+                        "person ('assigned to John'). Resolve the person first; never guess."
+                    ),
+                },
+                "assigned_only": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "True narrows to tasks that have ANY assignee, regardless of who — "
+                        "use this for 'assigned to someone'/'anyone assigned'/'only assigned "
+                        "tasks', which name no specific person (don't set assignee_id for "
+                        "that; assignee_id is for one named person). Leave both unset to "
+                        "include tasks either way, including unassigned ones."
+                    ),
+                },
                 "include_archived": {"type": "boolean", "default": False},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 10},
             }
@@ -359,8 +377,13 @@ _TOOLS: list[ToolSpec] = [
             "search_plan_tasks call, when the user pointed at specific items) OR "
             "start_date+end_date (resolve the user's wording — a week, a month, several "
             "months, a year, an explicit range — into concrete dates yourself), "
-            "optionally narrowed with query/status. Don't combine task_ids with a date "
-            "range in the same call.\n\n"
+            "optionally narrowed further with query/status/assignee_id/assigned_only — "
+            "e.g. 'assigned to Priya' (assignee_id, resolved via search_users), 'assigned "
+            "to someone'/'only assigned tasks' (assigned_only=true, no specific person "
+            "named), or 'unassigned tasks' (search_plan_tasks first with assigned_only, "
+            "then pass those task_ids here — there's no unassigned-only flag since 'not "
+            "assigned to this person' vs 'assigned to nobody at all' would be ambiguous "
+            "otherwise). Don't combine task_ids with a date range in the same call.\n\n"
             "This tool never rewrites title/description/requirements in bulk (those are "
             "per-item by nature) — only status/priority/category/archived. For several "
             "separate, non-contiguous periods ('September and November, not October'), "
@@ -387,6 +410,19 @@ _TOOLS: list[ToolSpec] = [
                     "type": "string",
                     "enum": ["todo", "in_progress", "blocked", "done"],
                     "description": "Optional: only tasks currently in this status.",
+                },
+                "assignee_id": {
+                    "type": "string",
+                    "description": "A user id from search_users — only tasks assigned to that person.",
+                },
+                "assigned_only": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "True narrows to tasks with ANY assignee ('assigned to someone', "
+                        "no specific name). Leave both this and assignee_id unset to include "
+                        "assigned and unassigned tasks alike."
+                    ),
                 },
                 "include_archived": {"type": "boolean", "default": False},
                 "new_status": {
@@ -425,11 +461,12 @@ _TOOLS: list[ToolSpec] = [
             "propose_bulk_update_plan_tasks with archived=true.\n\n"
             "Give the scope as EITHER an explicit task_ids list OR start_date+end_date "
             "(resolve the user's wording into concrete dates yourself), optionally "
-            "narrowed with query/status. Consider running search_plan_tasks with the "
-            "same range first to confirm the count with the user before deleting, "
-            "especially for a wide or vague scope ('everything', 'the whole month'). For "
-            "several separate, non-contiguous periods, call this once per period in the "
-            "same turn."
+            "narrowed with query/status/assignee_id/assigned_only (see "
+            "propose_bulk_update_plan_tasks for exactly how those work — same fields, "
+            "same meaning here). Consider running search_plan_tasks with the same scope "
+            "first to confirm the count with the user before deleting, especially for a "
+            "wide or vague scope ('everything', 'the whole month'). For several separate, "
+            "non-contiguous periods, call this once per period in the same turn."
         ),
         parameters=_obj(
             {
@@ -441,6 +478,15 @@ _TOOLS: list[ToolSpec] = [
                 },
                 "query": {"type": "string"},
                 "status": {"type": "string", "enum": ["todo", "in_progress", "blocked", "done"]},
+                "assignee_id": {
+                    "type": "string",
+                    "description": "A user id from search_users — only tasks assigned to that person.",
+                },
+                "assigned_only": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "True narrows to tasks with ANY assignee ('assigned to someone').",
+                },
                 "include_archived": {"type": "boolean", "default": False},
             }
         ),

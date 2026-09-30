@@ -407,11 +407,14 @@ def _resolve_bulk_task_ids(
     end_date: str | None,
     status: str | None,
     query: str | None,
+    assignee_id: str | None,
+    assigned_only: bool,
     include_archived: bool,
 ) -> list[uuid.UUID]:
     """The scope for a bulk propose_* call — an explicit id list, or every
-    task matching a date range (+ optional narrowing), capped at
-    _MAX_BULK_MATCHES so one tool call can never stage an unbounded batch."""
+    task matching a date range (+ optional narrowing, including who it's
+    assigned to — see _apply_assignee_filter), capped at _MAX_BULK_MATCHES so
+    one tool call can never stage an unbounded batch."""
     if task_ids:
         return [uuid.UUID(t) for t in task_ids]
     start, end = _resolve_date_window(on_date=None, start_date=start_date, end_date=end_date)
@@ -431,11 +434,12 @@ def _resolve_bulk_task_ids(
     if query:
         q = query.lower()
         rows = [r for r in rows if q in r.title.lower()]
+    rows = _apply_assignee_filter(rows, assignee_id=assignee_id, assigned_only=assigned_only)
     if len(rows) > _MAX_BULK_MATCHES:
         raise ValueError(
-            f"That range matches {len(rows)} tasks, more than the {_MAX_BULK_MATCHES}-task "
-            "bulk-operation limit — narrow the date range or add a query/status filter, "
-            "then try again."
+            f"That scope matches {len(rows)} tasks, more than the {_MAX_BULK_MATCHES}-task "
+            "bulk-operation limit — narrow the date range or add a query/status/assignee "
+            "filter, then try again."
         )
     return [r.id for r in rows]
 
@@ -450,6 +454,8 @@ def propose_bulk_update_plan_tasks(
     end_date: str | None = None,
     query: str | None = None,
     status: str | None = None,
+    assignee_id: str | None = None,
+    assigned_only: bool = False,
     include_archived: bool = False,
     new_status: str | None = None,
     priority: str | None = None,
@@ -477,6 +483,8 @@ def propose_bulk_update_plan_tasks(
         end_date=end_date,
         status=status,
         query=query,
+        assignee_id=assignee_id,
+        assigned_only=assigned_only,
         include_archived=include_archived,
     )
     if not ids:
@@ -503,6 +511,8 @@ def propose_bulk_delete_plan_tasks(
     end_date: str | None = None,
     query: str | None = None,
     status: str | None = None,
+    assignee_id: str | None = None,
+    assigned_only: bool = False,
     include_archived: bool = False,
 ) -> StagedBatch:
     ids = _resolve_bulk_task_ids(
@@ -513,6 +523,8 @@ def propose_bulk_delete_plan_tasks(
         end_date=end_date,
         status=status,
         query=query,
+        assignee_id=assignee_id,
+        assigned_only=assigned_only,
         include_archived=include_archived,
     )
     if not ids:

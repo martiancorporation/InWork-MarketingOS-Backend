@@ -40,11 +40,13 @@ def _admin(db_session: Session) -> User:
     return db_session.query(User).filter_by(email="admin@test.com").one()
 
 
-def _make_task(db_session, cid, admin, title, day: date, status=TaskStatus.todo):
+def _make_task(db_session, cid, admin, title, day: date, status=TaskStatus.todo, assignee_id=None):
     plans = PlanService(db_session)
     return plans.create_task(
         cid,
-        PlanTaskCreate(title=title, start_date=day, due_date=day, status=status),
+        PlanTaskCreate(
+            title=title, start_date=day, due_date=day, status=status, assignee_id=assignee_id
+        ),
         created_by=admin.id,
     )
 
@@ -132,6 +134,98 @@ def test_bulk_update_with_explicit_task_ids_ignores_date_range(
     )
     assert len(batch.operations) == 1
     assert batch.operations[0].entity_id == a.id
+
+
+def test_bulk_delete_assigned_only_excludes_unassigned_tasks(
+    client: TestClient, admin_headers: dict, db_session: Session, make_user
+):
+    """Regression for a real reported bug: "permanently delete all tasks
+    assigned to someone" (25 September tasks, many unassigned) had no way to
+    express "assigned, don't care to whom" and forced an unnecessary
+    clarifying-question loop. assigned_only=true is exactly that filter."""
+    cid = _client_id(client, admin_headers)
+    admin = _admin(db_session)
+    user, _ = make_user(email="assignee@test.com")
+    assignee_id = uuid.UUID(user["id"])
+    client.post(
+        f"{API}/clients/{cid}/assignments",
+        headers=admin_headers,
+        json={"user_id": str(assignee_id)},
+    )
+
+    assigned = [
+        _make_task(
+            db_session, cid, admin, f"Assigned {d}", date(2026, 9, d), assignee_id=assignee_id
+        )
+        for d in (5, 10)
+    ]
+    _make_task(db_session, cid, admin, "Unassigned", date(2026, 9, 15))
+
+    batch = handlers.propose_bulk_delete_plan_tasks(
+        db_session, cid, admin, start_date="2026-09-01", end_date="2026-09-30", assigned_only=True
+    )
+    assert {op.entity_id for op in batch.operations} == {t.id for t in assigned}
+
+
+def test_bulk_delete_assignee_id_narrows_to_one_person(
+    client: TestClient, admin_headers: dict, db_session: Session, make_user
+):
+    cid = _client_id(client, admin_headers)
+    admin = _admin(db_session)
+    priya, _ = make_user(email="priya@test.com", name="Priya")
+    jordan, _ = make_user(email="jordan@test.com", name="Jordan")
+    for u in (priya, jordan):
+        client.post(
+            f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": u["id"]}
+        )
+
+    priyas_task = _make_task(
+        db_session, cid, admin, "Priya's task", date(2026, 9, 5), assignee_id=uuid.UUID(priya["id"])
+    )
+    _make_task(
+        db_session,
+        cid,
+        admin,
+        "Jordan's task",
+        date(2026, 9, 6),
+        assignee_id=uuid.UUID(jordan["id"]),
+    )
+    _make_task(db_session, cid, admin, "Unassigned", date(2026, 9, 7))
+
+    batch = handlers.propose_bulk_delete_plan_tasks(
+        db_session,
+        cid,
+        admin,
+        start_date="2026-09-01",
+        end_date="2026-09-30",
+        assignee_id=priya["id"],
+    )
+    assert len(batch.operations) == 1
+    assert batch.operations[0].entity_id == priyas_task.id
+
+
+def test_search_plan_tasks_assigned_only_matches_the_same_scope(
+    client: TestClient, admin_headers: dict, db_session: Session, make_user
+):
+    """The model is instructed to preview a bulk scope with search_plan_tasks
+    first — it must see the identical set the bulk tool would act on."""
+    cid = _client_id(client, admin_headers)
+    admin = _admin(db_session)
+    user, _ = make_user(email="assignee2@test.com")
+    assignee_id = uuid.UUID(user["id"])
+    client.post(
+        f"{API}/clients/{cid}/assignments",
+        headers=admin_headers,
+        json={"user_id": str(assignee_id)},
+    )
+    _make_task(db_session, cid, admin, "Assigned", date(2026, 9, 5), assignee_id=assignee_id)
+    _make_task(db_session, cid, admin, "Unassigned", date(2026, 9, 6))
+
+    result = handlers.search_plan_tasks(
+        db_session, cid, admin, start_date="2026-09-01", end_date="2026-09-30", assigned_only=True
+    )
+    assert result["total_matching"] == 1
+    assert result["tasks"][0]["title"] == "Assigned"
 
 
 def test_bulk_update_requires_at_least_one_field():
