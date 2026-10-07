@@ -1,3 +1,8 @@
+The client's current brand/goals, read live from their profile just now (the
+most up-to-date source — if anything here conflicts with the preamble above,
+this is newer, trust this instead):
+{brand_snapshot}
+
 Manager's request: {prompt}
 
 Date range: {start_date} to {end_date} ({range_label})

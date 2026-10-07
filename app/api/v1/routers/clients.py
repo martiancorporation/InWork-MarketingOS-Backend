@@ -30,6 +30,8 @@ from app.schemas.client import ClientListResponse, ClientRead, ClientUpdate
 from app.schemas.consistency import ConsistencyReport
 from app.schemas.document import DocumentListResponse
 from app.schemas.onboarding import (
+    AutoFillRequest,
+    AutoFillResponse,
     BrandExtraction,
     BrandExtractionRequest,
     DocumentsRequest,
@@ -41,6 +43,7 @@ from app.schemas.onboarding import (
     OnboardingStepUpdate,
 )
 from app.services.brand_job_service import BrandJobService
+from app.services.client_discovery_service import AutoFillResult, ClientDiscoveryService
 from app.services.client_service import ClientService
 from app.services.demo_data_service import DemoDataService
 from app.services.intelligence.intelligence_service import IntelligenceService
@@ -58,6 +61,18 @@ def _step_response(client: Client, db) -> OnboardingStepResponse:
         readiness=ReadinessService().report(client),
         onboarding=OnboardingService.progress(client),
         intelligence=IntelligenceService(db).status(client),
+    )
+
+
+def _auto_fill_response(result: AutoFillResult, db) -> AutoFillResponse:
+    base = _step_response(result.client, db)
+    return AutoFillResponse(
+        **base.model_dump(),
+        filled=result.filled,
+        ai_guessed=result.ai_guessed,
+        suggestions=result.suggestions,
+        source=result.source,
+        ai_generated=result.ai_generated,
     )
 
 
@@ -116,6 +131,25 @@ def start_onboarding(
     client = OnboardingService(db).create_draft(admin, data)
     _queue_demo_seed(tasks, client.id, admin.id)
     return _step_response(client, db)
+
+
+@router.post(
+    "/onboarding/auto-fill",
+    response_model=AutoFillResponse,
+    summary="Scan a website and auto-fill onboarding fields (fill-only-if-empty, admin only)",
+    dependencies=[Depends(RateLimit("onboarding_auto_fill", times=8, seconds=60))],
+)
+async def auto_fill_onboarding(
+    data: AutoFillRequest, admin: AdminUser, db: DbSession, tasks: BackgroundTasks
+) -> AutoFillResponse:
+    """Scan ``data.website`` and save whatever it reliably found straight to
+    the client record — never advancing ``onboarding_step`` (auto-fill is not
+    auto-complete: the operator still reviews and completes every step by
+    hand) and never overwriting a field the client already has a value for."""
+    result = await ClientDiscoveryService(db).auto_fill(admin, data)
+    if result.created:
+        _queue_demo_seed(tasks, result.client.id, admin.id)
+    return _auto_fill_response(result, db)
 
 
 @router.patch(

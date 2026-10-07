@@ -49,7 +49,7 @@ from app.integrations.scrapingbee import ScrapingBeeClient
 from app.prompts.loader import load_prompt, render
 from app.schemas.onboarding import BrandExtraction, BrandExtractionRequest
 from app.utils.render import render_page
-from app.utils.web import fetch_page, normalize_url, parse_page
+from app.utils.web import IdentitySignals, fetch_page, normalize_url, parse_page
 
 logger = logging.getLogger("app.ai.brand_extraction")
 
@@ -83,6 +83,7 @@ class _Signals:
     theme_color: str | None
     description: str | None
     source: str  # "scrapingbee" | "render" | "scrape" | "none"
+    identity: IdentitySignals | None = None
 
 
 class BrandExtractionService:
@@ -139,11 +140,47 @@ class BrandExtractionService:
             media_type = "image/jpeg"
             label = data.website or "the website"
 
+        return await self._finish(data, sig, context, media_type=media_type, label=label)
+
+    async def extract_with_identity(
+        self, website: str, context: AiUsageContext | None = None
+    ) -> tuple[BrandExtraction, IdentitySignals | None, str, str | None]:
+        """Like ``extract()`` for a website, but also returns the deterministic
+        identity facts (name/logo/location/contacts/social links) the same
+        fetch gathered, plus which fetch tier succeeded — used by the
+        onboarding "auto-fill" flow. One fetch, not two.
+
+        The fourth element is the page's own raw meta description (``None``
+        when there wasn't one) — callers that persist ``summary`` directly to
+        a database field must not use it when ``ai_generated`` is ``False``,
+        since ``_fallback()``'s ``summary`` is otherwise a synthesized
+        placeholder ("Draft brand theme based on ..."), never real content.
+        """
+        data = BrandExtractionRequest(website=website)
+        sig = await self._collect(website)
+        result = await self._finish(data, sig, context, media_type="image/jpeg", label=website)
+        return result, sig.identity, sig.source, sig.description
+
+    async def _finish(
+        self,
+        data: BrandExtractionRequest,
+        sig: _Signals,
+        context: AiUsageContext | None,
+        *,
+        media_type: str,
+        label: str,
+    ) -> BrandExtraction:
         # Declared theme-color leads, then measured colors — both beat any guess.
         colors = _dedupe(([sig.theme_color] if sig.theme_color else []) + sig.colors)
 
         if sig.source == "none":
+            # Nothing was fetched at all — there is nothing for the model to
+            # analyze, and asking it anyway invites it to fabricate a "summary"
+            # describing its own inability rather than returning nothing (seen
+            # in practice). Skip the call outright; the deterministic fallback
+            # already says plainly that nothing could be captured.
             logger.warning("Brand extraction fetched nothing for %s", data.website)
+            return self._fallback(data, colors, sig.fonts, sig.description)
         if not self._client.is_configured:
             return self._fallback(data, colors, sig.fonts, sig.description)
 
@@ -165,6 +202,8 @@ class BrandExtractionService:
             fonts=_dedupe(sig.fonts + model_fonts)[:8],
             tone=_clean(payload.get("tone")),
             imagery=_clean(payload.get("imagery")),
+            suggested_industry=_clean(payload.get("suggested_industry")),
+            suggested_business_type=_clean(payload.get("suggested_business_type")),
             ai_generated=True,
         )
 
@@ -185,6 +224,7 @@ class BrandExtractionService:
                     theme_color=page.theme_color,
                     description=page.description,
                     source="scrapingbee",
+                    identity=page.identity,
                 )
             logger.info("ScrapingBee returned nothing for %s; falling back", website)
         page = await render_page(website)
@@ -197,6 +237,7 @@ class BrandExtractionService:
                 theme_color=page.theme_color,
                 description=page.description,
                 source="render",
+                identity=page.identity,
             )
         static = await to_thread.run_sync(fetch_page, website)
         if static is not None:
@@ -208,6 +249,7 @@ class BrandExtractionService:
                 theme_color=static.theme_color,
                 description=static.description,
                 source="scrape",
+                identity=static.identity,
             )
         return _Signals("", [], [], None, None, None, "none")
 

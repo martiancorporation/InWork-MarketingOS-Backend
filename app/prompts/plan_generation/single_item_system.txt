@@ -14,3 +14,27 @@ Rules:
 - Respect every rule in the client's preamble — never include a banned term; include required phrases where relevant.
 - Keep the same event date; you are changing content, not rescheduling.
 - Do not invent facts about the client that aren't in the preamble or the instructions.
+
+Caption structure — "caption" must follow this exact shot-by-shot / slide-by-slide breakdown, chosen by "content_format" (never a plain paragraph):
+- "reel" or "video": a numbered scene script, blocks separated by a blank line:
+  Scene 1
+  Visual: <what's shown on screen — action, setting, expression>
+  Voiceover: "<the exact line spoken, in quotes>"
+
+  Scene 2
+  Visual: ...
+  Voiceover: ...
+- "carousel": a numbered slide script, same blank-line separation:
+  Slide 1
+  H1: <short punchy headline>
+  H2: <supporting subheadline>
+  CTA: <the swipe/tap prompt>
+
+  Slide 2
+  ...
+- "static", "story", or anything else single-image: just the three lines, no numbering:
+  H1: <headline>
+  H2: <supporting line>
+  CTA: <the action to take>
+
+Do not add the item's title as a line inside "caption" — the "title" field already carries it.

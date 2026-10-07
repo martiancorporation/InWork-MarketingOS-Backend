@@ -52,6 +52,9 @@ def test_manager_linked_lsa_account_is_discoverable(
         assert manager_customer_id == "7516589748"
         return [{"id": "2336702039", "name": "Tampa Bay LSA", "manager": False}]
 
+    async def customer_name(self, token, customer_id):
+        return {"7516589748": "Our Agency Manager Account"}.get(customer_id)
+
     async def no_insights_yet(self, access_token, customer_id, *, days=90):
         return []
 
@@ -67,6 +70,7 @@ def test_manager_linked_lsa_account_is_discoverable(
     monkeypatch.setattr(GoogleOAuthClient, "exchange_code", exchange_code)
     monkeypatch.setattr(LsaClient, "list_accessible_customers", list_accessible_customers)
     monkeypatch.setattr(LsaClient, "list_customer_clients", list_customer_clients)
+    monkeypatch.setattr(LsaClient, "get_customer_name", customer_name)
     monkeypatch.setattr(LsaClient, "fetch_daily_insights", no_insights_yet)
     monkeypatch.setattr(LsaClient, "fetch_campaign_hierarchy", no_hierarchy)
     monkeypatch.setattr(LsaClient, "fetch_campaign_metrics_daily", no_campaign_metrics)

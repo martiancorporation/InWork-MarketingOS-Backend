@@ -24,19 +24,12 @@ class AISettings(BaseSettings):
     )
 
     api_key: str | None = None  # OPENROUTER_API_KEY — absent in local dev
-    # Model ids are "vendor/model", e.g. "anthropic/claude-sonnet-5",
-    # "openai/gpt-4o", "google/gemini-2.5-pro" — see openrouter.ai/models.
-    # This is the ceiling default: any feature not routed to a specific model
-    # via app/ai/model_router.py's category table uses this. Per-category
-    # routing (which model each *kind* of AI task actually uses) now lives in
-    # the admin-editable ``ai_model_routes`` table, not static settings here.
-    # Deliberately sonnet-5, not opus-5: opus-5 costs 2.5x more ($5/$25 vs
-    # $2/$10 per 1M tokens) for a fallback path that, today, no live feature
-    # actually hits (every real feature is already categorized in
-    # model_router.py) — sonnet-5 is the same model the hardest category
-    # (REASONING_COMPLEX) already defaults to, so the ceiling stays capable
-    # without paying the opus premium on an edge case.
-    model: str = "anthropic/claude-sonnet-5"  # OPENROUTER_MODEL
+    # No model id lives here, or anywhere else in settings/env — every AI call
+    # resolves its model from the admin-editable ``ai_model_routes`` table
+    # (app/ai/model_router.py, app/services/ai_model_route_service.py),
+    # itself populated from OpenRouter's live model catalog. A feature whose
+    # category has no configured route yet degrades the same way an
+    # unconfigured provider does (see app/integrations/llm/openrouter.py).
     base_url: str = "https://openrouter.ai/api/v1"  # OPENROUTER_BASE_URL
     max_tokens: int = 1024  # OPENROUTER_MAX_TOKENS
     # Per-request timeout (seconds) and client-side retries.

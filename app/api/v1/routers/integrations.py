@@ -9,6 +9,9 @@
 - ``POST /clients/{id}/integrations/{key}/sync``          — pull live insights
 - ``POST /clients/{id}/integrations/{key}/connect``       — placeholder connect (other providers)
 - ``POST /clients/{id}/integrations/{key}/disconnect``    — reset to disconnected
+- ``POST /clients/{id}/integrations/ghl/tags``            — set this client's GHL tags
+- ``GET  /clients/{id}/integrations/ghl/contacts``        — fetch this client's tagged GHL contacts
+- ``POST /clients/{id}/integrations/ghl/sync``            — sync this client's GHL lead counts now
 
 Every route is client-access-scoped via ``ClientService.get_client`` (admin or
 assigned user); an inaccessible client returns 404, never revealing its
@@ -20,20 +23,32 @@ are stored encrypted, and the bound account is never auto-picked — the
 operator always confirms it, even when only one is found (see
 ``IntegrationService._select_ad_account``/``_select_google_account``). Other
 providers still use ``connect`` until their client is built.
+
+**GHL** is a real OAuth2 connection too, but agency-wide, not per-client (this
+engagement's GHL setup is one shared location for every client) — its
+``oauth/start``/``oauth/complete`` live on the admin-only
+``app.api.v1.routers.ghl_agency`` router instead. The only per-client GHL
+setting is which tags identify that client's records (``POST .../ghl/tags``).
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import DbSession, RequireClient, require_capability
+from app.core.exceptions import BadRequestError
 from app.models.client import Client
 from app.models.enums import ClientCapability, IntegrationKey
 from app.schemas.integration import (
     AdAccountOption,
+    GhlContactRead,
+    GhlContactsRead,
+    GhlSetTagsRequest,
     IntegrationConnectRequest,
     IntegrationListResponse,
     IntegrationRead,
@@ -44,6 +59,83 @@ from app.schemas.integration import (
 from app.services.integration_service import IntegrationService
 
 router = APIRouter(prefix="/clients/{client_id}/integrations", tags=["integrations"])
+
+
+def _encode_cursor(cursor: list | None) -> str | None:
+    if not cursor:
+        return None
+    return base64.urlsafe_b64encode(json.dumps(cursor).encode()).decode()
+
+
+def _decode_cursor(raw: str | None) -> list | None:
+    if not raw:
+        return None
+    try:
+        return json.loads(base64.urlsafe_b64decode(raw.encode()).decode())
+    except Exception as exc:
+        raise BadRequestError("Invalid pagination cursor.") from exc
+
+
+# ---- GHL — registered ahead of the generic "/{key}" routes below, since a
+# literal "/ghl/..." path would otherwise be shadowed by "/{key}/..." (route
+# matching is order-dependent, not specificity-dependent). GHL's real OAuth
+# connect flow is agency-wide, not per-client — see
+# app.api.v1.routers.ghl_agency; the only per-client GHL setting is tags. -- #
+
+
+@router.post(
+    "/ghl/tags",
+    response_model=IntegrationRead,
+    summary="Set which GHL tags identify this client's records",
+)
+async def set_ghl_tags(
+    client_id: uuid.UUID,
+    data: GhlSetTagsRequest,
+    db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
+) -> IntegrationRead:
+    integration = await IntegrationService(db).set_ghl_tags(client_id, data.tags)
+    return IntegrationRead.model_validate(integration)
+
+
+@router.get(
+    "/ghl/contacts",
+    response_model=GhlContactsRead,
+    summary="Fetch this client's tagged GHL contacts (one page)",
+)
+async def get_ghl_contacts(
+    client_id: uuid.UUID,
+    db: DbSession,
+    _client: RequireClient,
+    page_limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    search_after: Annotated[
+        str | None,
+        Query(description="Opaque cursor from a previous response's next_search_after"),
+    ] = None,
+) -> GhlContactsRead:
+    page = await IntegrationService(db).fetch_ghl_contacts(
+        client_id, page_limit=page_limit, search_after=_decode_cursor(search_after)
+    )
+    return GhlContactsRead(
+        contacts=[GhlContactRead.model_validate(c) for c in page.contacts],
+        next_search_after=_encode_cursor(page.next_search_after),
+    )
+
+
+@router.post(
+    "/ghl/sync",
+    response_model=IntegrationRead,
+    summary="Sync this client's GHL lead counts into analytics now",
+)
+async def sync_ghl_leads(
+    client_id: uuid.UUID,
+    db: DbSession,
+    _client: Annotated[Client, Depends(require_capability(ClientCapability.manage_integrations))],
+) -> IntegrationRead:
+    service = IntegrationService(db)
+    await service.sync_ghl_leads(client_id)
+    integration = service.get(client_id, IntegrationKey.ghl)
+    return IntegrationRead.model_validate(integration)
 
 
 @router.get("", response_model=IntegrationListResponse, summary="List integrations")

@@ -17,7 +17,7 @@ from app.core.pagination import PaginationParams
 from app.core.request_context import set_audit_changes
 from app.models.assignment import ClientAssignment
 from app.models.client import Client
-from app.models.enums import ClientCapability, ClientStatus, DocumentKind, UserRole
+from app.models.enums import ClientCapability, ClientStatus, DocumentKind, IntelJobType, UserRole
 from app.models.user import User
 from app.repositories.assignment_repository import AssignmentRepository
 from app.repositories.client_repository import ClientRepository
@@ -25,10 +25,13 @@ from app.repositories.document_repository import DocumentRepository
 from app.schemas.client import ClientListItem, ClientListResponse, ClientUpdate
 from app.schemas.document import DocumentListResponse, DocumentRead
 from app.services.audit_service import field_changes
+from app.services.intelligence.job_queue import JobQueue
 
 
 def _audit_value(value: Any) -> Any:
     """JSON-safe representation of a field value for the audit diff."""
+    if isinstance(value, uuid.UUID):
+        return str(value)
     return getattr(value, "value", value)
 
 
@@ -119,36 +122,57 @@ class ClientService:
             page_size=pagination.page_size,
         )
 
+    #: Fields ``update_client`` may move, and which the audit/proposal diff tracks.
+    _UPDATE_FIELDS = (
+        "name",
+        "business_type",
+        "industry",
+        "website",
+        "location",
+        "language",
+        "timezone",
+        "markets",
+        "status",
+    )
+
     def update_client(self, client_id: uuid.UUID, data: ClientUpdate) -> Client:
         """Admin edit of status / basic profile fields (partial). Scoping is
         enforced at the router via the ``AdminUser`` dependency."""
-        client = self.clients.get(client_id)
-        if client is None:
-            raise NotFoundError("Client not found.")
-        fields = data.model_fields_set
-        tracked = (
-            "name",
-            "business_type",
-            "industry",
-            "website",
-            "location",
-            "language",
-            "timezone",
-            "markets",
-            "status",
-        )
-        before = {f: _audit_value(getattr(client, f)) for f in tracked}
-        for attr in tracked:
-            if attr in fields:
-                setattr(client, attr, getattr(data, attr))
-        after = {f: _audit_value(getattr(client, f)) for f in tracked}
-        # Record the before/after diff so the audit log shows what changed.
-        changes = field_changes(before, after)
+        client, changes = self._apply_update_client(client_id, data)
         if changes:
             set_audit_changes(changes)
         self.db.commit()
         self.db.refresh(client)
         return client
+
+    def _apply_update_client(
+        self, client_id: uuid.UUID, data: ClientUpdate
+    ) -> tuple[Client, dict | None]:
+        """Everything ``update_client`` does short of the commit — the reusable
+        core the AI proposal engine dry-runs inside a rolled-back SAVEPOINT
+        (see ``ProposalService``) and replays for real at execution time."""
+        client = self.clients.get(client_id)
+        if client is None:
+            raise NotFoundError("Client not found.")
+        fields = data.model_fields_set
+        before = {f: _audit_value(getattr(client, f)) for f in self._UPDATE_FIELDS}
+        for attr in self._UPDATE_FIELDS:
+            if attr in fields:
+                setattr(client, attr, getattr(data, attr))
+        after = {f: _audit_value(getattr(client, f)) for f in self._UPDATE_FIELDS}
+        changes = field_changes(before, after)
+        if changes:
+            # Keep the intelligence profile (and anything the AI chat grounds
+            # itself in) from ever going stale relative to the profile/status
+            # fields just saved — same transactional-outbox pattern as
+            # OnboardingService's own enqueues.
+            JobQueue(self.db).enqueue(
+                client_id,
+                IntelJobType.incremental.value,
+                changed_keys=sorted(changes),
+                debounce_seconds=5,
+            )
+        return client, changes
 
     def _can_access(self, user: User, client_id: uuid.UUID) -> bool:
         return user.role == UserRole.admin or self.assignments.exists(client_id, user.id)

@@ -6,7 +6,9 @@ Respond with ONLY a JSON object, no prose, in exactly this shape:
   "ready": <true|false>,
   "start_date": "<YYYY-MM-DD or null>",
   "end_date": "<YYYY-MM-DD or null>",
-  "clarifying_question": "<string or null>"
+  "clarifying_question": "<string or null>",
+  "content_instructions": "<string or null>",
+  "assignee_hint": "<string or null>"
 }
 
 Rules:
@@ -15,3 +17,5 @@ Rules:
 - If "wants_content_plan" is true but the date range is missing or genuinely ambiguous, set "ready": false, leave the dates null, and write ONE short, natural, specific follow-up question in "clarifying_question" (e.g. "Sure — what date range should this cover?"). Do not ask a checklist of questions; ask only what's missing to proceed. The client's own brand, goals, and strategy are already available separately, so don't ask about those unless the manager's own message raises a real ambiguity about them.
 - If "wants_content_plan" is false, set "ready": false and "clarifying_question": null — this message will be answered normally as a regular chat reply.
 - Never resolve a date before today. If the manager names a range that has already fully passed, treat it as not ready and ask for a valid range instead.
+- "content_instructions": whenever "ready" is true, pull together anything the manager said ANYWHERE in this conversation (not just the latest message) about what the content should actually contain or be like — a specific CTA/line to keep, a topic, a tone, a format, a count. Write it as a short, direct instruction for whoever generates the content (e.g. "Keep the CTA exactly: 'Call me, call me, call me!'"). null if nothing beyond the date range was said.
+- "assignee_hint": whenever "ready" is true and the manager named a specific person anywhere in this conversation to assign the content to (a name or email), put that name/email here verbatim. null if no one was mentioned — never guess a person who wasn't named.

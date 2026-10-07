@@ -15,7 +15,9 @@ _MAX_NOTES = 500
 class AiModelRouteRead(ORMModel):
     id: uuid.UUID
     task_category: str
-    model_id: str
+    # None means "nobody has configured this category yet" — a legitimate
+    # bootstrap state (see AiModelRouteService.list_routes), not an error.
+    model_id: str | None = None
     fallback_model_id: str | None = None
     is_active: bool
     notes: str | None = None

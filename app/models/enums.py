@@ -147,6 +147,7 @@ class IntegrationKey(str, enum.Enum):
     google_lsa = "google_lsa"
     meta = "meta"
     linkedin = "linkedin"  # added — present in the frontend integrations catalog
+    ghl = "ghl"  # GoHighLevel / LeadConnector — tag-scoped contacts under one shared location
 
 
 class IntegrationStatus(str, enum.Enum):
@@ -214,6 +215,7 @@ class SocialPlatform(str, enum.Enum):
     ga4 = "ga4"  # GA4 web-analytics bucket (distinct from google ads)
     seo = "seo"  # SEO channel + Search Console sync bucket
     influencer = "influencer"  # Phase-1 influencer channel
+    ghl = "ghl"  # GoHighLevel CRM lead-count sync bucket
     other = "other"
     # ---- deprecated (Phase-1 removed; kept for existing rows only) ----
     x = "x"
@@ -448,3 +450,38 @@ class TicketStatus(str, enum.Enum):
     in_progress = "in_progress"
     resolved = "resolved"
     closed = "closed"
+
+
+# ---- AI change-proposal engine (governed propose -> approve -> execute) ----
+
+
+class ProposalStatus(str, enum.Enum):
+    """Lifecycle of an AI-drafted ``ChangeProposal``.
+
+    ``pending_approval`` is the only state a human can act on. ``executing`` is
+    a transient claim state (set by a compare-and-swap so a duplicate/racing
+    approve call can't re-run it) — real clients never linger there.
+    """
+
+    draft = "draft"  # being assembled mid chat-turn; never shown to the user
+    pending_approval = "pending_approval"
+    executing = "executing"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+    expired = "expired"
+
+
+class ProposedOperationStatus(str, enum.Enum):
+    pending = "pending"
+    executed = "executed"
+    failed = "failed"
+    skipped = "skipped"
+
+
+class ProposedOperationType(str, enum.Enum):
+    create = "create"
+    update = "update"
+    delete = "delete"
+    assign = "assign"
+    unassign = "unassign"

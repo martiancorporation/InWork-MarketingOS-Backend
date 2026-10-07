@@ -54,6 +54,24 @@ class AssignmentService:
         assigned_by: uuid.UUID,
         capabilities: list[ClientCapability] | None = None,
     ) -> ClientAssignment:
+        assignment = self._apply_assign(
+            client_id, user_id, assigned_by=assigned_by, capabilities=capabilities
+        )
+        self.db.commit()
+        self.db.refresh(assignment)
+        return assignment
+
+    def _apply_assign(
+        self,
+        client_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        assigned_by: uuid.UUID,
+        capabilities: list[ClientCapability] | None = None,
+    ) -> ClientAssignment:
+        """Everything ``assign`` does short of the commit — see
+        ``PlanService._apply_update_task`` for why this split exists (the AI
+        proposal engine's dry run and real execution both replay this)."""
         if self.clients.get(client_id) is None:
             raise NotFoundError("Client not found.")
         if self.users.get(user_id) is None:
@@ -68,11 +86,21 @@ class AssignmentService:
             capabilities=_sorted_caps(capabilities),
         )
         self.db.add(assignment)
+        self.db.flush()
+        return assignment
+
+    def set_capabilities(
+        self,
+        client_id: uuid.UUID,
+        user_id: uuid.UUID,
+        capabilities: list[ClientCapability],
+    ) -> ClientAssignment:
+        assignment = self._apply_set_capabilities(client_id, user_id, capabilities)
         self.db.commit()
         self.db.refresh(assignment)
         return assignment
 
-    def set_capabilities(
+    def _apply_set_capabilities(
         self,
         client_id: uuid.UUID,
         user_id: uuid.UUID,
@@ -82,16 +110,19 @@ class AssignmentService:
         if assignment is None:
             raise NotFoundError("Assignment not found.")
         assignment.capabilities = _sorted_caps(capabilities)
-        self.db.commit()
-        self.db.refresh(assignment)
+        self.db.flush()
         return assignment
 
     def unassign(self, client_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        self._apply_unassign(client_id, user_id)
+        self.db.commit()
+
+    def _apply_unassign(self, client_id: uuid.UUID, user_id: uuid.UUID) -> None:
         assignment = self.assignments.get(client_id, user_id)
         if assignment is None:
             raise NotFoundError("Assignment not found.")
         self.db.delete(assignment)
-        self.db.commit()
+        self.db.flush()
 
     def list_for_client(self, client_id: uuid.UUID) -> AssignmentListResponse:
         if self.clients.get(client_id) is None:

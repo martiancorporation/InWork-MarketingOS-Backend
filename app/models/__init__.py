@@ -42,6 +42,7 @@ from app.models.event import (
     EventPost,
     MarketingEvent,
 )
+from app.models.ghl_agency_connection import GhlAgencyConnection
 from app.models.integration import Integration
 from app.models.intel_job import IntelJob
 from app.models.knowledge import KnowledgeChunk, KnowledgeSource
@@ -55,6 +56,7 @@ from app.models.platform_insight import (
     PlatformMetricDaily,
     PlatformRecommendation,
 )
+from app.models.proposal import ChangeProposal, ProposedOperation
 from app.models.recommendation import RecommendationAction
 from app.models.report import Report
 from app.models.report_email_log import ReportEmailLog
@@ -86,6 +88,7 @@ __all__ = [
     "ClientDirective",
     "ClientPlatform",
     "ClientProfile",
+    "ChangeProposal",
     "ComplianceDoc",
     "ComplianceEntry",
     "Conversation",
@@ -95,6 +98,7 @@ __all__ = [
     "EventAd",
     "EventAsset",
     "EventPost",
+    "GhlAgencyConnection",
     "Integration",
     "IntelJob",
     "KnowledgeChunk",
@@ -114,6 +118,7 @@ __all__ = [
     "PlatformDeliveryIssue",
     "PlatformMetricDaily",
     "PlatformRecommendation",
+    "ProposedOperation",
     "RecommendationAction",
     "Report",
     "ReportEmailLog",

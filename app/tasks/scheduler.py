@@ -26,6 +26,7 @@ REPORT_EMAIL_JOB = "daily_report_email"
 AUDIT_LOG_PURGE_JOB = "audit_log_purge"
 NOTIFICATION_EMAIL_JOB = "notification_email"
 AUTO_PLAN_GENERATION_JOB = "auto_plan_generation"
+GHL_LEADS_SYNC_JOB = "ghl_leads_sync"
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,14 @@ def build_jobs(settings: SchedulerSettings | None = None) -> list[ScheduledJob]:
                 "Auto-draft next month's content plan once a client's local day reaches the 15th",
             )
         )
+    if s.ghl_leads_sync_enabled:
+        jobs.append(
+            ScheduledJob(
+                GHL_LEADS_SYNC_JOB,
+                s.ghl_leads_sync_interval_minutes * 60,
+                "Roll each tagged client's GHL contacts up into analytics_daily leads",
+            )
+        )
     return jobs
 
 
@@ -150,6 +159,14 @@ async def run_job(name: str) -> None:
                 auto_plan.generated,
                 auto_plan.skipped,
                 auto_plan.failed,
+            )
+        elif name == GHL_LEADS_SYNC_JOB:
+            ghl_sync = await service.sync_ghl_leads_sweep()
+            logger.info(
+                "GHL leads sync sweep: clients=%d synced=%d failed=%d",
+                ghl_sync.clients,
+                ghl_sync.synced,
+                ghl_sync.failed,
             )
         else:
             logger.warning("Unknown scheduled job: %s", name)

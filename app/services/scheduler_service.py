@@ -27,6 +27,7 @@ from app.models.client import Client
 from app.models.enums import (
     AlertStatus,
     ClientStatus,
+    IntegrationKey,
     IntegrationStatus,
     NotificationLevel,
 )
@@ -227,6 +228,47 @@ class SchedulerService:
         synced = sum(1 for row in details if row.ok)
         failed = sum(1 for row in details if not row.ok)
         return SyncSweepResult(clients=len(clients), synced=synced, failed=failed, details=details)
+
+    async def sync_ghl_leads_sweep(self) -> SyncSweepResult:
+        """Roll every tagged client's GHL contacts up into ``analytics_daily``
+        (platform=ghl) — the actual "lead count" feature. Separate from
+        ``sync_integrations_sweep`` since GHL's connection is agency-wide, not
+        per-client (see ``IntegrationService``'s GHL section): a client here
+        only needs its own ``ghl_tags`` configured, not a per-client OAuth
+        grant. Skips a client with no tags configured — nothing to pull for
+        it — rather than treating that as a failure."""
+        clients = self._active_clients()
+        semaphore = self._sweep_semaphore()
+
+        async def _one(client: Client) -> SyncSweepRow | None:
+            async with semaphore:
+                session = self._new_session()
+                try:
+                    service = IntegrationService(session)
+                    integration = service.integrations.get_for_client(
+                        client.id, IntegrationKey.ghl
+                    )
+                    if integration is None or not integration.ghl_tags:
+                        return None
+                    try:
+                        await service.sync_ghl_leads(client.id)
+                        ok, err = True, None
+                    except Exception as exc:  # isolate per-client failures
+                        logger.warning(
+                            "GHL leads sync failed: client=%s", client.id, exc_info=True
+                        )
+                        ok, err = False, str(exc)[:300]
+                    return SyncSweepRow(
+                        client_id=client.id, client_name=client.name, key="ghl", ok=ok, error=err
+                    )
+                finally:
+                    session.close()
+
+        results = await asyncio.gather(*(_one(c) for c in clients))
+        details = [row for row in results if row is not None]
+        synced = sum(1 for row in details if row.ok)
+        failed = sum(1 for row in details if not row.ok)
+        return SyncSweepResult(clients=len(details), synced=synced, failed=failed, details=details)
 
     async def _prewarm_dashboard(self, session: Session, client: Client) -> None:
         """Recompute ``client``'s dashboard snapshot in the background if

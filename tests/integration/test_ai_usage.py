@@ -28,8 +28,8 @@ def _client_row(db: Session) -> Client:
 def _event(db: Session, **kw):
     defaults = {
         "feature": "onboarding.brand_extraction",
-        "provider": "anthropic",
-        "model": "claude-opus-4-8",
+        "provider": "qwen",
+        "model": "qwen3.7-flash",
         "operation": "complete",
         "input_tokens": 1000,
         "output_tokens": 500,
@@ -123,7 +123,7 @@ def test_platform_summary_totals_and_breakdowns(
     # by_model isn't a feature grouping — no label expected there.
     assert all(r["label"] is None for r in s["by_model"])
     models = {r["key"] for r in s["by_model"]}
-    assert {"claude-opus-4-8", "claude-sonnet-5"} == models
+    assert {"qwen3.7-flash", "claude-sonnet-5"} == models
     assert len(s["daily"]) >= 1
 
 

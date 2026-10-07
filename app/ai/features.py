@@ -17,6 +17,7 @@ class AiFeature:
     CLIENT_SUMMARY = "intelligence.client_summary"
     CLIENT_DIRECTIVES = "intelligence.client_directives"
     PROJECT_AI = "project_ai.chat"
+    COMMAND_AGENT = "assistant.command"
     PLAN_GENERATION = "plan.generate"
     PLAN_CHAT_INTENT = "plan.chat_intent"
     DAY_CHAT = "day.chat"
@@ -47,6 +48,7 @@ FEATURE_LABELS: dict[str, str] = {
     AiFeature.CLIENT_SUMMARY: "Client Summary",
     AiFeature.CLIENT_DIRECTIVES: "Client Directives",
     AiFeature.PROJECT_AI: "AI Chat",
+    AiFeature.COMMAND_AGENT: "AI Command Layer",
     AiFeature.PLAN_GENERATION: "AI Content Calendar",
     AiFeature.PLAN_CHAT_INTENT: "AI Chat / Plan Intent Check",
     AiFeature.DAY_CHAT: "Day Chat",

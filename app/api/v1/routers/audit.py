@@ -22,6 +22,9 @@ def list_audit(
     entity: str | None = Query(None, description="Exact entity, e.g. clients / users"),
     actor_user_id: uuid.UUID | None = Query(None, description="Filter by the acting user"),
     client_id: uuid.UUID | None = Query(None, description="Filter by client"),
+    proposal_id: uuid.UUID | None = Query(
+        None, description="Filter by the AI change proposal that produced the row"
+    ),
 ) -> AuditLogListResponse:
     return AuditService(db).list(
         pagination,
@@ -29,4 +32,5 @@ def list_audit(
         entity=entity,
         actor_user_id=actor_user_id,
         client_id=client_id,
+        proposal_id=proposal_id,
     )

@@ -13,7 +13,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from anyio import to_thread
@@ -21,17 +21,24 @@ from sqlalchemy.orm import Session
 
 from app.ai.assistant import AssistantStreamPrep, ProjectAssistantAgent
 from app.ai.attachments import MAX_ATTACHMENTS, AttachmentBundle, build_bundle
+from app.ai.command_agent import CommandAgent, CommandTurnResult
 from app.ai.features import AiFeature
 from app.ai.plan_chat_intent import PlanChatIntent, PlanChatIntentAgent
+from app.ai.tools import handlers as command_tool_handlers
 from app.ai.usage import AiUsageContext
-from app.core.exceptions import BadRequestError, NotFoundError, ServiceUnavailableError
+from app.core.exceptions import (
+    BadRequestError,
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from app.core.pagination import PaginationParams
 from app.integrations.embeddings import get_embedder
 from app.integrations.llm import get_llm_client
 from app.integrations.storage import Storage
 from app.models.ai import AiChat, AiChatMessage
 from app.models.client import Client
-from app.models.enums import AiRole
+from app.models.enums import AiRole, UserRole
 from app.models.user import User
 from app.repositories.ai_chat_repository import AiChatRepository
 from app.schemas.assistant import (
@@ -45,7 +52,9 @@ from app.schemas.assistant import (
     PlanDraftAction,
     PlanDraftItemSummary,
 )
+from app.schemas.proposal import ChangeProposalRead, CommandTurnResponse
 from app.services.plan_generation_service import PlanGenerationService
+from app.services.proposal_service import ProposalService
 from app.services.upload_service import UploadService
 from app.utils.download_link import upload_permalink
 from app.utils.timezones import client_local_today
@@ -63,6 +72,17 @@ _MAX_LLM_HISTORY_MESSAGES = 40
 # is always on the real Content Calendar; the card just needs enough for the
 # manager to recognize what was drafted before approving.
 _MAX_PREVIEW_ITEMS = 8
+
+#: UserRole.user is strictly read-only through Ask AI (see CommandAgent's own
+#: tool-level gate, which handles the natural-language command path) — this
+#: is the equivalent gate for the OLDER, separate chat-drafted-content-plan
+#: flow (_maybe_handle_plan_request), which persists rows directly rather
+#: than going through ProposalService's stage/approve mechanism at all.
+_READ_ONLY_CONTENT_PLAN_REPLY = (
+    "Your account has read-only access on this client, so I can't draft or change "
+    "the content calendar — an admin or manager needs to do that. I'm happy to look "
+    "up existing plans, performance, or anything else for you."
+)
 
 
 @dataclass
@@ -88,6 +108,29 @@ class StreamContext:
 def _sse(payload: dict) -> str:
     """One Server-Sent Events frame (``data: {...}\\n\\n``)."""
     return f"data: {json.dumps(payload)}\n\n"
+
+
+@dataclass
+class CommandStreamContext:
+    """Prepared state for a streamed chat turn (built before the SSE body
+    starts, mirroring ``StreamContext``'s "validate before streaming" contract).
+
+    ``agent``/``history`` are set for the normal path (answered or acted on via
+    ``CommandAgent``); a message that turned out to be a content-plan request
+    (a clarifying question, or an already-generated draft — see
+    ``_maybe_handle_plan_request``) instead sets ``immediate_result``/
+    ``immediate_meta``, delivered as a single SSE frame rather than streamed
+    token-by-token, since there's nothing to stream.
+    """
+
+    client_id: uuid.UUID
+    chat_id: uuid.UUID
+    user: User
+    content: str
+    agent: CommandAgent | None = None
+    history: list[tuple[str, str]] = field(default_factory=list)
+    immediate_result: CommandTurnResult | None = None
+    immediate_meta: dict | None = None
 
 
 class AssistantService:
@@ -178,6 +221,9 @@ class AssistantService:
                 read.action = PlanDraftAction.model_validate(action_data)
             except Exception:
                 logger.warning("Malformed plan-draft action on message %s", message.id)
+        proposal_id = meta.get("proposal_id")
+        if proposal_id:
+            read.proposal_id = uuid.UUID(str(proposal_id))
         return read
 
     def delete_chat(self, client_id: uuid.UUID, chat_id: uuid.UUID) -> None:
@@ -234,6 +280,239 @@ class AssistantService:
         self.db.refresh(assistant_msg)
         return AssistantAskResponse(message=self._message_read(assistant_msg), sources=sources)
 
+    async def run_command_turn(
+        self,
+        client_id: uuid.UUID,
+        chat_id: uuid.UUID,
+        user: User,
+        content: str,
+        *,
+        attachment_upload_ids: list[uuid.UUID] | None = None,
+        storage: Storage | None = None,
+    ) -> CommandTurnResponse:
+        """The one unified chat turn: answers questions, drafts a content plan
+        (the existing chat-drafted-calendar special case), or proposes a
+        change — whichever the message actually calls for, in one flow with no
+        mode to pick. A drafted mutation comes back as one ``ChangeProposal``;
+        nothing is applied until a human approves it via
+        ``ProposalService.approve``. See ``app/ai/command_agent.py``."""
+        self._require_chat(client_id, chat_id)
+        history = [
+            (m.role.value, m.content)
+            for m in self.chats.list_messages(chat_id, limit=_MAX_LLM_HISTORY_MESSAGES)
+        ]
+        bundle, meta = await self._resolve_attachments(user, attachment_upload_ids, storage)
+        self.chats.add_message(chat_id, AiRole.user, content, meta=meta)
+        self.db.commit()
+
+        plan_reply = await self._maybe_handle_plan_request(client_id, content, history, actor=user)
+        if plan_reply is not None:
+            reply_text, action_payload = plan_reply
+            result = CommandTurnResult(reply=reply_text)
+            extra_meta = {"action": action_payload} if action_payload else None
+            return self._finalize_command_turn(
+                client_id, chat_id, user, content, result, extra_meta=extra_meta
+            )
+
+        if bundle is not None:
+            # The tool-calling command loop is text-only (no vision support) —
+            # a turn with files attached is answered directly, grounded in the
+            # attachments + knowledge base, same as it always was. It can't
+            # stage a proposal in the same turn; ask a follow-up to do that.
+            result = await self._answer_with_attachments(client_id, user, content, history, bundle)
+            return self._finalize_command_turn(client_id, chat_id, user, content, result)
+
+        agent = self._command_agent(client_id, user)
+        result = await agent.run_turn(content, history=history)
+        return self._finalize_command_turn(client_id, chat_id, user, content, result)
+
+    async def begin_command_stream(
+        self,
+        client_id: uuid.UUID,
+        chat_id: uuid.UUID,
+        user: User,
+        content: str,
+        *,
+        attachment_upload_ids: list[uuid.UUID] | None = None,
+        storage: Storage | None = None,
+    ) -> CommandStreamContext:
+        """Validate + persist the user turn before any streaming starts (same
+        404-before-stream contract as ``begin_stream``). Call this, then feed
+        the result to ``stream_command_events``."""
+        self._require_chat(client_id, chat_id)
+        history = [
+            (m.role.value, m.content)
+            for m in self.chats.list_messages(chat_id, limit=_MAX_LLM_HISTORY_MESSAGES)
+        ]
+        bundle, meta = await self._resolve_attachments(user, attachment_upload_ids, storage)
+        self.chats.add_message(chat_id, AiRole.user, content, meta=meta)
+        self.db.commit()
+
+        plan_reply = await self._maybe_handle_plan_request(client_id, content, history, actor=user)
+        if plan_reply is not None:
+            reply_text, action_payload = plan_reply
+            return CommandStreamContext(
+                client_id=client_id,
+                chat_id=chat_id,
+                user=user,
+                content=content,
+                immediate_result=CommandTurnResult(reply=reply_text),
+                immediate_meta={"action": action_payload} if action_payload else None,
+            )
+
+        if bundle is not None:
+            # Vision completion isn't a token stream in this codebase — deliver
+            # it as one immediate frame, same as the plan-request short-circuit
+            # above, rather than not supporting attachments on this endpoint at all.
+            result = await self._answer_with_attachments(client_id, user, content, history, bundle)
+            return CommandStreamContext(
+                client_id=client_id,
+                chat_id=chat_id,
+                user=user,
+                content=content,
+                immediate_result=result,
+            )
+
+        agent = self._command_agent(client_id, user)
+        return CommandStreamContext(
+            client_id=client_id,
+            chat_id=chat_id,
+            user=user,
+            content=content,
+            agent=agent,
+            history=history,
+        )
+
+    async def _answer_with_attachments(
+        self,
+        client_id: uuid.UUID,
+        user: User,
+        content: str,
+        history: list[tuple[str, str]],
+        bundle: AttachmentBundle,
+    ) -> CommandTurnResult:
+        agent = ProjectAssistantAgent(
+            self.db,
+            client_id,
+            embedder=get_embedder(),
+            ai_client=get_llm_client(
+                AiUsageContext(feature=AiFeature.PROJECT_AI, client_id=client_id, user_id=user.id)
+            ),
+        )
+        answer, _sources = await agent.answer(content, history=history, attachments=bundle)
+        return CommandTurnResult(reply=answer)
+
+    async def stream_command_events(self, ctx: CommandStreamContext) -> AsyncIterator[str]:
+        """SSE for one chat turn: a ``delta`` frame per token as the model's
+        own reply is generated, a ``tool_progress`` frame as each tool call is
+        dispatched, and a ``done`` frame with the persisted message id, the
+        full reply, and any staged proposal — nothing is written to the
+        database until a human approves it (``ProposalService.approve``). A
+        content-plan turn (see ``begin_command_stream``) has nothing to
+        animate, so it's delivered as one immediate ``delta`` + ``done`` pair
+        instead, same as ``stream_events`` does for the old ask-only path."""
+        if ctx.immediate_result is not None:
+            yield _sse({"type": "delta", "text": ctx.immediate_result.reply})
+            response = self._finalize_command_turn(
+                ctx.client_id,
+                ctx.chat_id,
+                ctx.user,
+                ctx.content,
+                ctx.immediate_result,
+                extra_meta=ctx.immediate_meta,
+            )
+            yield _sse(
+                {
+                    "type": "done",
+                    "message_id": str(response.message_id),
+                    "content": response.reply,
+                    "proposal": None,
+                }
+            )
+            return
+
+        assert ctx.agent is not None
+        result: CommandTurnResult | None = None
+        async for event in ctx.agent.run_turn_stream(ctx.content, history=ctx.history):
+            if event.type == "delta":
+                yield _sse({"type": "delta", "text": event.text})
+            elif event.type == "tool_progress":
+                yield _sse({"type": "tool_progress", "label": event.tool_name})
+            else:
+                result = event.result
+
+        assert result is not None  # the agent's last event is always "result"
+        response = self._finalize_command_turn(
+            ctx.client_id, ctx.chat_id, ctx.user, ctx.content, result
+        )
+        yield _sse(
+            {
+                "type": "done",
+                "message_id": str(response.message_id),
+                "content": response.reply,
+                "proposal": response.proposal.model_dump(mode="json")
+                if response.proposal
+                else None,
+            }
+        )
+
+    def _command_agent(self, client_id: uuid.UUID, user: User) -> CommandAgent:
+        return CommandAgent(
+            self.db,
+            client_id,
+            user,
+            ai_client=get_llm_client(
+                AiUsageContext(
+                    feature=AiFeature.COMMAND_AGENT, client_id=client_id, user_id=user.id
+                )
+            ),
+        )
+
+    def _finalize_command_turn(
+        self,
+        client_id: uuid.UUID,
+        chat_id: uuid.UUID,
+        user: User,
+        content: str,
+        result: CommandTurnResult,
+        *,
+        extra_meta: dict | None = None,
+    ) -> CommandTurnResponse:
+        """Persist the assembled assistant turn and, if the model staged any
+        mutation, create the ``ChangeProposal`` for it — shared by the plain
+        and streamed turn paths so they behave identically.
+
+        ``extra_meta`` carries the content-plan special case's
+        ``{"action": ...}`` payload (see ``_maybe_handle_plan_request``) so the
+        existing ``PlanDraftCard`` UI keeps working once that flow is folded
+        into this same unified entry point.
+        """
+        chat = self._require_chat(client_id, chat_id)
+        assistant_msg = self.chats.add_message(chat_id, AiRole.assistant, result.reply)
+        chat.updated_at = datetime.now(UTC)
+        if extra_meta:
+            assistant_msg.meta = {**(assistant_msg.meta or {}), **extra_meta}
+
+        proposal_read: ChangeProposalRead | None = None
+        if result.operations:
+            proposal = ProposalService(self.db).create_proposal(
+                client_id,
+                chat_id=chat_id,
+                message_id=assistant_msg.id,
+                created_by=user.id,
+                raw_request=content,
+                summary=result.reply,
+                operations=result.operations,
+            )
+            assistant_msg.meta = {**(assistant_msg.meta or {}), "proposal_id": str(proposal.id)}
+            proposal_read = ChangeProposalRead.model_validate(proposal)
+
+        self.db.commit()
+        self.db.refresh(assistant_msg)
+        return CommandTurnResponse(
+            chat_id=chat_id, message_id=assistant_msg.id, reply=result.reply, proposal=proposal_read
+        )
+
     async def _maybe_handle_plan_request(
         self,
         client_id: uuid.UUID,
@@ -267,6 +546,11 @@ class AssistantService:
         intent = await intent_agent.classify(content, history=history, today=today)
         if not intent.wants_content_plan:
             return None
+        if actor.role == UserRole.user:
+            # Read-only accounts never reach generation at all — not even a
+            # clarifying question, since there is nothing they could approve
+            # afterward anyway. See the module-level constant's docstring.
+            return _READ_ONLY_CONTENT_PLAN_REPLY, None
         if not intent.ready:
             return intent.clarifying_question, None
         return await self._generate_plan_from_chat(client_id, intent, actor=actor)
@@ -275,8 +559,18 @@ class AssistantService:
         self, client_id: uuid.UUID, intent: PlanChatIntent, *, actor: User
     ) -> tuple[str, dict]:
         assert intent.start_date is not None and intent.end_date is not None
+
+        assignee_id, assignee_note = self._resolve_chat_assignee(
+            client_id, intent.assignee_hint, actor=actor
+        )
+
         items = await PlanGenerationService(self.db).propose_range(
-            client_id, "", start_date=intent.start_date, end_date=intent.end_date, user=actor
+            client_id,
+            intent.content_instructions or "",
+            start_date=intent.start_date,
+            end_date=intent.end_date,
+            user=actor,
+            assignee_id=assignee_id,
         )
         if not items:
             return (
@@ -302,7 +596,36 @@ class AssistantService:
             f"{intent.start_date.isoformat()} to {intent.end_date.isoformat()} — "
             "take a look below and approve it, or let me know what to change."
         )
+        if assignee_note:
+            reply += f" {assignee_note}"
         return reply, action.model_dump(mode="json")
+
+    def _resolve_chat_assignee(
+        self, client_id: uuid.UUID, assignee_hint: str | None, *, actor: User
+    ) -> tuple[uuid.UUID | None, str | None]:
+        """Resolve a name/email the manager mentioned to an actual team
+        member, the same "search this client's team, never guess" discipline
+        the command-agent tools use — never silently assign to the wrong
+        person, and never silently drop the request either: the returned note
+        (appended to the chat reply) says plainly when it couldn't be done."""
+        if not assignee_hint:
+            return None, None
+        matches = command_tool_handlers.search_users(
+            self.db, client_id, actor, query=assignee_hint
+        )["users"]
+        if len(matches) == 1:
+            match = matches[0]
+            return uuid.UUID(match["id"]), f"Assigned to {match['name']}."
+        if not matches:
+            return None, (
+                f"I couldn't find \"{assignee_hint}\" on this client's team, so it's "
+                "unassigned for now — assign it from the Plan board."
+            )
+        names = ", ".join(m["name"] for m in matches)
+        return None, (
+            f'"{assignee_hint}" matched more than one person ({names}), so I left it '
+            "unassigned — assign it from the Plan board."
+        )
 
     async def _resolve_attachments(
         self,
@@ -487,6 +810,8 @@ class AssistantService:
         ``PlanGenerationService.approve_batch``), then marks this specific
         message's card as resolved so reopening the chat later shows the
         outcome instead of a card that looks pending forever."""
+        if actor.role == UserRole.user:
+            raise ForbiddenError("Your account has read-only access and cannot approve changes.")
         message, task_ids = self._require_pending_action_message(client_id, chat_id, message_id)
         PlanGenerationService(self.db).approve_batch(client_id, task_ids, actor=actor)
         self._set_action_status(message, "approved")
@@ -504,6 +829,8 @@ class AssistantService:
         """The chat card's "Discard" button — mirrors
         ``PlanGenerationService.reject_batch`` exactly (never hard-deletes;
         a manager can still revise it later from the normal Plan page)."""
+        if actor.role == UserRole.user:
+            raise ForbiddenError("Your account has read-only access and cannot reject changes.")
         message, task_ids = self._require_pending_action_message(client_id, chat_id, message_id)
         PlanGenerationService(self.db).reject_batch(client_id, task_ids, reason, actor=actor)
         self._set_action_status(message, "rejected")

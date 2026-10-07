@@ -19,7 +19,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from app.ai.model_router import category_for, model_for
-from app.ai.pricing import MODEL_PRICING, UsageBreakdown, price
+from app.ai.pricing import UsageBreakdown, get_rate, has_rate, price
 from app.schemas.ai_usage import CostOptimizationReport, CostSuggestion
 
 # Don't bother suggesting for trivial amounts.
@@ -68,7 +68,7 @@ def _row_suggestions(r: dict) -> list[CostSuggestion]:
         and recommended
         and recommended != model
         and cost > 0
-        and recommended in MODEL_PRICING
+        and has_rate(recommended)
     ):
         projected = price(
             recommended,
@@ -100,9 +100,8 @@ def _row_suggestions(r: dict) -> list[CostSuggestion]:
         requests >= _CACHE_MIN_REQUESTS
         and input_tokens >= _CACHE_MIN_INPUT_TOKENS
         and cache_read_tokens == 0
-        and model in MODEL_PRICING
+        and (rate := get_rate(model)) is not None
     ):
-        rate = MODEL_PRICING[model]
         # Cached reads are far cheaper than base input; assume ~60% of input is a
         # stable prefix that could be served from cache.
         cacheable = Decimal(input_tokens) * Decimal("0.6")

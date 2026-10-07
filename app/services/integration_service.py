@@ -24,13 +24,23 @@ import hmac
 import logging
 import time
 import uuid
+from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.exceptions import AppError, BadRequestError, NotFoundError, ProviderAuthError
+from app.core.exceptions import (
+    AppError,
+    BadRequestError,
+    NotFoundError,
+    ProviderAuthError,
+    ServiceUnavailableError,
+)
 from app.integrations.crypto import TokenCipher
+from app.integrations.ghl.client import GhlClient, GhlContactsPage
+from app.integrations.ghl.oauth import GhlOAuthClient
 from app.integrations.google.ads import GoogleAdsClient
 from app.integrations.google.ga4 import Ga4Client
 from app.integrations.google.lsa import LsaClient
@@ -41,7 +51,9 @@ from app.integrations.linkedin.oauth import LinkedInOAuthClient
 from app.integrations.meta.client import MetaClient
 from app.integrations.meta.oauth import MetaOAuthClient
 from app.models.enums import IntegrationKey, IntegrationStatus, SocialPlatform
+from app.models.ghl_agency_connection import GhlAgencyConnection
 from app.models.integration import Integration
+from app.repositories.ghl_agency_connection_repository import GhlAgencyConnectionRepository
 from app.repositories.integration_repository import IntegrationRepository
 from app.schemas.analytics import AnalyticsDailyIn
 from app.schemas.integration import (
@@ -72,11 +84,18 @@ _GOOGLE_PLATFORM = {
     IntegrationKey.ga4: SocialPlatform.ga4,
     IntegrationKey.search_console: SocialPlatform.seo,
 }
-# Providers wired for REAL OAuth (others still use the placeholder `connect`).
+# Providers wired for REAL OAuth (an authorization-code redirect through our
+# own app — oauth_start / oauth_complete). GHL is deliberately NOT one of
+# these: its token is handed to us directly, out-of-band, by the client's
+# team (see `connect_ghl`), so it never runs the redirect flow and must not
+# be picked up by oauth_start/oauth_complete's per-provider branching, nor by
+# the scheduler sweep's generic `sync()` call (which only knows ad-metrics
+# providers) — a separate, explicit set keeps it out of both.
 _META_KEYS = {IntegrationKey.meta}
 _GOOGLE_KEYS = set(_GOOGLE_SCOPES)
 _LINKEDIN_KEYS = {IntegrationKey.linkedin}
 _REAL_KEYS = _META_KEYS | _GOOGLE_KEYS | _LINKEDIN_KEYS
+_GHL_KEYS = {IntegrationKey.ghl}
 
 
 def _select_ad_account(accounts: list[dict], requested: str | None) -> dict | None:
@@ -108,16 +127,14 @@ def _select_ad_account(accounts: list[dict], requested: str | None) -> dict | No
     return None
 
 
-def _select_google_account(accounts: list[str], requested: str | None) -> str | None:
+def _select_google_account(accounts: list[dict], requested: str | None) -> dict | None:
     """Pick which Google account (Ads customer id / GA4 property / Search
     Console site) to bind — same "never auto-bind" contract as
-    ``_select_ad_account``, just over a plain id list instead of dicts (Google's
-    discovery calls don't return display names).
-    """
+    ``_select_ad_account``, now over the same ``{"id", "name"}`` shape."""
     if requested:
         want = requested.replace("-", "")
         for acc in accounts:
-            if acc.replace("-", "") == want:
+            if str(acc["id"]).replace("-", "") == want:
                 return acc
         raise BadRequestError(
             "The requested Google account isn't accessible to the authorized user."
@@ -139,10 +156,13 @@ class IntegrationService:
         lsa_client: LsaClient | None = None,
         linkedin_oauth: LinkedInOAuthClient | None = None,
         linkedin_client: LinkedInClient | None = None,
+        ghl_oauth: GhlOAuthClient | None = None,
+        ghl_client: GhlClient | None = None,
         cipher: TokenCipher | None = None,
     ) -> None:
         self.db = db
         self.integrations = IntegrationRepository(db)
+        self.ghl_agency_repo = GhlAgencyConnectionRepository(db)
         self._meta_oauth = meta_oauth
         self._meta_client = meta_client
         self._google_oauth = google_oauth
@@ -152,6 +172,8 @@ class IntegrationService:
         self._lsa_client = lsa_client
         self._linkedin_oauth = linkedin_oauth
         self._linkedin_client = linkedin_client
+        self._ghl_oauth = ghl_oauth
+        self._ghl_client = ghl_client
         self._cipher_override = cipher
 
     # ---- reads --------------------------------------------------------- #
@@ -218,6 +240,263 @@ class IntegrationService:
         self.db.commit()
         self.db.refresh(integration)
         return integration
+
+    # ---- GHL (one real, agency-wide OAuth2 connection) ---------------- #
+    #
+    # This engagement's GHL setup is one shared location for every client, so
+    # the OAuth connect flow (below) is deliberately NOT client-scoped — it's
+    # performed once, by an admin, against ``GhlAgencyConnection`` (a
+    # singleton — see that model's docstring for why this also fixes a real
+    # refresh-token-collision bug the old per-client-copy design had). What
+    # IS per-client is only which contact/opportunity tags identify that
+    # client's records within the one shared location (``set_ghl_tags``).
+
+    def ghl_agency_status(self) -> GhlAgencyConnection | None:
+        return self.ghl_agency_repo.get_singleton()
+
+    def ghl_oauth_start(self) -> tuple[str, str]:
+        """Begin the agency-wide authorization-code flow: return
+        (authorization_url, state). An admin opens ``authorization_url``,
+        picks the one shared location on GHL's own consent screen, and GHL
+        redirects back with a ``code`` for ``ghl_oauth_complete``."""
+        if not self.ghl_oauth.is_configured:
+            raise ServiceUnavailableError(
+                "GHL integration is not configured on this server "
+                "(GHL_CLIENT_ID / GHL_CLIENT_SECRET / GHL_REDIRECT_URI)."
+            )
+        state = self._sign_agency_state()
+        url = self.ghl_oauth.authorization_url(state)
+        connection = self.ghl_agency_repo.get_singleton()
+        if connection is None:
+            connection = GhlAgencyConnection()
+            self.ghl_agency_repo.add(connection)
+        connection.status = IntegrationStatus.pending
+        self.db.commit()
+        return url, state
+
+    async def ghl_oauth_complete(
+        self, code: str, state: str, *, actor_user_id: uuid.UUID
+    ) -> GhlAgencyConnection:
+        """Finish the agency-wide OAuth: exchange the code, store the one
+        shared token pair. Re-derives who performed this from the
+        authenticated session (``actor_user_id``), same "never trust
+        anything client-supplied for who did this" stance as every other
+        approval-style action in this codebase."""
+        if not self._verify_agency_state(state):
+            raise BadRequestError("Invalid or expired OAuth state.")
+        tokens = await self.ghl_oauth.exchange_code(code)
+        connection = self.ghl_agency_repo.get_singleton()
+        if connection is None:
+            connection = GhlAgencyConnection()
+            self.ghl_agency_repo.add(connection)
+        access = tokens.get("access_token")
+        if not access:
+            raise ProviderAuthError("GHL did not return an access token.")
+        connection.access_token_encrypted = self.cipher.encrypt(access)
+        refresh = tokens.get("refresh_token")
+        connection.refresh_token_encrypted = self.cipher.encrypt(refresh) if refresh else None
+        connection.token_expires_at = self._expiry(tokens.get("expires_in"))
+        connection.location_id = tokens.get("locationId") or connection.location_id
+        connection.company_id = tokens.get("companyId") or connection.company_id
+        connection.status = IntegrationStatus.connected
+        connection.connected_by = actor_user_id
+        connection.last_error = None
+        self.db.commit()
+        self.db.refresh(connection)
+        # Sync right away rather than waiting for the next scheduled sweep —
+        # some clients may already have tags configured from before this
+        # connection existed (their status was `pending`; see set_ghl_tags).
+        await self._sync_all_tagged_ghl_clients()
+        return connection
+
+    async def _sync_all_tagged_ghl_clients(self) -> None:
+        """Best-effort immediate sync for every client with GHL tags already
+        configured. Failures are isolated per client and logged, never
+        raised — this runs opportunistically after a connect/tag-save, and
+        the periodic scheduler sweep remains the source of truth."""
+        clients = self.db.scalars(
+            select(Integration).where(Integration.key == IntegrationKey.ghl)
+        ).all()
+        for integration in clients:
+            if not integration.ghl_tags:
+                continue
+            try:
+                await self.sync_ghl_leads(integration.client_id)
+            except Exception:
+                logger.warning(
+                    "Immediate GHL leads sync failed: client=%s",
+                    integration.client_id,
+                    exc_info=True,
+                )
+
+    def ghl_disconnect(self) -> GhlAgencyConnection:
+        connection = self.ghl_agency_repo.get_singleton()
+        if connection is None:
+            raise NotFoundError("GHL has never been connected.")
+        connection.status = IntegrationStatus.disconnected
+        connection.access_token_encrypted = None
+        connection.refresh_token_encrypted = None
+        connection.token_expires_at = None
+        self.db.commit()
+        self.db.refresh(connection)
+        return connection
+
+    async def set_ghl_tags(self, client_id: uuid.UUID, tags: list[str]) -> Integration:
+        """Set which contact/opportunity tags identify this client's records
+        within InWork's one shared GHL location. This is the entire per-client
+        "connect" step now — the credential itself lives on the one agency-wide
+        ``GhlAgencyConnection`` (see above), never duplicated per client."""
+        if not tags:
+            raise BadRequestError("At least one GHL tag is required to connect this client.")
+        integration = self._upsert(client_id, IntegrationKey.ghl)
+        integration.ghl_tags = tags
+        agency_connected = self.ghl_agency_repo.get_singleton() is not None
+        integration.status = (
+            IntegrationStatus.connected if agency_connected else IntegrationStatus.pending
+        )
+        integration.last_error = None
+        self.db.commit()
+        self.db.refresh(integration)
+        if agency_connected:
+            # Sync right away rather than waiting for the next scheduled
+            # sweep, so leads show up as soon as tags are configured.
+            try:
+                await self.sync_ghl_leads(client_id)
+            except Exception:
+                logger.warning(
+                    "Immediate GHL leads sync failed: client=%s", client_id, exc_info=True
+                )
+        return integration
+
+    async def fetch_ghl_contacts(
+        self,
+        client_id: uuid.UUID,
+        *,
+        page_limit: int = 100,
+        search_after: list | None = None,
+    ) -> GhlContactsPage:
+        """One page of contacts tagged for this client, from InWork's one
+        shared GHL location. Bounded like every other list endpoint — callers
+        that want everything page through via ``next_search_after`` rather
+        than this pulling an unbounded set into memory in one call."""
+        integration = self.get(client_id, IntegrationKey.ghl)  # 404 if never configured
+        if not integration.ghl_tags:
+            raise BadRequestError("No GHL tags are configured for this client.")
+        connection = self.ghl_agency_repo.get_singleton()
+        if connection is None or not connection.access_token_encrypted:
+            raise BadRequestError("GHL is not connected yet — connect it from Settings first.")
+        try:
+            token = await self._ghl_agency_access_token(connection)
+            page = await self.ghl_client.search_contacts(
+                token,
+                connection.location_id,
+                integration.ghl_tags,
+                page_limit=page_limit,
+                search_after=search_after,
+            )
+        except Exception as exc:
+            self._record_ghl_failure(integration, connection, exc)
+            raise
+        integration.status = IntegrationStatus.connected
+        integration.last_sync_at = datetime.now(UTC)
+        integration.last_error = None
+        self.db.commit()
+        return page
+
+    async def sync_ghl_leads(self, client_id: uuid.UUID, *, days: int = 30) -> int:
+        """Roll this client's tagged GHL contacts up into ``analytics_daily``
+        as a daily lead count (``platform=ghl``) over a trailing window —
+        this is what actually produces a "lead count" the dashboard/report
+        can show; ``fetch_ghl_contacts`` only ever returns the raw contact
+        list on demand. Returns how many days got a row written."""
+        integration = self.get(client_id, IntegrationKey.ghl)  # 404 if never configured
+        if not integration.ghl_tags:
+            raise BadRequestError("No GHL tags are configured for this client.")
+        connection = self.ghl_agency_repo.get_singleton()
+        if connection is None or not connection.access_token_encrypted:
+            raise BadRequestError("GHL is not connected yet — connect it from Settings first.")
+        try:
+            token = await self._ghl_agency_access_token(connection)
+            contacts = await self.ghl_client.search_all_contacts(
+                token, connection.location_id, integration.ghl_tags
+            )
+        except Exception as exc:
+            self._record_ghl_failure(integration, connection, exc)
+            raise
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        counts: dict[date, int] = defaultdict(int)
+        for contact in contacts:
+            added = _parse_ghl_datetime(contact.get("dateAdded"))
+            if added is None or added < cutoff:
+                continue
+            counts[added.date()] += 1
+        rows = [
+            AnalyticsDailyIn(date=day, platform=SocialPlatform.ghl, leads=count)
+            for day, count in counts.items()
+        ]
+        if rows:
+            # commit=False: folded into this method's own terminal commit
+            # below, same reasoning as the real-OAuth providers' `sync()`.
+            AnalyticsService(self.db).ingest(client_id, rows, commit=False)
+        integration.status = IntegrationStatus.connected
+        integration.last_sync_at = datetime.now(UTC)
+        integration.last_error = None
+        connection.status = IntegrationStatus.connected
+        connection.last_sync_at = datetime.now(UTC)
+        connection.last_error = None
+        self.db.commit()
+        return len(rows)
+
+    def _record_ghl_failure(
+        self, integration: Integration, connection: GhlAgencyConnection, exc: Exception
+    ) -> None:
+        # A dead grant (refresh token itself expired/revoked — GHL's refresh
+        # tokens are valid up to a year if unused) needs a reconnect; anything
+        # else is worth retrying, so it stays `error`. Recorded on BOTH the
+        # one shared connection (the real root cause, same for every client)
+        # and this specific client's own row (so their own status view shows
+        # they're affected too).
+        status = (
+            IntegrationStatus.needs_reauth
+            if isinstance(exc, ProviderAuthError)
+            else IntegrationStatus.error
+        )
+        message = str(exc)[:1000]
+        connection.status = status
+        connection.last_error = message
+        integration.status = status
+        integration.last_error = message
+        self.db.commit()
+
+    async def _ghl_agency_access_token(self, connection: GhlAgencyConnection) -> str:
+        """Return a valid GHL access token, refreshing it if it's near expiry.
+
+        GHL rotates the refresh token on every use — the new one returned by
+        the refresh call is what must be persisted, not the one just spent.
+        Refreshing here, on the one shared connection, is what makes the
+        collision bug the old per-client-copy design had structurally
+        impossible: there is only ever one row to refresh and re-read.
+        """
+        now = datetime.now(UTC)
+        expires = connection.token_expires_at
+        if expires is not None and expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        fresh = expires is None or expires > now + timedelta(seconds=60)
+        if fresh or not connection.refresh_token_encrypted:
+            return self.cipher.decrypt(connection.access_token_encrypted)
+        tokens = await self.ghl_oauth.refresh_access_token(
+            self.cipher.decrypt(connection.refresh_token_encrypted)
+        )
+        access = tokens.get("access_token")
+        if not access:  # refresh failed — fall back to the stored token
+            return self.cipher.decrypt(connection.access_token_encrypted)
+        connection.access_token_encrypted = self.cipher.encrypt(access)
+        new_refresh = tokens.get("refresh_token")
+        if new_refresh:
+            connection.refresh_token_encrypted = self.cipher.encrypt(new_refresh)
+        connection.token_expires_at = self._expiry(tokens.get("expires_in"))
+        self.db.commit()
+        return access
 
     # ---- real OAuth2 (Meta + Google Ads) ------------------------------ #
 
@@ -320,13 +599,13 @@ class IntegrationService:
         else:
             access = await self._google_access_token(integration)
             accounts = await self._list_google_accounts(key, access)
-            account_id = _select_google_account(accounts, ad_account_id)
-            if account_id is None:
+            account = _select_google_account(accounts, ad_account_id)
+            if account is None:
                 raise BadRequestError(
                     "The requested Google account isn't accessible to the authorized user."
                 )
-            integration.external_account_id = account_id
-            integration.account_label = account_id
+            integration.external_account_id = account["id"]
+            integration.account_label = account.get("name") or account["id"]
             if key == IntegrationKey.google_ads:
                 integration.login_customer_id = login_customer_id
         self.db.commit()
@@ -574,19 +853,19 @@ class IntegrationService:
             raise BadRequestError("Google did not return an access token.")
         refresh = tokens.get("refresh_token")
         accounts = await self._list_google_accounts(key, access)
-        account_id = _select_google_account(accounts, ad_account_id)
+        account = _select_google_account(accounts, ad_account_id)
         integration.access_token_encrypted = self.cipher.encrypt(access)
         integration.refresh_token_encrypted = (
             self.cipher.encrypt(refresh) if refresh else integration.refresh_token_encrypted
         )
         integration.token_expires_at = self._expiry(tokens.get("expires_in"))
         integration.scopes = _GOOGLE_SCOPES[key]
-        if account_id is None:
+        if account is None:
             integration.external_account_id = None
             integration.account_label = None
-            return [{"id": a, "name": a} for a in accounts]
-        integration.external_account_id = account_id
-        integration.account_label = account_id
+            return accounts
+        integration.external_account_id = account["id"]
+        integration.account_label = account.get("name") or account["id"]
         # Google Ads only: the operator supplies this per real account (which
         # accounts sit under an MCC is client-specific, not derivable via the
         # API) — see app/models/integration.py.
@@ -594,22 +873,27 @@ class IntegrationService:
             integration.login_customer_id = login_customer_id
         return []
 
-    async def _list_google_accounts(self, key: IntegrationKey, access: str) -> list[str]:
+    async def _list_google_accounts(self, key: IntegrationKey, access: str) -> list[dict]:
         """Every account/property/site the token can read for ``key`` — no
-        picking here, see ``_select_google_account``."""
+        picking here, see ``_select_google_account``. Always ``{"id", "name"}``
+        per entry (GA4/Search Console have no separate display name to fetch,
+        so ``name`` is just the id there — kept uniform so every caller can
+        treat this the same way ``_select_ad_account``'s Meta accounts are)."""
         if key == IntegrationKey.google_ads:
             return await self._list_ads_family_customers(self.google_ads, access)
         if key == IntegrationKey.google_lsa:
             return await self._list_ads_family_customers(self.lsa_client, access)
         if key == IntegrationKey.ga4:
-            return await self.ga4_client.list_properties(access)
+            ids = await self.ga4_client.list_properties(access)
+            return [{"id": i, "name": i} for i in ids]
         if key == IntegrationKey.search_console:
-            return await self.search_console.list_sites(access)
+            ids = await self.search_console.list_sites(access)
+            return [{"id": i, "name": i} for i in ids]
         return []  # pragma: no cover - guarded by _require_real
 
     async def _list_ads_family_customers(
         self, ads_api_client: GoogleAdsClient | LsaClient, access: str
-    ) -> list[str]:
+    ) -> list[dict]:
         """Shared by Google Ads and LSA — both ride the same underlying Ads
         API account model. ``listAccessibleCustomers`` only returns accounts
         the OAuth user has *direct* access to — a manager account's linked
@@ -617,10 +901,19 @@ class IntegrationService:
         Ads UI, not via user-level access) don't show up there at all. Expand
         every directly-accessible account through ``customer_client`` so a
         manager-linked client account is selectable too, not just the manager
-        account itself."""
+        account itself.
+
+        Returns ``{"id", "name"}`` per account. A direct account has no name
+        in ``listAccessibleCustomers``'s response at all, so it costs one
+        extra lookup each (best-effort — falls back to the bare id if that
+        lookup fails); a manager-linked child account's name comes for free
+        from ``list_customer_clients`` and was previously being discarded."""
         direct = await ads_api_client.list_accessible_customers(access)
-        ids = list(direct)
+        accounts: list[dict] = []
         seen = set(direct)
+        for cid in direct:
+            name = await ads_api_client.get_customer_name(access, cid)
+            accounts.append({"id": cid, "name": name or cid})
         for manager_id in direct:
             try:
                 children = await ads_api_client.list_customer_clients(access, manager_id)
@@ -633,8 +926,8 @@ class IntegrationService:
                 cid = child.get("id")
                 if cid and cid not in seen:
                     seen.add(cid)
-                    ids.append(cid)
-        return ids
+                    accounts.append({"id": cid, "name": child.get("name") or cid})
+        return accounts
 
     async def _complete_linkedin(self, integration: Integration, code: str) -> None:
         tokens = await self.linkedin_oauth.exchange_code(code)
@@ -786,6 +1079,18 @@ class IntegrationService:
         return self._linkedin_client
 
     @property
+    def ghl_oauth(self) -> GhlOAuthClient:
+        if self._ghl_oauth is None:
+            self._ghl_oauth = GhlOAuthClient()
+        return self._ghl_oauth
+
+    @property
+    def ghl_client(self) -> GhlClient:
+        if self._ghl_client is None:
+            self._ghl_client = GhlClient()
+        return self._ghl_client
+
+    @property
     def cipher(self) -> TokenCipher:
         if self._cipher_override is None:
             self._cipher_override = TokenCipher()
@@ -834,6 +1139,30 @@ class IntegrationService:
             return False
 
     @staticmethod
+    def _sign_agency_state() -> str:
+        """Same signed-state contract as ``_sign_state``, minus a client_id —
+        the GHL connect flow is agency-wide, not client-scoped."""
+        raw = f"ghl-agency:{int(time.time())}"
+        sig = _hmac(raw)
+        return base64.urlsafe_b64encode(f"{raw}:{sig}".encode()).decode()
+
+    @staticmethod
+    def _verify_agency_state(state: str) -> bool:
+        try:
+            decoded = base64.urlsafe_b64decode(state.encode()).decode()
+            marker, ts, sig = decoded.rsplit(":", 2)
+        except Exception:
+            return False
+        if not hmac.compare_digest(sig, _hmac(f"{marker}:{ts}")):
+            return False
+        if marker != "ghl-agency":
+            return False
+        try:
+            return (int(time.time()) - int(ts)) <= _STATE_MAX_AGE
+        except ValueError:
+            return False
+
+    @staticmethod
     def _disconnected_view(client_id: uuid.UUID, key: IntegrationKey) -> IntegrationRead:
         """A transient ``disconnected`` catalog entry for a never-configured key."""
         now = datetime.now(UTC)
@@ -856,3 +1185,17 @@ def _hmac(raw: str) -> str:
     """Truncated HMAC-SHA256 of ``raw`` keyed by SECRET_KEY (OAuth state signing)."""
     secret = get_settings().security.secret_key.encode()
     return hmac.new(secret, raw.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _parse_ghl_datetime(raw: str | None) -> datetime | None:
+    """GHL's ``dateAdded`` is an ISO-8601 string (typically ``...Z`` UTC) —
+    tolerate that suffix, which ``datetime.fromisoformat`` doesn't accept
+    before Python 3.11, and any other malformed value from the API rather
+    than let one bad contact break the whole day-count rollup."""
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)

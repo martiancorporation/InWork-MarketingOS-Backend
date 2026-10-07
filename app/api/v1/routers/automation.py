@@ -7,6 +7,7 @@
 - ``POST /automation/report-email/run``    — run the daily report email sweep now
 - ``POST /automation/clients/{id}/report-email/send`` — send one client's report now (QA)
 - ``POST /automation/auto-plan-generation/run`` — run the month-ahead content-plan auto-generation sweep now
+- ``POST /automation/ghl-leads/sync``      — roll every tagged client's GHL contacts into analytics_daily leads now
 
 These are platform-wide operations, so they require an administrator. The same
 service methods are driven on a cadence by the scheduler process
@@ -123,3 +124,13 @@ async def run_auto_plan_generation_sweep(
     admin: AdminUser, db: DbSession
 ) -> AutoPlanGenerationSweepResult:
     return await SchedulerService(db).run_auto_plan_generation_sweep()
+
+
+@router.post(
+    "/ghl-leads/sync",
+    dependencies=[Depends(_SWEEP_RATE_LIMIT)],
+    response_model=SyncSweepResult,
+    summary="Roll every tagged client's GHL contacts into analytics_daily leads now (admin)",
+)
+async def sync_ghl_leads(admin: AdminUser, db: DbSession) -> SyncSweepResult:
+    return await SchedulerService(db).sync_ghl_leads_sweep()

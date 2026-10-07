@@ -74,3 +74,23 @@ class IntegrationsSettings(BaseSettings):
     @property
     def meta_configured(self) -> bool:
         return bool(self.meta_app_id and self.meta_app_secret and self.meta_redirect_uri)
+
+    # GoHighLevel / LeadConnector — a real Marketplace App, authorization-code
+    # OAuth2 flow (https://marketplace.gohighlevel.com/docs/Authorization/OAuth2.0/),
+    # same shape as Meta/Google below. One agency-wide connection (this
+    # engagement's GHL setup is one shared location for every client — see
+    # app/models/ghl_agency_connection.py), not one per client.
+    ghl_client_id: str | None = None
+    ghl_client_secret: str | None = None
+    ghl_redirect_uri: str | None = None
+    ghl_base_url: str = "https://services.leadconnectorhq.com"
+    ghl_authorize_url: str = "https://marketplace.gohighlevel.com/oauth/chooselocation"
+    ghl_api_version: str = "2021-07-28"
+    # Space-separated, per GHL's documented format. contacts.readonly is all
+    # the current GhlClient needs (contact search); extend here (never
+    # hardcode a second copy elsewhere) if a future feature needs more.
+    ghl_scopes: str = "contacts.readonly locations.readonly"
+
+    @property
+    def ghl_configured(self) -> bool:
+        return bool(self.ghl_client_id and self.ghl_client_secret and self.ghl_redirect_uri)

@@ -6,11 +6,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import uuid
+from datetime import date
 
 from fastapi.testclient import TestClient
 
+from app.ai.plan_chat_intent import PlanChatIntent
+from app.ai.plan_generation import PlanGenerationAgent, ProposedItem
 from app.integrations.llm.openrouter import OpenRouterClient
+from app.models.user import User
+from app.services.assistant_service import AssistantService
+from app.services.plan_generation_service import PlanGenerationService
 from tests.conftest import API
 from tests.helpers import onboarding_payload
 
@@ -255,3 +263,155 @@ def test_approve_plan_on_a_message_without_an_action_is_404(
         headers=admin_headers,
     )
     assert approve.status_code == 404
+
+
+# ---- regression: content/assignee mentioned earlier in the conversation ---
+# ---- must not get lost when the request pivots to "just create a new one" #
+
+
+def _admin(db_session) -> User:
+    return db_session.query(User).filter_by(email="admin@test.com").one()
+
+
+def test_content_instructions_from_earlier_turns_reach_the_generation_prompt(
+    client: TestClient, admin_headers: dict, db_session, monkeypatch
+):
+    """A real production bug: a manager said 'keep the CTA: X' in one turn,
+    then 'create new one' in a later turn — the generation call received an
+    empty prompt, silently dropping the CTA instruction. The classifier must
+    surface it as `content_instructions`, and it must reach the agent."""
+    cid = uuid.UUID(_client_id(client, admin_headers))
+    seen: dict = {}
+
+    async def fake_propose_range(
+        self, client_id, prompt, *, start_date, end_date, user, assignee_id=None
+    ):
+        seen["prompt"] = prompt
+        seen["assignee_id"] = assignee_id
+        return []
+
+    monkeypatch.setattr(PlanGenerationService, "propose_range", fake_propose_range)
+
+    intent = PlanChatIntent(
+        wants_content_plan=True,
+        ready=True,
+        start_date=date(2026, 9, 18),
+        end_date=date(2026, 9, 18),
+        clarifying_question=None,
+        content_instructions="Keep the CTA exactly: 'Call me, call me, call me!'",
+        assignee_hint=None,
+    )
+    service = AssistantService(db_session)
+
+    asyncio.run(service._generate_plan_from_chat(cid, intent, actor=_admin(db_session)))
+
+    assert seen["prompt"] == "Keep the CTA exactly: 'Call me, call me, call me!'"
+
+
+def test_assignee_hint_resolves_to_an_exact_match(
+    client: TestClient, admin_headers: dict, db_session, make_user
+):
+    cid = uuid.UUID(_client_id(client, admin_headers))
+    member, _ = make_user(email="mrimay@test.com", name="Mrimay Gupta")
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": member["id"]}
+    )
+
+    service = AssistantService(db_session)
+    assignee_id, note = service._resolve_chat_assignee(
+        cid, "Mrimay Gupta", actor=_admin(db_session)
+    )
+
+    assert str(assignee_id) == member["id"]
+    assert "Mrimay Gupta" in note
+
+
+def test_assignee_hint_with_no_match_leaves_it_unassigned_with_a_clear_note(
+    client: TestClient, admin_headers: dict, db_session
+):
+    cid = uuid.UUID(_client_id(client, admin_headers))
+
+    service = AssistantService(db_session)
+    assignee_id, note = service._resolve_chat_assignee(
+        cid, "Someone Nonexistent", actor=_admin(db_session)
+    )
+
+    assert assignee_id is None
+    assert "Someone Nonexistent" in note
+    assert "Plan board" in note
+
+
+def test_assignee_hint_ambiguous_leaves_it_unassigned(
+    client: TestClient, admin_headers: dict, db_session, make_user
+):
+    cid = uuid.UUID(_client_id(client, admin_headers))
+    for name, email in [("John Smith", "john.smith@test.com"), ("John Doe", "john.doe@test.com")]:
+        u, _ = make_user(email=email, name=name)
+        client.post(
+            f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": u["id"]}
+        )
+
+    service = AssistantService(db_session)
+    assignee_id, note = service._resolve_chat_assignee(cid, "John", actor=_admin(db_session))
+
+    assert assignee_id is None
+    assert "John Smith" in note and "John Doe" in note
+
+
+def test_assignee_hint_none_is_a_no_op(client: TestClient, admin_headers: dict, db_session):
+    cid = uuid.UUID(_client_id(client, admin_headers))
+
+    service = AssistantService(db_session)
+    assignee_id, note = service._resolve_chat_assignee(cid, None, actor=_admin(db_session))
+
+    assert assignee_id is None
+    assert note is None
+
+
+def test_generated_task_is_actually_assigned_when_resolved(
+    client: TestClient, admin_headers: dict, db_session, make_user, monkeypatch
+):
+    """End-to-end within the service layer: an assignee hint that resolves
+    must actually land on the created PlanTask, not just get acknowledged in
+    the reply text."""
+    cid = uuid.UUID(_client_id(client, admin_headers))
+    member, _ = make_user(email="mrimay2@test.com", name="Mrimay Gupta")
+    client.post(
+        f"{API}/clients/{cid}/assignments", headers=admin_headers, json={"user_id": member["id"]}
+    )
+
+    async def fake_generate_range(self, prompt, *, start_date, end_date, existing_titles, today):
+        return [
+            ProposedItem(
+                title="Storm Season Readiness",
+                event_date=start_date,
+                platform="instagram",
+                content_format="static",
+                category="content",
+                caption="Fast roof response protects your home's value.",
+                hashtags="#roofing",
+                suggested_role="content creator",
+            )
+        ]
+
+    monkeypatch.setattr(PlanGenerationAgent, "generate_range", fake_generate_range)
+
+    intent = PlanChatIntent(
+        wants_content_plan=True,
+        ready=True,
+        start_date=date(2026, 9, 18),
+        end_date=date(2026, 9, 18),
+        clarifying_question=None,
+        content_instructions=None,
+        assignee_hint="Mrimay Gupta",
+    )
+    service = AssistantService(db_session)
+    reply, action = asyncio.run(
+        service._generate_plan_from_chat(cid, intent, actor=_admin(db_session))
+    )
+
+    assert "Mrimay Gupta" in reply
+    task = client.get(
+        f"{API}/clients/{cid}/plan/tasks/{action['task_ids'][0]}", headers=admin_headers
+    ).json()
+    assert task["assignee_id"] == member["id"]
